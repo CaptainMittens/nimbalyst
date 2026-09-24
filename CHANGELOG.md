@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- Bug fixes go here -->
 - iOS: returning to the app after a long background shows a quiet "Reconnecting…" notice instead of the "Sync paused" warning
 - iOS: an open session no longer stays stuck loading after a long background
+- iOS: the running-sessions Live Activity starts again after an earlier card ends, and unread sessions keep it up for only 10 minutes after they finish
 
 ### Removed
 <!-- Removed features go here -->
