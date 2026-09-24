@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- Changes to existing functionality go here -->
+- iOS: the session detail status bar shows the session's model next to context usage
 
 ### Fixed
 <!-- Bug fixes go here -->
