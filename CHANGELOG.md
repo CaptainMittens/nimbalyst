@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 <!-- New features go here -->
 - Opt into unlimited open projects with a scrollable project rail and cleanup of unused project resources.
+- Knowledge extension sets up a team wiki and installs an editable "How we write this wiki" guide that agents follow, and its vocabulary now covers markets, makers, competition, and dated, cited facts.
 
 ### Changed
 <!-- Changes to existing functionality go here -->
@@ -20,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iOS: returning to the app after a long background shows a quiet "Reconnecting…" notice instead of the "Sync paused" warning
 - iOS: an open session no longer stays stuck loading after a long background
 - iOS: the running-sessions Live Activity starts again after an earlier card ends, and unread sessions keep it up for only 10 minutes after they finish
+- Changes to a team tracker type now reach teammates right away instead of after the next reconnect
+- A team project's knowledge relationship verbs are shared with teammates and the web console instead of staying on the machine that defined them
 
 ### Removed
 <!-- Removed features go here -->

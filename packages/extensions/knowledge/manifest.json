@@ -12,11 +12,12 @@
     "icon": "hub",
     "featured": false,
     "tagline": "A shared vocabulary for team knowledge graphs",
-    "longDescription": "Knowledge teaches the agent how to set up and write a knowledge graph in your project: entities, claims, questions, findings, and investigations as tracker types, with a small set of verbs for statements. Graphs built this way stay consistent across projects and show up in the team wiki.",
+    "longDescription": "Knowledge teaches the agent how to set up and write a knowledge graph in your project: entities, claims, questions, findings, and investigations as tracker types, with a small set of verbs for statements. Setup also installs an editable \"How we write this wiki\" page that tells people and agents what belongs in the wiki. Graphs built this way stay consistent across projects and show up in the team wiki.",
     "highlights": [
       "Standard tracker types for entities, claims, questions, findings, and investigations",
       "A predicate registry for typed statements between entities",
-      "Guidance for writing claims with a stated basis and conditions"
+      "Guidance for writing claims with a stated basis and conditions",
+      "A wiki guide page your team can edit or replace, which the agent reads before writing"
     ]
   },
   "permissions": {
@@ -26,7 +27,7 @@
     "claudePlugin": {
       "path": "claude-plugin",
       "displayName": "Knowledge",
-      "description": "Set up and write a team knowledge graph with tracker types",
+      "description": "Set up a team knowledge graph and wiki guide, then write to it with tracker types",
       "enabledByDefault": true
     }
   }
