@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 <!-- Bug fixes go here -->
+- iOS: returning to the app after a long background shows a quiet "Reconnecting…" notice instead of the "Sync paused" warning
+- iOS: an open session no longer stays stuck loading after a long background
 
 ### Removed
 <!-- Removed features go here -->
