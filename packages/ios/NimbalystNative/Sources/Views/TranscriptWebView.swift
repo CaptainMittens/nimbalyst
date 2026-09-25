@@ -587,7 +587,7 @@ public struct TranscriptWebView: UIViewRepresentable {
         // interpolation, avoiding escaping issues with special characters in
         // message content (code, nested JSON, unicode, etc.).
 
-        private func callJS(_ script: String, arguments: [String: Any] = [:], in webView: WKWebView, completion: ((Error?) -> Void)? = nil) {
+        private func callJS(_ script: String, arguments: [String: Any] = [:], in webView: WKWebView, completion: (@MainActor (Error?) -> Void)? = nil) {
             callJS(script, arguments: arguments, in: webView) { (_: Any?, error: Error?) in
                 completion?(error)
             }
@@ -597,7 +597,7 @@ public struct TranscriptWebView: UIViewRepresentable {
             _ script: String,
             arguments: [String: Any] = [:],
             in webView: WKWebView,
-            completion: @escaping (Any?, Error?) -> Void
+            completion: @escaping @MainActor (Any?, Error?) -> Void
         ) {
             callJavaScript(script, arguments, webView, completion)
         }
