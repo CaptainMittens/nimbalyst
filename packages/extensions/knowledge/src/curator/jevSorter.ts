@@ -12,8 +12,13 @@
  */
 
 export const JEV_ENDPOINT = 'https://api.typesafe.ai/v1/systemone';
-/** Pinned, not `jev-latest`: the thresholds below were chosen against this version. */
+/**
+ * Pinned, not `jev-latest`: the thresholds below were chosen against this version.
+ * Cloudflare serves `typesafe/jev` with no way to pin, so callers compare the
+ * returned `model` against this instead.
+ */
 export const JEV_MODEL = 'jev-1.13.0';
+export const CLOUDFLARE_JEV_MODEL = 'typesafe/jev';
 /** Jev accuracy drops as irrelevant state grows; commits and session replies can be long. */
 export const MAX_EVENT_TEXT_CHARS = 6000;
 
@@ -95,8 +100,8 @@ type JevQuestion =
   | { type: 'noul'; instructions: unknown; criteria?: { true?: unknown; false?: unknown } }
   | { type: 'choice'; instructions: unknown; criteria: Record<string, unknown> };
 
+/** Provider-neutral: TypeSafe also takes `model`, Cloudflare rejects any extra field. */
 export interface JevRequest {
-  model: string;
   state: unknown;
   questions: Record<string, JevQuestion>;
 }
@@ -175,7 +180,7 @@ export function buildJevRequest(event: CuratorEvent, ctx: SortContext): JevReque
     };
   }
 
-  return { model: JEV_MODEL, state, questions };
+  return { state, questions };
 }
 
 function noul(res: JevResponse, key: string): number | undefined {
@@ -235,8 +240,72 @@ type FetchLike = (url: string, init: { method: string; headers: Record<string, s
   text(): Promise<string>;
 }>;
 
+/**
+ * Where Jev runs. TypeSafe is invite-only; Cloudflare Workers AI hosts the same
+ * model billed to the user's Cloudflare account, optionally through an AI Gateway.
+ */
+export type JevProvider =
+  | { kind: 'typesafe'; apiKey: string }
+  | { kind: 'cloudflare'; accountId: string; apiToken: string; gatewayId?: string };
+
+/** The Cloudflare credential is saved as one JSON string so it lives in a single encrypted slot. */
+export function parseCloudflareCredential(raw: string | null | undefined): JevProvider | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as { accountId?: unknown; apiToken?: unknown; gatewayId?: unknown };
+    if (typeof v.accountId !== 'string' || !v.accountId || typeof v.apiToken !== 'string' || !v.apiToken) return null;
+    const gatewayId = typeof v.gatewayId === 'string' && v.gatewayId ? v.gatewayId : undefined;
+    return { kind: 'cloudflare', accountId: v.accountId, apiToken: v.apiToken, gatewayId };
+  } catch {
+    return null;
+  }
+}
+
+function jevHttpRequest(
+  req: JevRequest,
+  provider: JevProvider
+): { url: string; headers: Record<string, string>; body: unknown } {
+  if (provider.kind === 'typesafe') {
+    return { url: JEV_ENDPOINT, headers: { Authorization: `Bearer ${provider.apiKey}` }, body: { model: JEV_MODEL, ...req } };
+  }
+  // Partner models take the model name in the body; `/ai/run/<model>` does not route for them.
+  return {
+    url: `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(provider.accountId)}/ai/run`,
+    headers: {
+      Authorization: `Bearer ${provider.apiToken}`,
+      ...(provider.gatewayId ? { 'cf-aig-gateway-id': provider.gatewayId } : {}),
+    },
+    body: { model: CLOUDFLARE_JEV_MODEL, input: req },
+  };
+}
+
+/** Cloudflare wraps the answer in `{ success, errors, result: { state, result } }`; TypeSafe returns it bare. */
+function unwrapJevResponse(raw: string, status: number): JevResponse {
+  const parsed = JSON.parse(raw) as unknown;
+  const env = parsed as { success?: boolean; errors?: Array<{ message?: string }>; result?: unknown };
+  let out = parsed;
+  if (env && typeof env === 'object' && 'success' in env) {
+    if (!env.success || !env.result) {
+      const message = (env.errors ?? []).map((e) => e.message).filter(Boolean).join('; ') || 'no result';
+      throw new JevError(status, `Jev request failed: ${message}`);
+    }
+    out = env.result;
+    // Partner models add a job wrapper: `{ state: 'Completed', result: {...}, gatewayMetadata }`.
+    const job = out as { state?: unknown; result?: unknown };
+    if (job && typeof job === 'object' && typeof job.state === 'string' && 'result' in job) {
+      if (job.state !== 'Completed') throw new JevError(status, `Jev job did not complete: ${job.state}`);
+      out = job.result;
+    }
+  }
+  const answers = (out as { answers?: unknown } | null)?.answers;
+  if (!answers || typeof answers !== 'object') {
+    throw new JevError(status, `Jev response has no answers: ${raw.slice(0, 500)}`);
+  }
+  return out as JevResponse;
+}
+
 export interface JevClientOptions {
-  apiKey: string;
+  provider: JevProvider;
   fetch: FetchLike;
   /** Waits between retries on 429/529. Injected so tests do not sleep. */
   sleep?: (ms: number) => Promise<void>;
@@ -246,17 +315,18 @@ export interface JevClientOptions {
 export async function callJev(req: JevRequest, opts: JevClientOptions): Promise<JevResponse> {
   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
   const maxAttempts = opts.maxAttempts ?? 4;
+  const { url, headers, body } = jevHttpRequest(req, opts.provider);
   for (let attempt = 1; ; attempt++) {
-    const res = await opts.fetch(JEV_ENDPOINT, {
+    const res = await opts.fetch(url, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${opts.apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(req),
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     });
-    if (res.ok) return JSON.parse(await res.text()) as JevResponse;
-    const body = await res.text();
+    if (res.ok) return unwrapJevResponse(await res.text(), res.status);
+    const errorBody = await res.text();
     const retryable = res.status === 429 || res.status === 529;
     if (!retryable || attempt >= maxAttempts) {
-      throw new JevError(res.status, `Jev request failed (${res.status}): ${body.slice(0, 300)}`);
+      throw new JevError(res.status, `Jev request failed (${res.status}): ${errorBody.slice(0, 300)}`);
     }
     const retryAfter = Number(res.headers.get('retry-after'));
     await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 500 * 2 ** (attempt - 1));

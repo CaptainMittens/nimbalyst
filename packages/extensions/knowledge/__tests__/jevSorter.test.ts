@@ -4,6 +4,7 @@ import {
   buildJevRequest,
   callJev,
   interpretJevResponse,
+  parseCloudflareCredential,
   type JevResponse,
   type SortContext,
 } from '../src/curator/jevSorter';
@@ -60,7 +61,7 @@ describe('Jev sorter', () => {
     const waits: number[] = [];
     const queue = [reply(429, {}, '2'), reply(529, {}), reply(200, answers(0.9, ['area-product', 0.9], ['new', 0.9]))];
     const res = await callJev(buildJevRequest({ ref: 'r', kind: 'commit', title: 't', text: 'x' }, ctx), {
-      apiKey: 'k',
+      provider: { kind: 'typesafe', apiKey: 'k' },
       fetch: async () => queue.shift()!,
       sleep: async (ms) => void waits.push(ms),
     });
@@ -69,10 +70,54 @@ describe('Jev sorter', () => {
 
     await expect(
       callJev(buildJevRequest({ ref: 'r', kind: 'commit', title: 't', text: 'x' }, ctx), {
-        apiKey: 'bad',
+        provider: { kind: 'typesafe', apiKey: 'bad' },
         fetch: async () => reply(401, { detail: 'no key' }),
         sleep: async () => {},
       })
     ).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('calls Cloudflare Workers AI with the model in the body, through a gateway when named, and unwraps the envelope', async () => {
+    const calls: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = [];
+    const reply = (body: unknown) => ({ ok: true, status: 200, headers: { get: () => null }, text: async () => JSON.stringify(body) });
+    const fetch = async (url: string, init: { headers: Record<string, string>; body: string }) => {
+      calls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+      return queue.shift()!;
+    };
+    // The shape observed live on 2026-09-25: a job wrapper inside the API envelope.
+    const live = (inner: JevResponse, state = 'Completed') => ({
+      result: { state, result: inner, gatewayMetadata: { keySource: 'Unified' } },
+      success: true,
+      errors: [],
+      messages: [],
+    });
+    const inner = answers(0.9, ['area-product', 0.9], ['new', 0.9]);
+    const queue = [
+      reply(live(inner)),
+      reply(live(inner)),
+      reply(live(inner, 'Failed')),
+      reply({ success: false, errors: [{ code: 5006, message: 'bad input' }], result: null }),
+    ];
+    const req = buildJevRequest({ ref: 'r', kind: 'commit', title: 't', text: 'x' }, ctx);
+
+    const direct = parseCloudflareCredential(JSON.stringify({ accountId: 'acct', apiToken: 'tok' }));
+    const res = await callJev(req, { provider: direct!, fetch });
+    expect(res.answers.knowledge).toEqual({ type: 'noul', noul: 0.9 });
+    // The model goes in the body, not the path: `/ai/run/typesafe/jev` answers 7000 "No route for that URI".
+    expect(calls[0].url).toBe('https://api.cloudflare.com/client/v4/accounts/acct/ai/run');
+    expect(calls[0].headers.Authorization).toBe('Bearer tok');
+    expect(calls[0].headers['cf-aig-gateway-id']).toBeUndefined();
+    // Cloudflare's input schema rejects anything but state and questions.
+    expect(calls[0].body.model).toBe('typesafe/jev');
+    expect(Object.keys(calls[0].body.input as object).sort()).toEqual(['questions', 'state']);
+
+    const viaGateway = parseCloudflareCredential(JSON.stringify({ accountId: 'acct', apiToken: 'tok', gatewayId: 'kg' }));
+    await callJev(req, { provider: viaGateway!, fetch });
+    expect(calls[1].url).toBe('https://api.cloudflare.com/client/v4/accounts/acct/ai/run');
+    expect(calls[1].headers['cf-aig-gateway-id']).toBe('kg');
+
+    await expect(callJev(req, { provider: direct!, fetch })).rejects.toThrow(/Failed/);
+    await expect(callJev(req, { provider: direct!, fetch })).rejects.toThrow(/bad input/);
+    expect(parseCloudflareCredential('{"accountId":"acct"}')).toBeNull();
   });
 });

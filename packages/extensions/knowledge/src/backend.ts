@@ -4,8 +4,9 @@
  * Hosts the curator's Jev sorter. It lives here rather than in the renderer
  * because api.typesafe.ai rejects the app's origin under CORS.
  *
- * The TypeSafe key comes only from the `getApiKey('typesafe')` broker, which
- * reads the encrypted credential the settings panel saved. Never `process.env`.
+ * Jev runs on TypeSafe or on Cloudflare Workers AI. Credentials come only from
+ * the `getApiKey` broker, which reads the encrypted credentials the settings
+ * panel saved. Never `process.env`.
  *
  * Method names below must match the names passed to registerMcpTools; the host
  * advertises them as `knowledge.<name>`.
@@ -14,11 +15,16 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   DEFAULT_THRESHOLDS,
+  JEV_MODEL,
   JevError,
+  callJev,
+  type JevRequest,
+  parseCloudflareCredential,
   sortEvent,
   type CuratorArea,
   type CuratorCandidate,
   type CuratorEvent,
+  type JevProvider,
   type SortResult,
   type SortThresholds,
 } from './curator/jevSorter';
@@ -37,6 +43,8 @@ interface ActivateCtx {
 }
 
 export const TYPESAFE_CREDENTIAL = 'typesafe';
+/** JSON `{ accountId, apiToken, gatewayId? }`; see parseCloudflareCredential. */
+export const CLOUDFLARE_CREDENTIAL = 'cloudflare-workers-ai';
 /** USD per input token for jev-1.13 ($0.042 per million). Output is free. */
 const JEV_USD_PER_INPUT_TOKEN = 0.042 / 1_000_000;
 const CONCURRENCY = 4;
@@ -47,7 +55,7 @@ const TOOLS = [
   {
     name: 'sort_events',
     description:
-      'Knowledge curator sorter. For each work event (commit, session, tracker change), asks the Jev decision model whether it carries durable knowledge, which wiki area it belongs to, and which existing item it is about (or "new"), and whether it contradicts that claim. Returns a verdict per event: create, update, supersede, or drop with a reason. Only confident answers pass. Requires a TypeSafe API key in Settings > Knowledge curator. Every decision is logged locally for evaluation.',
+      'Knowledge curator sorter. For each work event (commit, session, tracker change), asks the Jev decision model whether it carries durable knowledge, which wiki area it belongs to, and which existing item it is about (or "new"), and whether it contradicts that claim. Returns a verdict per event: create, update, supersede, or drop with a reason. Only confident answers pass. Requires a TypeSafe API key or a Cloudflare Workers AI token in Settings > Knowledge curator. Every decision is logged locally for evaluation.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -105,8 +113,31 @@ const TOOLS = [
     },
   },
   {
+    name: 'ask_jev',
+    description:
+      'Ask the Jev decision model your own typed questions about one or more states, e.g. to screen drafted wiki items before writing them. Each question is noul (yes/no probability; criteria {true,false}), choice (criteria {option: description}), or score (criteria: ordered labels). Returns raw answers with probabilities and confidence; nothing is gated or logged. Keep each state short and relevant.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        requests: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              ref: { type: 'string' },
+              state: { description: 'String or object to judge' },
+              questions: { type: 'object', description: 'Question key -> { type, instructions, criteria }' },
+            },
+            required: ['ref', 'state', 'questions'],
+          },
+        },
+      },
+      required: ['requests'],
+    },
+  },
+  {
     name: 'curator_status',
-    description: 'Whether a TypeSafe key is configured, and how many sorter decisions have been logged.',
+    description: 'Which Jev provider is configured (TypeSafe or Cloudflare), and how many sorter decisions have been logged.',
     inputSchema: { type: 'object', properties: {} },
   },
 ] as const;
@@ -130,13 +161,20 @@ export async function activate(ctx: ActivateCtx) {
   mkdirSync(dataDir, { recursive: true });
   const decisionLog = path.join(dataDir, 'curator-decisions.jsonl');
 
-  // Read per call, not at activation, so a key saved after startup is picked up.
-  async function readKey(): Promise<string | null> {
+  async function readCredential(name: string): Promise<string | null> {
     try {
-      return (await getApiKey(TYPESAFE_CREDENTIAL)).key;
+      return (await getApiKey(name)).key;
     } catch {
       return null;
     }
+  }
+
+  // Read per call, not at activation, so a key saved after startup is picked up.
+  // TypeSafe wins when both are saved because it is the only one that pins the version.
+  async function readProvider(): Promise<JevProvider | null> {
+    const apiKey = await readCredential(TYPESAFE_CREDENTIAL);
+    if (apiKey) return { kind: 'typesafe', apiKey };
+    return parseCloudflareCredential(await readCredential(CLOUDFLARE_CREDENTIAL));
   }
 
   await registerMcpTools(TOOLS.map((t) => ({ ...t, scope: 'global' as const })));
@@ -153,9 +191,9 @@ export async function activate(ctx: ActivateCtx) {
         const areas = Array.isArray(params?.areas) ? params.areas : [];
         if (!events.length) throw new Error('events is required');
         if (!areas.length) throw new Error('areas is required: list the wiki area entities');
-        const apiKey = await readKey();
-        if (!apiKey) {
-          throw new Error('No TypeSafe API key. Add one in Settings > Knowledge curator.');
+        const provider = await readProvider();
+        if (!provider) {
+          throw new Error('No Jev provider. Add a TypeSafe API key or Cloudflare Workers AI token in Settings > Knowledge curator.');
         }
         const thresholds = { ...DEFAULT_THRESHOLDS, ...(params.thresholds ?? {}) };
 
@@ -166,7 +204,7 @@ export async function activate(ctx: ActivateCtx) {
             return await sortEvent(
               event,
               { areas, candidates: event.candidates ?? [], guidance: params.guidance },
-              { apiKey, fetch, thresholds }
+              { provider, fetch, thresholds }
             );
           } catch (err) {
             if (err instanceof JevError && (err.status === 401 || err.status === 403)) auth.failure = err;
@@ -188,10 +226,20 @@ export async function activate(ctx: ActivateCtx) {
         for (const r of sorted) {
           if (r.decision.verdict === 'drop') dropped[r.decision.reason] = (dropped[r.decision.reason] ?? 0) + 1;
         }
-        log('info', `[knowledge] sorted ${sorted.length}/${events.length} event(s), ${inputTokens} input tokens`);
+        log('info', `[knowledge] sorted ${sorted.length}/${events.length} event(s) via ${provider.kind}, ${inputTokens} input tokens`);
+        const models = [...new Set(sorted.map((r) => r.model))];
+        const unpinnedModels = models.filter((m) => m !== JEV_MODEL);
+        if (unpinnedModels.length) {
+          log('warn', `[knowledge] Jev returned ${unpinnedModels.join(', ')}; thresholds were chosen against ${JEV_MODEL}`);
+        }
         return {
           results,
           summary: {
+            provider: provider.kind,
+            models,
+            ...(unpinnedModels.length
+              ? { warning: `Jev ${unpinnedModels.join(', ')} answered, but the thresholds were chosen against ${JEV_MODEL}. Check verdicts before trusting them.` }
+              : {}),
             sorted: sorted.length,
             errors: results.length - sorted.length,
             passed: sorted.filter((r) => r.decision.verdict !== 'drop').length,
@@ -203,11 +251,47 @@ export async function activate(ctx: ActivateCtx) {
         };
       },
 
+      ask_jev: async (params: { requests?: Array<{ ref: string; state: unknown; questions: JevRequest['questions'] }> }) => {
+        const requests = Array.isArray(params?.requests) ? params.requests : [];
+        if (!requests.length) throw new Error('requests is required');
+        const provider = await readProvider();
+        if (!provider) {
+          throw new Error('No Jev provider. Add a TypeSafe API key or Cloudflare Workers AI token in Settings > Knowledge curator.');
+        }
+        const auth: { failure: JevError | null } = { failure: null };
+        const results = await mapLimit(requests, CONCURRENCY, async (r) => {
+          if (auth.failure) return { ref: r.ref, error: 'skipped after authentication failure' };
+          try {
+            const res = await callJev({ state: r.state, questions: r.questions }, { provider, fetch });
+            return { ref: r.ref, model: res.model, answers: res.answers, inputTokens: res.usage?.input_tokens ?? 0 };
+          } catch (err) {
+            if (err instanceof JevError && (err.status === 401 || err.status === 403)) auth.failure = err;
+            return { ref: r.ref, error: (err as Error).message };
+          }
+        });
+        if (auth.failure) throw auth.failure;
+        const inputTokens = results.reduce((n, r) => n + ('inputTokens' in r ? (r.inputTokens ?? 0) : 0), 0);
+        log('info', `[knowledge] ask_jev ${requests.length} request(s) via ${provider.kind}, ${inputTokens} input tokens`);
+        return { results, summary: { provider: provider.kind, inputTokens, costUsd: Number((inputTokens * JEV_USD_PER_INPUT_TOKEN).toFixed(6)) } };
+      },
+
       curator_status: async () => {
         const logged = existsSync(decisionLog)
           ? readFileSync(decisionLog, 'utf-8').split('\n').filter(Boolean).length
           : 0;
-        return { keyConfigured: Boolean(await readKey()), decisionsLogged: logged, decisionLog };
+        const provider = await readProvider();
+        const cloudflare = parseCloudflareCredential(await readCredential(CLOUDFLARE_CREDENTIAL));
+        return {
+          keyConfigured: Boolean(provider),
+          provider: provider?.kind ?? null,
+          typesafeConfigured: Boolean(await readCredential(TYPESAFE_CREDENTIAL)),
+          cloudflareConfigured: Boolean(cloudflare),
+          // Not secrets: shown back in settings so a saved form does not look empty. The token never leaves.
+          cloudflareAccountId: cloudflare?.kind === 'cloudflare' ? cloudflare.accountId : null,
+          cloudflareGatewayId: cloudflare?.kind === 'cloudflare' ? (cloudflare.gatewayId ?? null) : null,
+          decisionsLogged: logged,
+          decisionLog,
+        };
       },
     },
   };

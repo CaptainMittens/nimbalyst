@@ -51,7 +51,7 @@
         "enablement": {
           "default": "disabled",
           "promptOn": "firstUse",
-          "purpose": "Sort work events for the knowledge graph with TypeSafe's Jev model. Sends event text to api.typesafe.ai only after you save a TypeSafe API key."
+          "purpose": "Sort work events for the knowledge graph with TypeSafe's Jev model. Sends event text to api.typesafe.ai or your Cloudflare account's Workers AI only after you save a TypeSafe API key or Cloudflare token."
         }
       }
     ],
