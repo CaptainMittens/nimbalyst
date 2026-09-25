@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iOS: the running-sessions Live Activity starts again after an earlier card ends, and unread sessions keep it up for only 10 minutes after they finish
 - Changes to a team tracker type now reach teammates right away instead of after the next reconnect
 - A team project's knowledge relationship verbs are shared with teammates and the web console instead of staying on the machine that defined them
+- Improved load performance for very large Codex sessions
 
 ### Removed
 <!-- Removed features go here -->
