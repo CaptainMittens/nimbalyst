@@ -20,7 +20,7 @@ extension VoiceAgent {
         let args = parseArguments(arguments)
         if effectiveEngine == .live, let sessionId = args["session_id"] as? String,
            let session = try? database?.session(byId: sessionId),
-           session.projectId != resolveProjectId() || session.hostDeviceId != toolScopes[callId]?.hostDeviceId {
+           !session.isVoiceAvailable(onHost: toolScopes[callId]?.hostDeviceId, projectId: resolveProjectId()) {
             sendToolResult(callId: callId, output: Self.encodeArgs(["success": false, "error": "Session belongs to another computer or project."]))
             return
         }
@@ -241,7 +241,7 @@ extension VoiceAgent {
 
         do {
             let sessions = try database.sessions(forProject: projectId).filter {
-                effectiveEngine != .live || $0.hostDeviceId == toolScopes[callId]?.hostDeviceId
+                effectiveEngine != .live || $0.isVoiceAvailable(onHost: toolScopes[callId]?.hostDeviceId, projectId: projectId)
             }
             let sessionList = sessions.map { session -> [String: Any] in
                 var info: [String: Any] = [
@@ -282,8 +282,8 @@ extension VoiceAgent {
         }
 
         if effectiveEngine == .live {
-            guard let session = try? database?.session(byId: sessionId), session.projectId == resolveProjectId(),
-                  session.hostDeviceId == selectedHostDeviceId else {
+            guard let session = try? database?.session(byId: sessionId),
+                  session.isVoiceAvailable(onHost: selectedHostDeviceId, projectId: resolveProjectId()) else {
                 sendToolResult(callId: callId, output: Self.encodeArgs(["success": false, "error": "Session is not available on the selected computer in this project."]))
                 return
             }

@@ -17,7 +17,11 @@ import {
   voicePromptReadout,
   voicePromptVersion,
 } from "./mobileVoicePromptContract";
-import type { MobileLiveRequest, MobileLiveResult } from "./mobileLiveRelay";
+import {
+  isSessionOwnedByScopedHost,
+  type MobileLiveRequest,
+  type MobileLiveResult,
+} from "./mobileLiveRelay";
 import { AISessionsRepository } from "@nimbalyst/runtime/storage/repositories/AISessionsRepository";
 import { isSessionInWorkspace } from "./voiceIpcAuthorization";
 
@@ -61,7 +65,7 @@ export async function handleMobileVoicePrompt(
     const owner = await AISessionsRepository.get(scope.sessionId);
     if (
       !isSessionInWorkspace(owner, scope.projectId) ||
-      owner?.metadata?.hostDeviceId !== scope.hostDeviceId
+      !isSessionOwnedByScopedHost(owner?.metadata, scope.hostDeviceId)
     )
       throw new Error("The session ownership changed.");
     const messages: Array<{

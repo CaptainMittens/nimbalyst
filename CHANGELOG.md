@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iOS: returning to the app after a long background shows a quiet "Reconnecting…" notice instead of the "Sync paused" warning
 - iOS: an open session no longer stays stuck loading after a long background
 - iOS: creating a session no longer shows "Unable to Create Session" when the desktop created it successfully
+- iOS: Live voice mode can summarize, answer questions in, and announce sessions that were started on the desktop instead of saying they belong to another computer
 - iOS: the running-sessions Live Activity starts again after an earlier card ends, and unread sessions keep it up for only 10 minutes after they finish
 - Changes to a team tracker type now reach teammates right away instead of after the next reconnect
 - A team project's knowledge relationship verbs are shared with teammates and the web console instead of staying on the machine that defined them

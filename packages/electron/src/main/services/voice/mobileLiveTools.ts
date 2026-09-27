@@ -4,7 +4,7 @@ import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AI
 import Store from '../../utils/privateSettingsStore';
 import { isSessionInWorkspace } from './voiceIpcAuthorization';
 import { handleMobileVoiceToolCall } from './mobileVoiceToolHandler';
-import { MobileLiveActions, type MobileLiveRequest, type MobileLiveResult } from './mobileLiveRelay';
+import { isSessionOwnedByScopedHost, MobileLiveActions, type MobileLiveRequest, type MobileLiveResult } from './mobileLiveRelay';
 
 // Account/host is part of each key. Only opaque action identities are retained.
 let reservations: Store<Record<string, string[]>> | undefined;
@@ -24,7 +24,7 @@ export async function handleMobileLiveTool(request: MobileLiveRequest): Promise<
   const { scope, tool } = request;
   if (scope.sessionId) {
     const session = await AISessionsRepository.get(scope.sessionId);
-    if (!isSessionInWorkspace(session, scope.projectId) || session?.metadata?.hostDeviceId !== scope.hostDeviceId) {
+    if (!isSessionInWorkspace(session, scope.projectId) || !isSessionOwnedByScopedHost(session?.metadata, scope.hostDeviceId)) {
       return { success: false, error: 'The session is not owned by this computer in this workspace.' };
     }
   }

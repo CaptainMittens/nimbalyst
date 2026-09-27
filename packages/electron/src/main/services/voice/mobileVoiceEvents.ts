@@ -4,7 +4,7 @@ import { getDatabase } from '../../database/initialize';
 import { loadVoiceSession } from './voiceSessionLoader';
 import { isSessionInWorkspace } from './voiceIpcAuthorization';
 import { voicePresentationAuthority, voicePresentationKey, desktopRealtimeOwnsVoice } from './voicePresentationAuthority';
-import type { MobileLiveRequest, MobileLiveResult } from './mobileLiveRelay';
+import { isSessionOwnedByScopedHost, type MobileLiveRequest, type MobileLiveResult } from './mobileLiveRelay';
 
 interface VoiceSourceEvent {
   eventId: string;
@@ -32,11 +32,11 @@ async function eventsFor(request: MobileLiveRequest): Promise<VoiceSourceEvent[]
   for (const candidate of candidates) {
     if (events.length >= 10) break;
     const session = await AISessionsRepository.get(candidate.id);
-    if (!isSessionInWorkspace(session, scope.projectId) || session?.metadata?.hostDeviceId !== scope.hostDeviceId) continue;
+    if (!isSessionInWorkspace(session, scope.projectId) || !isSessionOwnedByScopedHost(session?.metadata, scope.hostDeviceId)) continue;
     const loaded = await loadVoiceSession(scope.projectId, candidate.id);
     if ('error' in loaded || loaded.sessionId !== candidate.id) continue;
     const current = await AISessionsRepository.get(candidate.id);
-    if (!current || current.updatedAt !== session!.updatedAt || !isSessionInWorkspace(current, scope.projectId) || current.metadata?.hostDeviceId !== scope.hostDeviceId) continue;
+    if (!current || current.updatedAt !== session!.updatedAt || !isSessionInWorkspace(current, scope.projectId) || !isSessionOwnedByScopedHost(current.metadata, scope.hostDeviceId)) continue;
     const messages: Array<{ id?: string | number; type: string; text?: string; interactivePrompt?: { status?: string; requestId?: string } }> = loaded.session.messages ?? [];
     const user = [...messages].reverse().find(m => m.type === 'user_message');
     const common = { sessionId: candidate.id, hostDeviceId: scope.hostDeviceId, projectId: scope.projectId, taskId: String(user?.id ?? candidate.id), revision: session!.updatedAt, label: String(session!.title ?? 'Session') };
@@ -71,7 +71,7 @@ export async function handleMobileVoiceEvent(request: MobileLiveRequest): Promis
   const event = events.find(e => e.eventId === args.eventId && e.taskId === args.taskId && e.revision === args.revision);
   if (!event) return { success: false, error: 'This voice event is no longer current.' };
   const current = await AISessionsRepository.get(event.sessionId);
-  if (!current || current.updatedAt !== event.revision || !isSessionInWorkspace(current, event.projectId) || current.metadata?.hostDeviceId !== event.hostDeviceId) {
+  if (!current || current.updatedAt !== event.revision || !isSessionInWorkspace(current, event.projectId) || !isSessionOwnedByScopedHost(current.metadata, event.hostDeviceId)) {
     return { success: false, error: 'This voice event changed before presentation.' };
   }
   const key = voicePresentationKey(request.scope.hostDeviceId, request.scope.projectId, event.eventId);

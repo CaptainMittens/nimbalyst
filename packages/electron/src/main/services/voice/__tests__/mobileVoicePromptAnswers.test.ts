@@ -102,6 +102,15 @@ describe("host canonical prompt relay", () => {
     expect((await call("voice_prompt_answer", args)).success).toBe(false);
     expect(mocks.resolve).not.toHaveBeenCalled();
   });
+  it("prepares a desktop-created session's question but not a remote mirror's", async () => {
+    mocks.owner.mockResolvedValue({ workspacePath: "/p", metadata: {} });
+    expect((await call("voice_prompt_prepare")).success).toBe(true);
+    mocks.owner.mockResolvedValue({
+      workspacePath: "/p",
+      metadata: { remoteHostDeviceId: "other" },
+    });
+    expect((await call("voice_prompt_prepare")).success).toBe(false);
+  });
   it("dispatches the exact canonical proposal once and reconciles its actual outcome after reply loss", async () => {
     const prepared = await call("voice_prompt_prepare");
     const args = {

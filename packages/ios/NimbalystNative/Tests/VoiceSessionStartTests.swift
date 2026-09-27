@@ -15,6 +15,13 @@ final class VoiceSessionStartTests: XCTestCase {
             VoiceScreenContext(hostId: "host", projectId: "/project", sessionId: "a", session: nil),
             VoiceScreenContext(hostId: "host", projectId: "/project", sessionId: nil, session: nil),
         ] { XCTAssertNil(context.targetSessionId) }
+
+        // Desktop-created sessions are never host-stamped but are listed under the
+        // selected desktop; voice must resolve them there, still project-scoped.
+        let desktop = Session(id: "d", projectId: "/project", titleDecrypted: "D")
+        XCTAssertEqual(VoiceScreenContext(hostId: "host", projectId: "/project", sessionId: "d", session: desktop).targetSessionId, "d")
+        XCTAssertNil(VoiceScreenContext(hostId: "host", projectId: "/other", sessionId: "d", session: desktop).targetSessionId)
+        XCTAssertNil(VoiceScreenContext(hostId: nil, projectId: "/project", sessionId: "d", session: desktop).targetSessionId)
     }
     #if os(iOS)
     @MainActor

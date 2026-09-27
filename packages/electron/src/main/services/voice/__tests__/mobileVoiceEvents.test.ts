@@ -46,6 +46,15 @@ describe('mobile source events', () => {
     expect(await claimDesktopVoiceEvent('host', '/p', 's', 'q-s')).toBeNull();
     expect(mocks.claim).not.toHaveBeenCalled();
   });
+  it('announces desktop-created sessions but never another host or a remote mirror', async () => {
+    const withMeta = (id: string, metadata: Record<string, unknown>) => ({ ...session(id), metadata });
+    const rows = [withMeta('local', {}), withMeta('foreign', { hostDeviceId: 'other' }), withMeta('mirror', { remoteHostDeviceId: 'other' })];
+    mocks.list.mockResolvedValue(rows);
+    mocks.get.mockImplementation(async id => rows.find(r => r.id === id));
+    const result = await handleMobileVoiceEvent(request);
+    expect(JSON.parse(result.result!).events.map((e: any) => e.sessionId)).toEqual(['local']);
+    expect((await handleMobileVoiceEvent({ ...request, tool: 'voice_event_claim', arguments: JSON.stringify({ eventId: 'q-local', taskId: 'task', revision: 1 }) })).success).toBe(true);
+  });
   it('reports the headless limitation explicitly', async () => {
     mocks.window.mockReturnValue(undefined);
     expect(await handleMobileVoiceEvent(request)).toMatchObject({ success: false, error: expect.stringContaining('headless') });

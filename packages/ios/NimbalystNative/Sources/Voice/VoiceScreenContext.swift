@@ -14,7 +14,7 @@ struct VoiceScreenContext: Codable, Equatable {
         self.projectId = projectId
         visibleSessionId = sessionId
         self.documentId = documentId
-        resolved = sessionId == nil || (hostId != nil && session?.id == sessionId && session?.projectId == projectId && session?.hostDeviceId == hostId)
+        resolved = sessionId == nil || (session?.id == sessionId && session?.isVoiceAvailable(onHost: hostId, projectId: projectId) == true)
         sessionTitle = resolved ? session?.titleDecrypted : nil
     }
 
