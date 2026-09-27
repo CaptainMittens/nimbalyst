@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 <!-- Changes to existing functionality go here -->
 - iOS: the session detail status bar shows the session's model next to context usage
+- Claude Code sessions that have finished their turn but are still waiting on a background shell or sub-agent show a distinct indicator in the session list and name the task in the transcript
 
 ### Fixed
 <!-- Bug fixes go here -->
@@ -28,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changes to a team tracker type now reach teammates right away instead of after the next reconnect
 - A team project's knowledge relationship verbs are shared with teammates and the web console instead of staying on the machine that defined them
 - Improved load performance for very large Codex sessions
+- A session no longer stays marked as running after its turn ended while a question to you was still open
 
 ### Removed
 <!-- Removed features go here -->
