@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 <!-- Bug fixes go here -->
+- File @-mention suggestions now pick up newly created and renamed files without opening Quick Open or reloading the window.
 - iOS: returning to the app after a long background shows a quiet "Reconnecting…" notice instead of the "Sync paused" warning
 - iOS: an open session no longer stays stuck loading after a long background
 - iOS: creating a session no longer shows "Unable to Create Session" when the desktop created it successfully
