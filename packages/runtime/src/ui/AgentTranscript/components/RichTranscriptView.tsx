@@ -585,6 +585,18 @@ export function shouldAutoScrollTranscript(
 }
 
 /**
+ * True when the user has scrolled to the native top but the first row is still
+ * drawn above it. On iOS WebKit virtua defers size-correction jumps until a
+ * scroll gesture ends (writing scrollTop mid-momentum kills the momentum), and
+ * reports the pending amount through a negative `getItemOffset(0)`. Rows above
+ * the viewport are estimated before they are measured, so a long flick upward
+ * bounces off a false top several messages into the session.
+ */
+export function isAtFalseTranscriptTop(scrollOffset: number, firstRowOffset: number): boolean {
+  return scrollOffset <= 1 && firstRowOffset < -1;
+}
+
+/**
  * True only when there is a live, non-collapsed text selection whose anchor sits
  * inside the transcript root. Scopes the auto-scroll suppression to selections
  * made in the transcript, so selecting text elsewhere (the composer, a sidebar)
@@ -1192,6 +1204,9 @@ export const RichTranscriptView = React.forwardRef<
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const viewRootRef = useRef<HTMLDivElement>(null);
   const vlistRef = useRef<VListHandle>(null);
+  // Set when a scroll gesture hits a false top (see isAtFalseTranscriptTop);
+  // onScrollEnd finishes the trip to the first row once virtua applies its jump.
+  const hitFalseTopRef = useRef(false);
   const messageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const isAtBottomRef = useRef(
     persistScrollState ? getSessionIsAtBottom(sessionId) : true
@@ -2474,9 +2489,22 @@ export const RichTranscriptView = React.forwardRef<
                   bufferSize={vlistBufferSize}
                   itemSize={90}
                   cache={vlistCacheMap.get(sessionId)}
+                  onScrollEnd={() => {
+                    if (!hitFalseTopRef.current) return;
+                    hitFalseTopRef.current = false;
+                    // Programmatic scrollToIndex applies jumps immediately and
+                    // re-measures until stable, so it lands on the real first row.
+                    vlistRef.current?.scrollToIndex(0, { align: 'start' });
+                  }}
                   onScroll={(offset) => {
                     // Track if we're at the bottom for auto-scroll using per-session atom
                     if (vlistRef.current) {
+                      if (isAtFalseTranscriptTop(offset, vlistRef.current.getItemOffset(0))) {
+                        hitFalseTopRef.current = true;
+                      } else if (offset > vlistRef.current.viewportSize / 2) {
+                        // User headed back down in the same gesture; don't yank them up.
+                        hitFalseTopRef.current = false;
+                      }
                       const scrollSize = vlistRef.current.scrollSize;
                       const viewportSize = vlistRef.current.viewportSize;
                       const distanceFromBottom = scrollSize - offset - viewportSize;
