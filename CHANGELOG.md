@@ -40,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iOS: scrolling up in a long session now reaches the first message instead of stopping partway
 - Clicking the Dock or tray icon now brings back the project window, or opens Project Manager if none remains, instead of doing nothing after the app sat in the background
 - Following external Claude Code sessions keeps importing after the agent changes directory, and no longer re-reads every unchanged session log in the background
+- A question you leave unanswered by sending a new message now shows as skipped, instead of staying answerable, keeping the "Jump to question" button, and marking the session as waiting for you
 
 ### Removed
 <!-- Removed features go here -->
