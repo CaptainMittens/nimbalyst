@@ -400,6 +400,7 @@ Companion app; pairs with a desktop over encrypted sync. Voice mode is not inclu
 - Claude slash command contribution
 - Nested settings panel contribution plus first-class application/project settings routes with project context
 - Tracker importer contribution (`trackerImporters`) — external-source importers backed by a backend module
+- Extension-driven AI sessions (`ai-sessions` permission): a backend module can create sessions with a system-prompt directive (agent providers only), queue prompts, read status, results, and token usage, and receive settle events for the sessions it owns and their descendants; panels can embed a session transcript with its composer and set a gutter badge, including from the backend while the panel is closed
 - Extension hot reload
 - Extension developer kit with scaffolding
 - Extension marketplace (alpha)
@@ -411,6 +412,7 @@ Companion app; pairs with a desktop over encrypted sync. Voice mode is not inclu
 - Astro Editor
 - CSV Spreadsheet
 - Calc Sheets
+- Crew (Alpha) -- off by default; persistent agent personas (for example a PM) defined as markdown files in `nimbalyst-local/crew/`, each with a role directive, notes, a journal, weekly/interval shift schedules, notification limits, and token budgets counted across all tokens including cache. Shifts run as ordinary agent sessions grouped under the member's workstream, in the project's normal permission mode. Fullscreen panel with roster, per-member desk (embedded transcript), feed, and hire templates. Desktop only; schedules run only while the project is open, and a missed run fires once on reopen
 - DataModelLM
 - Developer Tools
 - Excalidraw

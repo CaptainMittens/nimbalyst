@@ -21,6 +21,7 @@ vi.mock('electron', async () => ({
 
 import { SQLiteDatabase } from '../../database/sqlite/SQLiteDatabase';
 import { createPGLiteSessionStore } from '../PGLiteSessionStore';
+import { OWNER_METADATA_MERGE_SQL } from '../extensionSessions/sessionOwnership';
 
 let tmpDir: string;
 let sqlite: SQLiteDatabase;
@@ -56,4 +57,26 @@ it('merges overlapping metadata updates without losing either key', async () => 
   const metadata = JSON.parse(rows[0].metadata);
   expect(metadata).toMatchObject({ tags: ['ai'], hasPendingPrompt: true, tokenUsage: { totalTokens: 5 }, phase: 'implementing' });
   expect(metadata.activity).toHaveLength(1);
+});
+
+// Ownership is assigned by the host at creation and is immutable afterwards;
+// only the owning extension (through extensionSessionsService) edits its bag.
+it('keeps extension ownership out of reach of ordinary metadata writes and re-creates', async () => {
+  const owned = { sessionOwner: { extensionId: 'com.example.owner', key: 'ada' }, ownerMetadata: { chapter: 1 } };
+  const store = createPGLiteSessionStore(sqlite);
+  await store.create({ id: 's2', provider: 'claude-code', workspaceId: '/p', metadata: owned });
+
+  await store.updateMetadata('s2', {
+    metadata: { sessionOwner: { extensionId: 'com.evil', key: 'x' }, ownerMetadata: { chapter: 99 }, phase: 'planning' },
+  });
+  // A renderer re-issuing sessions:create for an existing id must not wipe the owner.
+  await store.create({ id: 's2', provider: 'claude-code', workspaceId: '/p', metadata: { phase: 'implementing' } });
+
+  const { rows } = await sqlite.query<{ metadata: string }>(`SELECT metadata FROM ai_sessions WHERE id = 's2'`);
+  expect(JSON.parse(rows[0].metadata)).toMatchObject({ ...owned, phase: 'implementing' });
+
+  // The owner's own bag write (merged in SQL) runs on this backend.
+  await sqlite.query(OWNER_METADATA_MERGE_SQL, [JSON.stringify({ ownerMetadata: { chapter: 2 } }), 's2']);
+  const after = await sqlite.query<{ metadata: string }>(`SELECT metadata FROM ai_sessions WHERE id = 's2'`);
+  expect(JSON.parse(after.rows[0].metadata)).toMatchObject({ sessionOwner: owned.sessionOwner, ownerMetadata: { chapter: 2 } });
 });

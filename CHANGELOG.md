@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Knowledge curator (alpha): agents can sort commits, sessions, and tracker changes with TypeSafe's Jev model to decide what belongs in the knowledge graph, using your own TypeSafe API key or your Cloudflare account through Workers AI.
 - Team wiki from the terminal (alpha): a Claude Code plugin and `nim login` / `nim wiki` commands let an agent read and write a team project's knowledge wiki, with each session's edits listed in the web console.
 - iOS: Live voice conversations are recorded as voice sessions on the connected desktop, including tool calls and their results
+- Crew (alpha, off by default): hire persistent agent teammates such as a PM that work scheduled shifts within token budgets, keep notes and a journal, and flag you when something needs you; extensions can now start and drive their own agent sessions.
 
 ### Changed
 <!-- Changes to existing functionality go here -->

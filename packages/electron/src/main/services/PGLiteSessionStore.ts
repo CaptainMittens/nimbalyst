@@ -5,6 +5,12 @@
 import { toMillis } from '../utils/timestampUtils';
 import { parseJsonObjectColumn } from '../utils/jsonColumn';
 import {
+  OWNER_METADATA_KEY,
+  SESSION_OWNER_KEY,
+  readSessionOwner,
+  stripOwnerControlledMetadata,
+} from './extensionSessions/sessionOwnership';
+import {
   computeSessionPhaseTransition,
   normalizeSessionPhaseMetadataUpdate,
 } from './session/sessionPhaseTransition';
@@ -490,6 +496,23 @@ export function createPGLiteSessionStore(db: PGliteLike, ensureDbReady?: EnsureR
 
       const branchedAt = payload.branchedAt ? new Date(payload.branchedAt) : null;
 
+      // The insert below upserts. Re-creating an existing extension-owned row
+      // (e.g. a renderer re-issuing sessions:create) must not wipe its owner or
+      // the owner's bag: ownership is immutable once assigned.
+      let createMetadata: Record<string, unknown> = payload.metadata ?? {};
+      const { rows: existingRows } = await db.query<{ metadata: unknown }>(
+        `SELECT metadata FROM ai_sessions WHERE id = $1`,
+        [payload.id],
+      );
+      const existingMetadata = existingRows[0] ? normalizeJsonObject(existingRows[0].metadata) : null;
+      if (existingMetadata && readSessionOwner(existingMetadata)) {
+        createMetadata = {
+          ...stripOwnerControlledMetadata(createMetadata),
+          [SESSION_OWNER_KEY]: existingMetadata[SESSION_OWNER_KEY],
+          [OWNER_METADATA_KEY]: existingMetadata[OWNER_METADATA_KEY] ?? {},
+        };
+      }
+
       await db.query(
         `INSERT INTO ai_sessions (
           id, workspace_id, file_path, worktree_id, parent_session_id, provider, model, title, session_type, mode,
@@ -544,8 +567,8 @@ export function createPGLiteSessionStore(db: PGliteLike, ensureDbReady?: EnsureR
           payload.providerConfig ?? null,
           payload.providerSessionId ?? null,
           null,
-          (payload as any).metadata ?? {},
-          (payload as any).hasBeenNamed ?? false,
+          createMetadata,
+          payload.hasBeenNamed ?? false,
           createdAt,
           updatedAt,
           payload.branchedFromSessionId ?? null,  // Branch tracking - separate from parent
@@ -596,7 +619,14 @@ export function createPGLiteSessionStore(db: PGliteLike, ensureDbReady?: EnsureR
       // loudly so the upstream caller surfaces in main.log instead of
       // silently amplifying corruption.
       if (metadata.metadata !== undefined) {
-        const incoming = metadata.metadata;
+        // Owner keys are assigned at creation and edited only by the owning
+        // extension's broker; drop them from every ordinary write. Non-objects
+        // pass through untouched to be refused below.
+        const raw = metadata.metadata as unknown;
+        const incoming =
+          raw && typeof raw === 'object' && !Array.isArray(raw)
+            ? stripOwnerControlledMetadata(raw as Record<string, unknown>)
+            : metadata.metadata;
         if (
           incoming === null ||
           typeof incoming !== 'object' ||

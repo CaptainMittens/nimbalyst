@@ -332,6 +332,28 @@ describe("MessageStreamingHandler OpenCode turn config", () => {
   });
 });
 
+describe("MessageStreamingHandler provisional title", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.providerFactory.getProvider.mockReturnValue(null);
+  });
+
+  it("titles a fresh session from its first prompt but keeps a title its caller assigned", async () => {
+    const updateSessionTitle = vi.fn();
+    for (const [id, hasBeenNamed] of [["fresh-session", false], ["caller-named-session", true]] as const) {
+      await runTurn({
+        session: openCodeSession({ id, messages: [], hasBeenNamed }),
+        provider: new RecordingProvider(),
+        sessionManager: { updateSessionTitle },
+      });
+    }
+
+    expect(updateSessionTitle.mock.calls).toEqual([
+      ["fresh-session", "Prompt", { force: true, markAsNamed: false }],
+    ]);
+  });
+});
+
 describe("MessageStreamingHandler OpenCode context usage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -357,6 +379,8 @@ describe("MessageStreamingHandler OpenCode context usage", () => {
       inputTokens: 1_000,
       outputTokens: 200,
       totalTokens: 1_200,
+      cacheReadInputTokens: 0,
+      cacheCreationInputTokens: 0,
       contextWindow: 200_000,
       currentContext: { tokens: 12_500, contextWindow: 200_000 },
     });

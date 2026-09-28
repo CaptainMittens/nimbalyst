@@ -469,10 +469,16 @@ export interface SessionData {
     inputTokens: number;      // Cumulative input tokens across session lifetime
     outputTokens: number;     // Cumulative output tokens across session lifetime
     totalTokens: number;      // Total tokens (input + output)
+    // Cumulative prompt-cache reads/writes, disjoint from inputTokens (which is
+    // uncached input only). Absent on rows written before they were stored;
+    // read absent as 0. Per-provider semantics: tokenUsageAccumulation.ts.
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
     // Internal Codex baseline tracking for cumulative SDK snapshots.
     // Not user-facing; used to convert provider-cumulative usage into per-session deltas.
-    providerCumulativeInputTokens?: number;
+    providerCumulativeInputTokens?: number;   // cache-inclusive
     providerCumulativeOutputTokens?: number;
+    providerCumulativeCachedInputTokens?: number;
     contextWindow?: number;   // Max context window size for the model (legacy, use currentContext)
     categories?: TokenUsageCategory[]; // Breakdown parsed from /context output (legacy, use currentContext)
     costUSD?: number;         // Total cost in USD (from SDK modelUsage)
