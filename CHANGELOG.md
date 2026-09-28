@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A session no longer stays marked as running after its turn ended while a question to you was still open
 - iOS: scrolling up in a long session now reaches the first message instead of stopping partway
 - Clicking the Dock or tray icon now brings back the project window, or opens Project Manager if none remains, instead of doing nothing after the app sat in the background
+- Following external Claude Code sessions keeps importing after the agent changes directory, and no longer re-reads every unchanged session log in the background
 
 ### Removed
 <!-- Removed features go here -->
