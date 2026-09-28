@@ -4,6 +4,7 @@ import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AI
 import Store from '../../utils/privateSettingsStore';
 import { isSessionInWorkspace } from './voiceIpcAuthorization';
 import { handleMobileVoiceToolCall } from './mobileVoiceToolHandler';
+import { appendMobileVoiceLog } from './mobileVoiceLog';
 import { isSessionOwnedByScopedHost, MobileLiveActions, type MobileLiveRequest, type MobileLiveResult } from './mobileLiveRelay';
 
 // Account/host is part of each key. Only opaque action identities are retained.
@@ -29,7 +30,9 @@ export async function handleMobileLiveTool(request: MobileLiveRequest): Promise<
     }
   }
   if (['voice_events', 'voice_event_claim', 'voice_event_presented'].includes(tool)) return handleMobileVoiceEvent(request);
-  if (tool === 'capabilities') return { success: true, result: JSON.stringify({ version: 1, targetedTools: true, voiceApprovals: true, promptAnswersVersion: 1 }) };
+  if (tool === 'capabilities') return { success: true, result: JSON.stringify({ version: 1, targetedTools: true, voiceApprovals: true, promptAnswersVersion: 1, voiceLog: 1 }) };
+  // Idempotent by entry id, so retries are safe without an action reservation.
+  if (tool === 'voice_log') return appendMobileVoiceLog(request);
   if (['voice_prompt_prepare', 'voice_prompt_presented', 'voice_prompt_answer', 'voice_prompt_status'].includes(tool)) return handleMobileVoicePrompt(request);
   // Ungated legacy answers are never an alternative to the versioned prompt contract.
   if (tool === 'answer_prompt') return { success: false, error: 'Use the question or approval card in the app.' };

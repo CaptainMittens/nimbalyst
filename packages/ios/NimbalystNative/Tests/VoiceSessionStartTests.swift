@@ -22,6 +22,13 @@ final class VoiceSessionStartTests: XCTestCase {
         XCTAssertEqual(VoiceScreenContext(hostId: "host", projectId: "/project", sessionId: "d", session: desktop).targetSessionId, "d")
         XCTAssertNil(VoiceScreenContext(hostId: "host", projectId: "/other", sessionId: "d", session: desktop).targetSessionId)
         XCTAssertNil(VoiceScreenContext(hostId: nil, projectId: "/project", sessionId: "d", session: desktop).targetSessionId)
+
+        // The synced pending-prompt bit tells the agent to read the question instead of answering from the screen.
+        var asking = desktop
+        asking.hasQueuedPrompts = true
+        XCTAssertTrue(VoiceScreenContext(hostId: "host", projectId: "/project", sessionId: "d", session: asking).waitingForInput)
+        XCTAssertFalse(VoiceScreenContext(hostId: "host", projectId: "/other", sessionId: "d", session: asking).waitingForInput)
+        XCTAssertFalse(VoiceScreenContext(hostId: "host", projectId: "/project", sessionId: "d", session: desktop).waitingForInput)
     }
     #if os(iOS)
     @MainActor
@@ -86,24 +93,15 @@ final class VoiceSessionStartTests: XCTestCase {
     }
 
     @MainActor
-    func testRouteLossInvalidatesPromptReadoutAndSettlesItsToolExactlyOnce() async throws {
+    func testRouteLossInvalidatesAPresentedQuestion() async throws {
         let session = FakeVoiceAudioSession()
         let agent = VoiceAgent(audioSession: session)
-        let speaker = FakePromptSpeaker()
-        agent.promptSpeaker = speaker
         try await agent.audioRoutes.activate()
-        agent.state = .speaking
-        agent.readingPrompt = true
-        var replies = [String]()
-        agent.promptReadoutCallId = agent.toolResults.register { replies.append($0) }
         let prompt = PreparedVoicePrompt(promptId: "p", sessionId: "a", version: "v", token: "t", claimToken: "c", readout: "Commit?", ttlMs: 30000)
         agent.promptPresentation = VoicePromptPresentation(prompt: prompt, generation: agent.connectionGeneration.value, projectId: "project", hostId: "host", deadline: Date().addingTimeInterval(30))
         session.emit(.routeChanged(removedOutputs: [FakeVoiceAudioSession.headset]))
         agent.invalidatePromptPresentation()
         XCTAssertNil(agent.promptPresentation)
-        XCTAssertFalse(agent.readingPrompt)
-        XCTAssertEqual(replies.count, 1)
-        XCTAssertGreaterThan(speaker.stops, 0)
         agent.deactivate()
     }
 
@@ -290,12 +288,6 @@ final class VoiceSessionStartTests: XCTestCase {
 }
 
 #if os(iOS)
-@MainActor
-private final class FakePromptSpeaker: VoicePromptSpeaker {
-    var stops = 0
-    func speak(_ text: String, language: String?, completion: @escaping (Bool) -> Void) {}
-    func stop() { stops += 1 }
-}
 @MainActor
 private final class RouteTestVoiceEngine: VoiceEngine {
     var kind: VoiceEngineKind { .live }

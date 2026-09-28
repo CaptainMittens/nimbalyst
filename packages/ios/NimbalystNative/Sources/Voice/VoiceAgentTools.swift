@@ -5,12 +5,8 @@ import os
 @MainActor
 extension VoiceAgent {
     func sendToolResult(callId: String, output: String) {
-        if promptReadoutCallId == callId {
-            promptReadoutCallId = nil
-            readingPrompt = false
-            if let error = parseArguments(output)["error"] as? String { announcementStatus = error }
-        }
         toolScopes.removeValue(forKey: callId)
+        withConversationLog { $0.toolCompleted(callId: callId, output: output) }
         toolResults.finish(callId, output: output)
     }
 
@@ -330,7 +326,10 @@ extension VoiceAgent {
                 )
                 guard self.toolResults.contains(callId) else { return }
                 if outcome.success, let result = outcome.result, !result.isEmpty {
-                    let payload: [String: Any] = ["success": true, "source": "desktop", "session_id": sessionId, "summary": result, "pending_prompt_available": true]
+                    // Only the desktop knows whether a waiter is still live; it adds this section only then.
+                    // A hard-coded true here let the agent announce a question nothing could answer.
+                    let waiting = result.contains("This session is waiting for your input:")
+                    let payload: [String: Any] = ["success": true, "source": "desktop", "session_id": sessionId, "summary": result, "waiting_for_input": waiting]
                     self.sendToolResult(callId: callId, output: Self.encodeArgs(payload))
                     return
                 }
@@ -378,7 +377,7 @@ extension VoiceAgent {
                 "source": "local_cache",
                 "session_id": sessionId,
                 "updated_at": session.updatedAt,
-                "pending_prompt_available": false,
+                "waiting_for_input": "unknown",
                 "limitation": "Offline cached summary; pending questions and approvals are unknown. Do not infer that no question is waiting.",
                 "title": session.titleDecrypted ?? "Untitled",
                 "provider": session.provider ?? "unknown",

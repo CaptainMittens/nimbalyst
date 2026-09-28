@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Knowledge extension sets up a team wiki and installs an editable "How we write this wiki" guide that agents follow, and its vocabulary now covers markets, makers, competition, and dated, cited facts.
 - Knowledge curator (alpha): agents can sort commits, sessions, and tracker changes with TypeSafe's Jev model to decide what belongs in the knowledge graph, using your own TypeSafe API key or your Cloudflare account through Workers AI.
 - Team wiki from the terminal (alpha): a Claude Code plugin and `nim login` / `nim wiki` commands let an agent read and write a team project's knowledge wiki, with each session's edits listed in the web console.
+- iOS: Live voice conversations are recorded as voice sessions on the connected desktop, including tool calls and their results
 
 ### Changed
 <!-- Changes to existing functionality go here -->
@@ -27,7 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - iOS: returning to the app after a long background shows a quiet "Reconnecting…" notice instead of the "Sync paused" warning
 - iOS: an open session no longer stays stuck loading after a long background
 - iOS: creating a session no longer shows "Unable to Create Session" when the desktop created it successfully
-- iOS: Live voice mode can summarize, answer questions in, and announce sessions that were started on the desktop instead of saying they belong to another computer
+- iOS: Live voice reads a session's pending question in its own voice instead of a separate system voice, your spoken answer now reaches the session, and this works for sessions started on the desktop
+- A session that asked a question could occasionally lose its waiting-for-your-response state
 - iOS: the running-sessions Live Activity starts again after an earlier card ends, and unread sessions keep it up for only 10 minutes after they finish
 - Changes to a team tracker type now reach teammates right away instead of after the next reconnect
 - A team project's knowledge relationship verbs are shared with teammates and the web console instead of staying on the machine that defined them

@@ -1,5 +1,4 @@
 import Store from "../../utils/privateSettingsStore";
-import type { InteractivePromptPayload } from "@nimbalyst/runtime/ai/server/transcript/types";
 import { loadVoiceSession } from "./voiceSessionLoader";
 import { resolveExactVoicePromptResponse } from "../ai/MobileSessionControlHandler";
 import {
@@ -24,6 +23,8 @@ import {
 } from "./mobileLiveRelay";
 import { AISessionsRepository } from "@nimbalyst/runtime/storage/repositories/AISessionsRepository";
 import { isSessionInWorkspace } from "./voiceIpcAuthorization";
+import { pendingVoicePrompts } from "./voicePendingPrompts";
+import { sessionHasLivePrompt } from "./voicePromptLiveness";
 
 let store: Store<Record<string, VoicePromptLease>> | undefined;
 function storage(): Store<Record<string, VoicePromptLease>> {
@@ -68,22 +69,21 @@ export async function handleMobileVoicePrompt(
       !isSessionOwnedByScopedHost(owner?.metadata, scope.hostDeviceId)
     )
       throw new Error("The session ownership changed.");
-    const messages: Array<{
-      type: string;
-      id?: string | number;
-      interactivePrompt?: InteractivePromptPayload;
-    }> = loaded.session.messages ?? [];
-    const pending = messages
-      .filter(
-        (m) =>
-          m.type === "interactive_prompt" &&
-          m.interactivePrompt?.status === "pending"
-      )
-      .map((m) => m.interactivePrompt as InteractivePromptPayload)
-      .filter((p) => !requestedId || p.requestId === requestedId);
-    if (pending.length !== 1)
+    const messages: Array<{ type: string; id?: string | number }> =
+      loaded.session.messages ?? [];
+    const live = sessionHasLivePrompt(scope.sessionId, owner?.metadata?.hasPendingPrompt);
+    const pending = (live ? pendingVoicePrompts(messages) : []).filter(
+      (p) => !requestedId || p.requestId === requestedId
+    );
+    if (pending.length === 0)
       throw new Error(
-        "There is no single matching pending question. Use its app card."
+        requestedId
+          ? "That question is no longer pending in this session."
+          : "This session is not waiting on a question."
+      );
+    if (pending.length > 1)
+      throw new Error(
+        "This session has more than one open question. Use its app card."
       );
     const prompt = pending[0];
     const taskId = String(
