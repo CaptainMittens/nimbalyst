@@ -111,7 +111,7 @@ export const CREW_AGENT_TOOL_DESCRIPTORS: CrewToolDescriptor[] = [
 ];
 
 // Only crew members' own sessions (and their delegated work) see the agent tools.
-for (const tool of CREW_AGENT_TOOL_DESCRIPTORS) tool.audience = 'owned-sessions';
+for (const tool of CREW_AGENT_TOOL_DESCRIPTORS) tool.audience = tool.name === CREW_AGENT_TOOLS.roster ? 'all' : 'owned-sessions';
 
 // Hiring happens from the user's own session (`/crew:hire`), so every session sees it.
 CREW_AGENT_TOOL_DESCRIPTORS.push({
@@ -191,7 +191,9 @@ export function createCrewToolHandlers(runtime: CrewRuntime, service: CrewServic
       });
     },
     [CREW_AGENT_TOOLS.roster]: async (_args, call) => {
-      const self = callerSlug(call);
+      // Read-only, so any session may call it (a hiring session checks for duplicate roles); `you` is only set for a crew caller.
+      const owner = call?.sessionOwner;
+      const self = owner?.extensionId === CREW_EXTENSION_ID ? owner.key : undefined;
       const roster = await service.roster();
       return {
         members: roster.members.map(({ definition, runtime: state }) => ({

@@ -781,6 +781,16 @@ describe('crew tools', () => {
     expect(await readNotes(workspace, 'ada')).toBe('Agent rewrite');
   });
 
+  it('roster is readable from any session and marks the caller only when it is a crew member', async () => {
+    const workspace = makeWorkspace({ 'ada.md': ADA });
+    const runtime = runtimeAt(workspace, new FakeSessions({ now: 0 }), { now: utc('2026-09-28T16:00:00Z') });
+    const tools = createCrewToolHandlers(runtime, new CrewService(runtime));
+    const plain: ToolCallContext = { sessionId: 'user', workspacePath: workspace, caller: 'agent', sessionOwner: null };
+
+    expect((await tools.roster({}, plain) as { members: unknown[] }).members).toEqual([expect.not.objectContaining({ you: true })]);
+    expect((await tools.roster({}, { ...asAda, workspacePath: workspace }) as { members: unknown[] }).members).toEqual([expect.objectContaining({ slug: 'ada', you: true })]);
+  });
+
   it('hire works from any session, names the bad field, and never overwrites a member', async () => {
     const workspace = makeWorkspace({ 'ada.md': ADA });
     const runtime = runtimeAt(workspace, new FakeSessions({ now: 0 }), { now: utc('2026-09-28T16:00:00Z') });
