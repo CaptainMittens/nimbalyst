@@ -10,7 +10,7 @@ import { type HealthItem } from './ontologyKnowledge';
 import { type ContentHealthOptions } from './ontologyContentHealth';
 export { computeContentHealth, factBoxPredicates } from './ontologyContentHealth';
 export { factStaleAt, STALE_FACT_DAYS } from './ontologyKnowledge';
-export { buildLabelMap } from './ontologyLabelMap';
+export { buildTypeMap } from './ontologyLabelMap';
 export { buildTypePageModel, claimRecordsOf, typeCell } from './ontologyTypePage';
 /**
  * Every label health check (content and schema) over a room's records, for

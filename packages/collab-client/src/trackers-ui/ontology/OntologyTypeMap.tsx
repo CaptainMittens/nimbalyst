@@ -1,198 +1,208 @@
 /**
- * The type map: every label a project uses, sized by how many pages carry it
- * (narrower labels' pages included), with solid lines up to broader labels and
- * dashed, named lines for entity-valued properties that declare a range. A
- * searchable list beside it reaches every label from the keyboard, with the
- * structure labels (areas, home) and the unlabeled pages at the end.
+ * The type map: every label a project uses, grouped into domain zones, with
+ * one line per pair of types that links, a pill per relationship, and an
+ * inspector beside it. Pan by dragging, zoom with the wheel (around the
+ * cursor), the buttons or `+`/`-`/`0`, arrows to pan, Escape to deselect.
+ * Zooming in shows every relationship, then each type's properties.
  *
- * Presentational: the host builds the model (`buildLabelMap`) and navigates.
+ * The host builds the model (`buildTypeMap`) and navigates; the layout is
+ * computed here (`typeMap/typeMapLayout.ts`). Everything here is behind a lazy
+ * import.
  */
-import { useMemo, useState } from 'react';
-import type { LabelMapModel, LabelMapNode } from './ontologyLabelMap';
-import './ontologyTypes.css';
-
-const MAP_W = 960;
-const ROW_H = 118;
-const PER_ROW = 6;
-const TOP = 56;
+import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react';
+import type { OntologyInspectorWriter } from './OntologyInspector';
+import type { TypeMapModel, TypeMapRelationship } from './ontologyLabelMap';
+import { OTHER_ZONE } from './typeMap/typeMapZones';
+import { buildPairs, layoutTypeMap, type MapLayout, type MapPair } from './typeMap/typeMapLayout';
+import { TypeMapCanvas, type MapSelection } from './typeMap/TypeMapCanvas';
+import { TypeMapInspector } from './typeMap/TypeMapInspector';
+import { TypeMapMinimap } from './typeMap/TypeMapMinimap';
+import { TypeMapSearch } from './typeMap/TypeMapSearch';
+import { useMapViewport, type Box } from './typeMap/useMapViewport';
+import './typeMap/typeMap.css';
 
 export interface OntologyTypeMapProps {
-  model: LabelMapModel;
+  model: TypeMapModel;
+  /** Opens a label's type page (its table). */
   onOpenLabel: (id: string) => void;
-  /** Opens the pages that carry no label; omitted hides the bucket. */
+  /** Opens a page by item id. */
+  onOpenPage?: (id: string) => void;
+  /** Opens the pages that carry no label; omitted hides the entry. */
   onOpenUnlabeled?: () => void;
+  /** Files proposal requests; null or omitted (the public wiki, viewers) hides those actions. */
+  writer?: OntologyInspectorWriter | null;
 }
 
-function radius(count: number): number {
-  return Math.min(40, 14 + 6 * Math.log2(count + 1));
-}
-
-function layout(nodes: readonly LabelMapNode[]): { positions: Map<string, [number, number]>; height: number } {
-  const byDepth = new Map<number, LabelMapNode[]>();
-  for (const node of nodes) byDepth.set(node.depth, [...(byDepth.get(node.depth) ?? []), node]);
-  const positions = new Map<string, [number, number]>();
-  let line = 0;
-  for (const depth of [...byDepth.keys()].sort((a, b) => a - b)) {
-    const band = [...byDepth.get(depth)!].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-    for (let start = 0; start < band.length; start += PER_ROW) {
-      const row = band.slice(start, start + PER_ROW);
-      row.forEach((node, i) => positions.set(node.id, [((i + 0.5) * MAP_W) / row.length, TOP + line * ROW_H]));
-      line += 1;
-    }
-  }
-  return { positions, height: TOP + Math.max(line, 1) * ROW_H - 20 };
-}
-
-function trim(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
-export function OntologyTypeMap({ model, onOpenLabel, onOpenUnlabeled }: OntologyTypeMapProps) {
-  const [query, setQuery] = useState('');
-  const [hover, setHover] = useState<string | null>(null);
-  const { positions, height } = useMemo(() => layout(model.nodes), [model.nodes]);
+/** The type and relationship ids a selection lights: itself and its neighbourhood. */
+export function litIds(selection: MapSelection, relationships: readonly TypeMapRelationship[]): Set<string> {
   const lit = new Set<string>();
-  if (hover) {
-    lit.add(hover);
-    for (const edge of model.edges) {
-      if (edge.from === hover || edge.to === hover) {
-        lit.add(edge.id);
-        lit.add(edge.from);
-        lit.add(edge.to);
-      }
-    }
+  if (!selection) return lit;
+  for (const relationship of relationships) {
+    const touches = selection.kind === 'type'
+      ? relationship.from === selection.id || relationship.to === selection.id
+      : relationship.id === selection.id;
+    if (!touches) continue;
+    lit.add(`rel:${relationship.id}`).add(`type:${relationship.from}`).add(`type:${relationship.to}`);
   }
-  const needle = query.trim().toLowerCase();
-  const listed = [...model.nodes]
-    .filter((node) => !needle || node.name.toLowerCase().includes(needle) || node.id.includes(needle) || node.description.toLowerCase().includes(needle))
-    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  const structure = model.structure.filter((node) => !needle || node.name.toLowerCase().includes(needle));
+  if (selection.kind === 'type') lit.add(`type:${selection.id}`);
+  return lit;
+}
+
+export function OntologyTypeMap({ model, onOpenLabel, onOpenPage, onOpenUnlabeled, writer = null }: OntologyTypeMapProps) {
+  const [showEmpty, setShowEmpty] = useState(true);
+  const [showUnused, setShowUnused] = useState(true);
+  const [selection, setSelection] = useState<MapSelection>(null);
+  const [hover, setHover] = useState<MapSelection>(null);
+  // The canvas's shape, in steps of 0.1, so zones pack to it without relaying out on every pixel.
+  const [aspect, setAspect] = useState(1.5);
+
+  const typeById = useMemo(() => new Map(model.types.map((type) => [type.id, type])), [model.types]);
+  const zoneTone = useMemo(() => new Map(model.zones.map((zone, i) => [zone.id, zone.id === OTHER_ZONE ? 4 : i % 4])), [model.zones]);
+  // A selected empty type stays on the map when empty types are hidden; otherwise selection must not relayout.
+  const keepType = !showEmpty && selection?.kind === 'type' ? selection.id : null;
+  const types = useMemo(() => model.types.filter((type) => showEmpty || type.count > 0 || type.id === keepType), [model.types, showEmpty, keepType]);
+  const relationships = useMemo(() => {
+    const shown = new Set(types.map((type) => type.id));
+    return model.relationships.filter((relationship) => shown.has(relationship.from) && shown.has(relationship.to) && (showUnused || relationship.statements > 0));
+  }, [model.relationships, types, showUnused]);
+  const pairs = useMemo(() => buildPairs(relationships), [relationships]);
+  const pairById = useMemo(() => new Map<string, MapPair>(pairs.map((pair) => [pair.id, pair])), [pairs]);
+  const relationshipById = useMemo(() => new Map(model.relationships.map((relationship) => [relationship.id, relationship])), [model.relationships]);
+  const maxCount = useMemo(() => Math.max(1, ...model.types.map((type) => type.count)), [model.types]);
+
+  // Lay out again when what is shown changes (a toggle) or the canvas changes shape, then fit.
+  const layout = useMemo<MapLayout>(() => layoutTypeMap({ types, zones: model.zones, pairs, aspect }), [types, model.zones, pairs, aspect]);
+  const viewport = useMapViewport(layout);
+  const { fit } = viewport;
+  useEffect(() => {
+    fit(false);
+  }, [layout, fit]);
+  useEffect(() => {
+    const canvas = viewport.canvasRef.current;
+    if (!canvas || typeof ResizeObserver === 'undefined') return undefined;
+    let width = canvas.clientWidth;
+    const measure = () => {
+      if (canvas.clientWidth && canvas.clientHeight) setAspect(Math.round((canvas.clientWidth / canvas.clientHeight) * 10) / 10);
+    };
+    measure();
+    const observer = new ResizeObserver(() => {
+      measure();
+      if (Math.abs(canvas.clientWidth - width) < 40) return;
+      width = canvas.clientWidth;
+      fit(false);
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [viewport.canvasRef, fit]);
+
+  const boxOf = useCallback((target: NonNullable<MapSelection>): Box | null => {
+    if (target.kind === 'type') return layout.nodes.get(target.id) ?? null;
+    const relationship = relationshipById.get(target.id);
+    const pill = layout.pills.find((entry) => entry.relationshipId === target.id);
+    const ends = relationship ? [layout.nodes.get(relationship.from), layout.nodes.get(relationship.to)].filter((box): box is Box => Boolean(box)) : [];
+    const boxes = [...ends, ...(pill ? [pill] : [])];
+    if (!boxes.length) return null;
+    const x = Math.min(...boxes.map((box) => box.x));
+    const y = Math.min(...boxes.map((box) => box.y));
+    return { x, y, w: Math.max(...boxes.map((box) => box.x + box.w)) - x, h: Math.max(...boxes.map((box) => box.y + box.h)) - y };
+  }, [layout, relationshipById]);
+
+  const center = useCallback((target: NonNullable<MapSelection>, k?: number) => {
+    const box = boxOf(target);
+    if (box) viewport.focus(box, k);
+  }, [boxOf, viewport]);
+  const pick = useCallback((target: NonNullable<MapSelection>) => {
+    setSelection(target);
+    center(target, target.kind === 'type' ? 1.45 : undefined);
+  }, [center]);
+  const { dragged } = viewport;
+  const select = useCallback((target: MapSelection) => {
+    if (!dragged()) setSelection(target);
+  }, [dragged]);
+
+  const lit = useMemo(() => litIds(hover ?? selection, relationships), [hover, selection, relationships]);
+  const statements = relationships.reduce((sum, relationship) => sum + relationship.statements, 0);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement;
+    if (target.closest('input, textarea, select, [contenteditable="true"]') || event.metaKey || event.ctrlKey || event.altKey) return;
+    const step = 60;
+    const keys: Record<string, () => void> = {
+      '+': () => viewport.zoomBy(1.25),
+      '=': () => viewport.zoomBy(1.25),
+      '-': () => viewport.zoomBy(0.8),
+      '0': () => viewport.fit(),
+      Escape: () => setSelection(null),
+      ArrowLeft: () => viewport.panBy(step, 0),
+      ArrowRight: () => viewport.panBy(-step, 0),
+      ArrowUp: () => viewport.panBy(0, step),
+      ArrowDown: () => viewport.panBy(0, -step),
+    };
+    const action = keys[event.key];
+    if (!action) return;
+    event.preventDefault();
+    action();
+  };
 
   return (
-    <div className="ontology-type-map" data-testid="ontology-type-map">
-      <div className="ontology-type-map-canvas">
-        <svg viewBox={`0 0 ${MAP_W} ${height}`} role="img" aria-label="Labels and how they relate" data-focus={hover ? 'true' : 'false'}>
-          <defs>
-            <marker id="ontology-type-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-              <path className="ontology-type-arrow" d="M0,0 L10,5 L0,10 z" />
-            </marker>
-          </defs>
-          {model.edges.map((edge) => {
-            const from = positions.get(edge.from);
-            const to = positions.get(edge.to);
-            if (!from || !to) return null;
-            const fromNode = model.nodes.find((node) => node.id === edge.from)!;
-            const toNode = model.nodes.find((node) => node.id === edge.to)!;
-            const [x1, y1] = from;
-            const [x2, y2] = to;
-            if (edge.from === edge.to) {
-              const r = radius(fromNode.count);
-              return (
-                <g key={edge.id} className="ontology-type-edge" data-kind={edge.kind} data-lit={lit.has(edge.id) ? 'true' : 'false'}>
-                  <path d={`M${x1 - r * 0.6},${y1 - r * 0.8} C${x1 - r * 1.6},${y1 - r * 2.6} ${x1 + r * 1.6},${y1 - r * 2.6} ${x1 + r * 0.6},${y1 - r * 0.8}`} markerEnd="url(#ontology-type-arrow)" />
-                  <text x={x1} y={y1 - r * 2.2} textAnchor="middle">{edge.label}</text>
-                </g>
-              );
-            }
-            const length = Math.hypot(x2 - x1, y2 - y1) || 1;
-            const [ux, uy] = [(x2 - x1) / length, (y2 - y1) / length];
-            const [sx, sy] = [x1 + ux * radius(fromNode.count), y1 + uy * radius(fromNode.count)];
-            const [ex, ey] = [x2 - ux * (radius(toNode.count) + 3), y2 - uy * (radius(toNode.count) + 3)];
-            // Range lines bow sideways so they do not sit on a broader line between the same pair.
-            const bend = edge.kind === 'range' ? 38 : 0;
-            const [cx, cy] = [(sx + ex) / 2 - uy * bend, (sy + ey) / 2 + ux * bend];
-            return (
-              <g key={edge.id} className="ontology-type-edge" data-kind={edge.kind} data-lit={lit.has(edge.id) ? 'true' : 'false'}>
-                <path d={`M${sx},${sy} Q${cx},${cy} ${ex},${ey}`} markerEnd="url(#ontology-type-arrow)" />
-                {edge.label && <text x={(sx + 2 * cx + ex) / 4} y={(sy + 2 * cy + ey) / 4 - 4} textAnchor="middle">{edge.label}</text>}
-              </g>
-            );
-          })}
-          {model.nodes.map((node) => {
-            const [x, y] = positions.get(node.id)!;
-            const r = radius(node.count);
-            return (
-              <g
-                key={node.id}
-                className="ontology-type-node"
-                data-label-id={node.id}
-                data-declared={node.declared ? 'true' : 'false'}
-                data-role={node.role}
-                data-lit={lit.has(node.id) ? 'true' : 'false'}
-                onMouseEnter={() => setHover(node.id)}
-                onMouseLeave={() => setHover(null)}
-                onClick={() => onOpenLabel(node.id)}
-              >
-                <title>{`${node.name}: ${node.count} ${node.count === 1 ? 'page' : 'pages'}${node.declared ? '' : ' (not in the registry)'}`}</title>
-                <circle cx={x} cy={y} r={r} />
-                <text className="ontology-type-node-count" x={x} y={y + 4} textAnchor="middle">{node.count}</text>
-                <text className="ontology-type-node-name" x={x} y={y + r + 15} textAnchor="middle">{trim(node.plural, 22)}</text>
-              </g>
-            );
-          })}
-        </svg>
-        <div className="ontology-type-map-key">
-          <span><span className="ontology-type-key-line" data-kind="broader" />narrower than</span>
-          <span><span className="ontology-type-key-line" data-kind="range" />points at</span>
-          <span>Circle size: pages under the label</span>
+    <div className="ontology-type-map" data-testid="ontology-type-map" onKeyDown={onKeyDown}>
+      <div className="type-map-toolbar">
+        <TypeMapSearch types={types} relationships={relationships} typeById={typeById} onPick={pick} />
+        <div className="type-map-toggles">
+          <label><input type="checkbox" checked={showEmpty} onChange={(event) => setShowEmpty(event.target.checked)} /> Types with no pages</label>
+          <label><input type="checkbox" checked={showUnused} onChange={(event) => setShowUnused(event.target.checked)} /> Relationships nobody uses yet</label>
+        </div>
+        <span className="type-map-summary">{`${types.length} types · ${relationships.length} relationships · ${statements} linking statements`}</span>
+        <div className="type-map-zoom" role="group" aria-label="Zoom">
+          <button type="button" title="Zoom out (-)" aria-label="Zoom out" onClick={() => viewport.zoomBy(0.8)}>&minus;</button>
+          <span className="type-map-zoom-percent" ref={viewport.percentRef}>100%</span>
+          <button type="button" title="Zoom in (+)" aria-label="Zoom in" onClick={() => viewport.zoomBy(1.25)}>+</button>
+          <button type="button" title="Fit the map (0)" onClick={() => viewport.fit()}>Fit</button>
         </div>
       </div>
-      <aside className="ontology-type-list" aria-label="Labels">
-        <input
-          className="ontology-type-list-search"
-          type="search"
-          placeholder="Find a label"
-          aria-label="Find a label"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
+      <div className="type-map-work">
+        <div
+          className="type-map-canvas"
+          ref={viewport.canvasRef}
+          tabIndex={0}
+          role="application"
+          aria-label="Type map. Drag to pan, scroll to zoom."
+          onClick={() => { if (!viewport.dragged()) setSelection(null); }}
+        >
+          <svg className="type-map-svg" ref={viewport.svgRef} data-zoom="fit">
+            <g ref={viewport.sceneRef}>
+              <TypeMapCanvas
+                layout={layout}
+                types={typeById}
+                pairs={pairById}
+                relationships={relationshipById}
+                zoneTone={zoneTone}
+                maxCount={maxCount}
+                lit={lit}
+                selection={selection}
+                onSelect={select}
+                onHover={setHover}
+              />
+            </g>
+          </svg>
+          <TypeMapMinimap layout={layout} types={typeById} zoneTone={zoneTone} viewRef={viewport.miniViewRef} onJump={viewport.centerOn} onShown={viewport.refresh} />
+          <div className="type-map-hint">Scroll to zoom · drag to pan · click a type or a relationship · zoom in for properties</div>
+        </div>
+        <TypeMapInspector
+          model={model}
+          typeById={typeById}
+          relationships={relationships}
+          zoneTone={zoneTone}
+          selection={selection}
+          onPick={pick}
+          onCenter={(target) => center(target)}
+          onOpenLabel={onOpenLabel}
+          onOpenUnlabeled={onOpenUnlabeled}
+          onOpenPage={onOpenPage}
+          writer={writer}
         />
-        <ul>
-          {listed.map((node) => (
-            <li key={node.id}>
-              <button
-                type="button"
-                className="ontology-type-list-row"
-                data-label-id={node.id}
-                data-declared={node.declared ? 'true' : 'false'}
-                onMouseEnter={() => setHover(node.id)}
-                onMouseLeave={() => setHover(null)}
-                onFocus={() => setHover(node.id)}
-                onBlur={() => setHover(null)}
-                onClick={() => onOpenLabel(node.id)}
-                title={node.description || undefined}
-              >
-                <span className="ontology-type-list-name">{node.plural}</span>
-                {!node.declared && <span className="ontology-type-list-flag">not declared</span>}
-                <span className="ontology-type-list-count">{node.count}</span>
-              </button>
-            </li>
-          ))}
-          {listed.length === 0 && <li className="ontology-type-list-empty">No label matches.</li>}
-        </ul>
-        {(structure.length > 0 || (onOpenUnlabeled && model.unlabeled > 0)) && (
-          <>
-            <div className="ontology-type-list-heading">Page structure and triage</div>
-            <ul>
-              {structure.map((node) => (
-                <li key={node.id}>
-                  <button type="button" className="ontology-type-list-row" data-label-id={node.id} onClick={() => onOpenLabel(node.id)}>
-                    <span className="ontology-type-list-name">{node.plural}</span>
-                    <span className="ontology-type-list-count">{node.count}</span>
-                  </button>
-                </li>
-              ))}
-              {onOpenUnlabeled && model.unlabeled > 0 && (
-                <li>
-                  <button type="button" className="ontology-type-list-row ontology-type-unlabeled" onClick={onOpenUnlabeled}>
-                    <span className="ontology-type-list-name">Unlabeled</span>
-                    <span className="ontology-type-list-count">{model.unlabeled}</span>
-                  </button>
-                </li>
-              )}
-            </ul>
-          </>
-        )}
-      </aside>
+      </div>
     </div>
   );
 }
+

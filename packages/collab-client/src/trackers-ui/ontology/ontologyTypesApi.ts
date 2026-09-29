@@ -14,7 +14,7 @@ import { isFallbackRegistry } from './ontologyLabels';
 
 export { computeContentHealth, factBoxPredicates } from './ontologyContentHealth';
 export { factStaleAt, STALE_FACT_DAYS } from './ontologyKnowledge';
-export { buildLabelMap } from './ontologyLabelMap';
+export { buildTypeMap } from './ontologyLabelMap';
 export { buildTypePageModel, claimRecordsOf, typeCell } from './ontologyTypePage';
 
 /**
