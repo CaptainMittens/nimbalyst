@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A question you leave unanswered by sending a new message now shows as skipped, instead of staying answerable, keeping the "Jump to question" button, and marking the session as waiting for you
 - Prevent overlapping file scans from exhausting memory while files change in large projects.
 - Sessions inside a workstream in the session list now keep their "updated" time current instead of showing a stale value such as "Just now".
+- An agent edit that changes many bullets in a long, list-heavy markdown file (such as renumbering labels) no longer freezes the window while its inline diff is built, and a slow diff is no longer rebuilt from disk right after it renders (#1606).
 
 ### Removed
 <!-- Removed features go here -->
