@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Following external Claude Code sessions keeps importing after the agent changes directory, and no longer re-reads every unchanged session log in the background
 - A question you leave unanswered by sending a new message now shows as skipped, instead of staying answerable, keeping the "Jump to question" button, and marking the session as waiting for you
 - Prevent overlapping file scans from exhausting memory while files change in large projects.
+- Sessions inside a workstream in the session list now keep their "updated" time current instead of showing a stale value such as "Just now".
 
 ### Removed
 <!-- Removed features go here -->
