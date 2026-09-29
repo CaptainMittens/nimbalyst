@@ -4,6 +4,7 @@ import type { CrewFeedEntry, CrewMemberSnapshot } from '../../shared/types';
 import { buildCrewFeed, mergeFeedEntries } from '../crewFeedModel';
 import { crewGutterBadge, deriveShiftAction, nextSeenState, splitChapters } from '../crewDeskModel';
 import { formatScheduleTiming } from '../crewFormat';
+import { DESK_PANEL_WIDTH, readCrewPaneLayout, ROSTER_WIDTH } from '../crewPaneLayout';
 
 function entry(id: string, at: string, kind: CrewFeedEntry['kind'], level?: CrewFeedEntry['level']): CrewFeedEntry {
   return { id, memberSlug: 'ada', at, kind, title: id, body: '', level };
@@ -123,5 +124,18 @@ describe('desk derivations', () => {
     expect(formatScheduleTiming({ prompt: '', weekly: { days: ['friday', 'monday', 'wednesday', 'thursday', 'tuesday'], time: '09:00' } }))
       .toBe('Weekdays 09:00');
     expect(formatScheduleTiming({ prompt: '', weekly: { days: ['sunday', 'monday'], time: '16:00' } })).toBe('Mon, Sun 16:00');
+  });
+});
+
+describe('readCrewPaneLayout', () => {
+  it('restores a stored layout, clamping widths and defaulting anything missing or malformed', () => {
+    expect(readCrewPaneLayout(undefined)).toEqual({
+      rosterWidth: ROSTER_WIDTH.initial, rosterCollapsed: false,
+      deskPanelWidth: DESK_PANEL_WIDTH.initial, deskPanelCollapsed: false,
+    });
+    expect(readCrewPaneLayout({ rosterWidth: 9999, rosterCollapsed: true, deskPanelWidth: 'wide', deskPanelCollapsed: 'yes' })).toEqual({
+      rosterWidth: ROSTER_WIDTH.max, rosterCollapsed: true,
+      deskPanelWidth: DESK_PANEL_WIDTH.initial, deskPanelCollapsed: false,
+    });
   });
 });

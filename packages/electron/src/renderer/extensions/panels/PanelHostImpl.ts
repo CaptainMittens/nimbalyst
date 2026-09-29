@@ -8,10 +8,11 @@
 import type { ComponentType } from 'react';
 import { createElement } from 'react';
 import type { PanelHost, PanelAIContext, ExtensionStorage, ExtensionFileStorage, ExtensionDataAccess, ExecOptions, ExecResult } from '@nimbalyst/runtime';
-import type { PanelHostComponents, PanelSessionTranscriptProps } from '@nimbalyst/extension-sdk';
+import type { PanelHostComponents, PanelPanes, PanelPaneSide, PanelSessionTranscriptProps } from '@nimbalyst/extension-sdk';
 import { store } from '@nimbalyst/runtime/store';
 import { ExtensionFileStorageImpl } from './ExtensionFileStorageImpl';
 import { setPanelGutterBadge } from './panelGutterBadges';
+import { addPanelPaneToggleHandler, setPanelPanes } from './panelPanes';
 import { workspaceRootPathsAtom } from '../../store/atoms/fileTree';
 import { isPathInWorkspace } from '../../../shared/pathUtils';
 
@@ -284,6 +285,14 @@ class PanelHostImpl implements PanelHost {
   setGutterBadge(value: number | null, options?: { tone?: 'default' | 'warning' }): void {
     // Deliberately not cleared in dispose(): the badge must outlive the panel.
     setPanelGutterBadge(this.panelId, value, options?.tone ?? 'default');
+  }
+
+  setPanes(panes: PanelPanes | null): void {
+    setPanelPanes(this.panelId, panes);
+  }
+
+  onPaneToggle(callback: (side: PanelPaneSide) => void): () => void {
+    return addPanelPaneToggleHandler(this.panelId, callback);
   }
 
   /**

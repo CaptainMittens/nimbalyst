@@ -15,6 +15,7 @@ import { GeminiUsageIndicator } from '../GeminiUsageIndicator';
 import { VoiceModeButton } from '../UnifiedAI/VoiceModeButton';
 import { useExtensionGutterButtons, useExtensionBottomPanelButtons } from '../../extensions/panels/usePanels';
 import { PanelGutterBadgeBubble } from '../../extensions/panels/PanelGutterBadgeBubble';
+import { togglePanelPane } from '../../extensions/panels/panelPanes';
 import { openOrganizationSurface } from './openOrganizationSurface';
 import { HelpTooltip } from '../../help';
 import {
@@ -282,6 +283,9 @@ export const NavigationGutter: React.FC<NavigationGutterProps> = ({
       <button
         className={navBtnClass(isActive)}
         onClick={() => {
+          // Like a built-in mode, a fullscreen panel that declared a left pane
+          // collapses it on re-click rather than closing.
+          if (isActive && panel.placement === 'fullscreen' && togglePanelPane(panel.id, 'left')) return;
           const newPanelId = isActive ? null : panel.id;
           // Sidebar panels work alongside files mode.
           if (panel.placement === 'sidebar' && newPanelId && contentMode !== 'files') {

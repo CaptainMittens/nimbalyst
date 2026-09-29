@@ -455,6 +455,41 @@ export interface PanelHost {
    * disabled or unloaded. A panel can only update it while it is mounted.
    */
   setGutterBadge(value: number | null, options?: { tone?: 'default' | 'warning' }): void;
+
+  // ============ PANES ============
+
+  /**
+   * Declare the fullscreen panel's side panes so the host treats them like a
+   * built-in mode's: the title bar shows their toggle buttons, Toggle Sidebar
+   * and the right-pane toggle reach the panel, and re-clicking the gutter
+   * button toggles the left pane instead of closing the panel. Call again
+   * whenever a pane collapses or expands; `null` withdraws the declaration.
+   *
+   * The declaration only takes effect while an {@link onPaneToggle}
+   * subscription is live, and is dropped when the last one unsubscribes.
+   * Optional because older hosts do not implement it.
+   */
+  setPanes?(panes: PanelPanes | null): void;
+
+  /**
+   * Called when the user toggles one of the declared panes from the host.
+   * The panel owns the state: flip it, then report it with {@link setPanes}.
+   */
+  onPaneToggle?(callback: (side: PanelPaneSide) => void): () => void;
+}
+
+export type PanelPaneSide = 'left' | 'right';
+
+/** One side pane of a fullscreen panel, as the host's toggle shows it. */
+export interface PanelPaneState {
+  /** Names the pane in the toggle's tooltip, e.g. "Crew roster". */
+  label: string;
+  collapsed: boolean;
+}
+
+export interface PanelPanes {
+  left?: PanelPaneState;
+  right?: PanelPaneState;
 }
 
 /**

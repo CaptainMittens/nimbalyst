@@ -13,11 +13,13 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  encodeTrackerLabelRegistryPayload,
   encodeTrackerPredicateRegistryPayload,
   encodeTrackerSchemaPatchPayload,
+  TRACKER_LABEL_REGISTRY_SCHEMA_TYPE,
   TRACKER_PREDICATE_REGISTRY_SCHEMA_TYPE,
 } from '@nimbalyst/runtime/plugins/TrackerPlugin/models/schemaSyncPayload';
-import type { TrackerDataModel } from '@nimbalyst/tracker-schema';
+import { globalRegistry, type TrackerDataModel } from '@nimbalyst/tracker-schema';
 import { BrowserTrackerSchemaStore, resolveBrowserTrackerSchema } from '../browser/BrowserTrackerSchemaStore';
 
 const seed = {
@@ -130,6 +132,35 @@ describe('the predicate registry (NIM-6653)', () => {
       expect(store.getState().predicates).toEqual([worksAt]);
     } finally {
       unsubscribe();
+      store.dispose();
+    }
+  });
+});
+
+describe('the label registry', () => {
+  it('installs a published registry and keeps it when a later push is unreadable', async () => {
+    const store = new BrowserTrackerSchemaStore({ builtins: [seed] });
+    try {
+      const registry = {
+        labels: [{ id: 'capability', label: 'Capability' }, { id: 'feature', label: 'Feature', broader: ['capability'] }],
+        properties: [],
+        claimProperties: {},
+      };
+      await store.schemaSync.applyRemote({
+        type: TRACKER_LABEL_REGISTRY_SCHEMA_TYPE,
+        model: encodeTrackerLabelRegistryPayload(registry),
+        syncId: 1 as never,
+      });
+      expect(store.getState().labels).toEqual(registry);
+      expect(globalRegistry.resolveLabels({ labels: ['feature'] })).toEqual(['feature', 'capability']);
+
+      await store.schemaSync.applyRemote({
+        type: TRACKER_LABEL_REGISTRY_SCHEMA_TYPE,
+        model: JSON.stringify({ payloadKind: 'trackerLabelRegistry', version: 1, registry: { labels: [{ id: 'x' }] } }),
+        syncId: 2 as never,
+      });
+      expect(store.getState().labels).toEqual(registry);
+    } finally {
       store.dispose();
     }
   });
