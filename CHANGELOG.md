@@ -10,45 +10,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 <!-- New features go here -->
-- Opt into unlimited open projects with a scrollable project rail and cleanup of unused project resources.
-- Sonnet 5.5 for Claude Agent and the Claude API; the Sonnet row now runs Sonnet 5.5 and Sonnet 5 stays selectable.
-- Knowledge extension sets up a team wiki and installs an editable "How we write this wiki" guide that agents follow, with optional vocabulary packs for markets and competitors or for describing the project itself as subsystems, features, requirements, and invariants.
-- Knowledge graph labels: a page can carry several labels, each bringing its own fields and expected statements, and the fields appear on the item as soon as a label is added.
-- Knowledge curator (alpha): agents can sort commits, sessions, and tracker changes with TypeSafe's Jev model to decide what belongs in the knowledge graph, using your own TypeSafe API key or your Cloudflare account through Workers AI.
-- Team wiki from the terminal (alpha): a Claude Code plugin and `nim login` / `nim wiki` commands let an agent read and write a team project's knowledge wiki, with each session's edits listed in the web console.
-- iOS: Live voice conversations are recorded as voice sessions on the connected desktop, including tool calls and their results
-- Crew (alpha, off by default): hire persistent agent teammates such as a PM that work scheduled shifts within token budgets, keep notes and a journal, and flag you when something needs you; extensions can now start and drive their own agent sessions.
 
 ### Changed
 <!-- Changes to existing functionality go here -->
-- iOS: the session detail status bar shows the session's model next to context usage
-- Claude Code sessions that have finished their turn but are still waiting on a background shell or sub-agent show a distinct indicator in the session list and name the task in the transcript
 
 ### Fixed
 <!-- Bug fixes go here -->
-- Agent sessions no longer read and cache large or binary files that other tools write into the workspace (such as browser profiles), which flooded the log and grew memory.
-- File @-mention suggestions now pick up newly created and renamed files without opening Quick Open or reloading the window.
-- iOS: returning to the app after a long background shows a quiet "Reconnecting…" notice instead of the "Sync paused" warning
-- iOS: an open session no longer stays stuck loading after a long background
-- iOS: creating a session no longer shows "Unable to Create Session" when the desktop created it successfully
-- iOS: Live voice reads a session's pending question in its own voice instead of a separate system voice, your spoken answer now reaches the session, and this works for sessions started on the desktop
-- A session that asked a question could occasionally lose its waiting-for-your-response state
-- iOS: the running-sessions Live Activity starts again after an earlier card ends, and unread sessions keep it up for only 10 minutes after they finish
-- Changes to a team tracker type now reach teammates right away instead of after the next reconnect
-- A team project's knowledge relationship verbs are shared with teammates and the web console instead of staying on the machine that defined them
-- Improved load performance for very large Codex sessions
-- A session no longer stays marked as running after its turn ended while a question to you was still open
-- iOS: scrolling up in a long session now reaches the first message instead of stopping partway
-- Clicking the Dock or tray icon now brings back the project window, or opens Project Manager if none remains, instead of doing nothing after the app sat in the background
-- Following external Claude Code sessions keeps importing after the agent changes directory, and no longer re-reads every unchanged session log in the background
-- A question you leave unanswered by sending a new message now shows as skipped, instead of staying answerable, keeping the "Jump to question" button, and marking the session as waiting for you
-- Prevent overlapping file scans from exhausting memory while files change in large projects.
-- Sessions inside a workstream in the session list now keep their "updated" time current instead of showing a stale value such as "Just now".
-- An agent edit that changes many bullets in a long, list-heavy markdown file (such as renumbering labels) no longer freezes the window while its inline diff is built, and a slow diff is no longer rebuilt from disk right after it renders (#1606).
-- A sent prompt no longer stays duplicated at the bottom of the transcript when the agent took more than a few seconds to start the turn (#1620).
 
 ### Removed
 <!-- Removed features go here -->
+
+## [0.79.0] - 2026-09-29
+
+
+### Added
+<!-- New features go here -->
+- Opt-in unlimited open projects with a scrollable project rail and cleanup of unused project resources.
+- Sonnet 5.5 for Claude Agent and the Claude API; the Sonnet row now runs Sonnet 5.5 and Sonnet 5 stays selectable.
+- Crew (alpha, off by default): persistent agent teammates that work scheduled shifts within token budgets and flag you when something needs you.
+- Extensions can start and drive their own agent sessions.
+- Knowledge extension sets up a team wiki with an editable "How we write this wiki" guide and optional market and project-spec vocabulary packs.
+- Knowledge graph labels: a page can carry several labels, each bringing its own fields and expected statements.
+- Ontology inspector in web console Tracker setup shows what a team project tracks and drafts fixes for gaps.
+- Navigable wiki Types map with search, minimap, and per-relationship details.
+- Knowledge curator (alpha): sort commits, sessions, and tracker changes into the knowledge graph with TypeSafe's Jev model or Workers AI.
+- Team wiki from the terminal (alpha): a Claude Code plugin and `nim wiki` commands read and write a team project's knowledge wiki.
+- iOS: Live voice conversations are recorded as voice sessions on the connected desktop, including tool calls.
+
+### Changed
+<!-- Changes to existing functionality go here -->
+- iOS: the session detail status bar shows the session's model.
+- Claude Code sessions waiting on a background shell or sub-agent show a distinct indicator and name the task in the transcript.
+
+### Fixed
+<!-- Bug fixes go here -->
+- Agent sessions no longer read and cache large or binary files written into the workspace, which flooded the log and grew memory.
+- File @-mention suggestions pick up newly created and renamed files without a reload.
+- Overlapping file-tree scans no longer exhaust memory while files change in large projects.
+- Improved load performance for very large Codex sessions.
+- Clicking the Dock or tray icon brings back the project window after the app sat in the background.
+- Following external Claude Code sessions keeps importing after the agent changes directory, and skips unchanged logs.
+- Sessions no longer stay marked as running, or lose their waiting-for-you state, around an open question.
+- A question left unanswered by sending a new message now shows as skipped.
+- Workstream sessions in the session list keep their "updated" time current.
+- Inline diffs no longer freeze the window for agent edits across long, list-heavy markdown files (#1606).
+- A sent prompt no longer stays duplicated below the transcript when the turn is slow to start (#1620).
+- Team tracker type changes reach teammates right away instead of after the next reconnect.
+- A team project's knowledge relationship verbs are shared with teammates and the web console.
+- iOS: returning after a long background shows a quiet "Reconnecting…" notice and no longer leaves an open session stuck loading.
+- iOS: creating a session no longer reports failure when the desktop created it.
+- iOS: Live voice reads a session's pending question in its own voice, relays your answer, and works for desktop-started sessions.
+- iOS: the running-sessions Live Activity restarts after an earlier card ends.
+- iOS: scrolling up in a long session reaches the first message.
 
 ## [0.78.5] - 2026-09-24
 
