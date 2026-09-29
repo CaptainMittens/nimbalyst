@@ -119,6 +119,7 @@ import {
   shouldArmGraceTimerForResult,
   shouldContinueWithTaskResults,
   buildTaskResultContinuationMessage,
+  summarizeBackgroundWait,
   type DrainExitCause,
   type TaskTerminalNotification,
 } from './claudeCode/subagentDrain';
@@ -136,7 +137,8 @@ import {
 import { normalizeStructuredContextUsage } from '../utils/contextUsage';
 import { createTurnState } from './claudeCode/turnState';
 import { buildTurnQuery, prepareTurnAttachments, resolveTurnPaths } from './claudeCode/turnPrologue';
-import { finishTurn, handleTurnError, type TurnEpilogueHost } from './claudeCode/turnEpilogue';
+import { buildTurnCompleteUsage, finishTurn, handleTurnError, type TurnEpilogueHost } from './claudeCode/turnEpilogue';
+import { fromDbBoolean } from '../../../core/dbBoolean';
 import { applyTaskListMutation, sortTaskList, type TaskListItem } from './claudeCode/taskListReconstruct';
 
 
@@ -198,6 +200,9 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
   // turn 2, because adding the section later is the same cache miss.
   private gitContextFrozen = false;
   private frozenGitContext: string | undefined = undefined;
+  // `metadata.sessionDirective`, frozen by BaseAgentProvider.getSessionDirective
+  // and copied here because buildSystemPrompt is synchronous.
+  private frozenSessionDirective: string | undefined = undefined;
 
   private markMessagesAsHidden: boolean = false; // Flag to mark next messages as hidden
   private helperMethod: 'native' | 'custom' = 'native';
@@ -246,6 +251,9 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
   // is still iterating to drain background sub-agents that outlived the turn.
   // See subagentDrain.ts and NIM-1344 / GitHub #732.
   private drainingBackgroundTasks: boolean = false;
+  // Task ids last published as the session's background wait, so unchanged
+  // task_progress chunks do not re-broadcast.
+  private publishedBackgroundWaitKey = '';
   // Why the current streaming loop stopped iterating. Set at each loop-exit point
   // so finalizeBackgroundDrain() can tell a user stop / supersede (no continuation)
   // apart from an unexpected sub-agent death (auto-continue). Reset each turn.
@@ -667,6 +675,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
           getAgentRole: (sid) => this.getAgentRole(sid),
           getWorkflowPreset: (sid) => this.getWorkflowPreset(sid),
           ensureGitContext: (wp) => this.ensureGitContext(wp),
+          ensureSessionDirective: async (sid) => { this.frozenSessionDirective = await this.getSessionDirective(sid); },
           buildSystemPrompt: (dc, teams, meta, preset) => this.buildSystemPrompt(dc, teams, meta, preset),
           emit: (event, payload) => { this.emit(event, payload); },
           withPromptProvenanceMetadata: (dc) => this.withPromptProvenanceMetadata(dc),
@@ -1371,20 +1380,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
               await this.toolHooksService.createTurnEndSnapshots();
             }
 
-            // Prefer result.usage (deduplicated by Anthropic via message.id). The SDK's
-            // modelUsage aggregate over-counts: the agent stream emits each assistant
-            // message 2-3x (one event per content block) and modelUsage sums the dupes,
-            // inflating cumulative input/output. Fall back to the modelUsage sum only when
-            // result.usage is missing. See NIM-689.
-            let totalInputTokens = state.usageData?.input_tokens || 0;
-            let totalOutputTokens = state.usageData?.output_tokens || 0;
-            if (!state.usageData && state.modelUsageData) {
-              for (const modelName of Object.keys(state.modelUsageData)) {
-                const modelStats = state.modelUsageData[modelName];
-                totalInputTokens += modelStats.inputTokens || 0;
-                totalOutputTokens += modelStats.outputTokens || 0;
-              }
-            }
+            const turnUsage = buildTurnCompleteUsage(state);
 
             const lastMessageContextTokens = state.lastAssistantUsage
               ? (state.lastAssistantUsage.input_tokens || 0)
@@ -1402,6 +1398,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
             const willDrainSubagents = shouldDeferTeardownForSubagents(this.hasRunningTasks());
             if (willDrainSubagents) {
               this.drainingBackgroundTasks = true;
+              this.publishBackgroundWait(sessionId);
             }
             // Same ordering constraint for the "settled during the turn" trigger:
             // willResumeAfterCompletion() reads it while the consumer handles the
@@ -1416,15 +1413,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
             yield {
               type: 'complete',
               isComplete: true,
-              ...(state.usageData || state.modelUsageData ? {
-                usage: {
-                  input_tokens: totalInputTokens,
-                  output_tokens: totalOutputTokens,
-                  cache_read_input_tokens: state.usageData?.cache_read_input_tokens || 0,
-                  cache_creation_input_tokens: state.usageData?.cache_creation_input_tokens || 0,
-                  total_tokens: totalInputTokens + totalOutputTokens
-                }
-              } : {}),
+              ...(turnUsage ? { usage: turnUsage } : {}),
               ...(state.modelUsageData ? { modelUsage: state.modelUsageData } : {}),
               ...(lastMessageContextTokens !== undefined ? { contextFillTokens: lastMessageContextTokens } : {}),
               ...(state.structuredContextUsage ? { contextReport: state.structuredContextUsage } : {}),
@@ -1649,6 +1638,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       // drainingBackgroundTasks, so reset those only afterward. NIM-1344 / #732.
       this.finalizeBackgroundDrain(sessionId, queryForDrainCleanup);
       this.drainingBackgroundTasks = false;
+      this.publishBackgroundWait(sessionId);
       this.drainExitCause = 'resolved';
       this.drainTerminalNotifications = [];
       this.drainGraceExpired = false;
@@ -1773,7 +1763,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       const { AISessionsRepository } = await import('../../../storage/repositories/AISessionsRepository');
       const session = await AISessionsRepository.get(sessionId);
       if (!session) return;
-      if ((session as any).hasBeenNamed === true) return;
+      // Raw store row: SQLite returns the flag as 0/1.
+      if (fromDbBoolean(session.hasBeenNamed)) return;
 
       // Default phase fallback — only if the metadata tool or a prior turn has
       // not set a phase. Tags remain owned by the required metadata-tool call;
@@ -2365,7 +2356,25 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       notifications: this.drainTerminalNotifications,
       log: (message) => console.log(message),
     });
-    if (changed) this.emitTaskUpdate(sessionId).catch(() => {});
+    if (changed) {
+      this.emitTaskUpdate(sessionId).catch(() => {});
+      this.publishBackgroundWait(sessionId);
+    }
+  }
+
+  /**
+   * Tell the renderer which background tasks the session is waiting on after the
+   * lead's turn ended (an empty list clears it). Rides the metadata-updated
+   * forwarder to `sessions:session-updated`; not persisted, since the tasks die
+   * with the process.
+   */
+  private publishBackgroundWait(sessionId: string | undefined): void {
+    if (!sessionId) return;
+    const backgroundTasks = summarizeBackgroundWait(this.drainingBackgroundTasks, this.activeTasks.values());
+    const key = backgroundTasks.map((t) => t.taskId).join(',');
+    if (key === this.publishedBackgroundWaitKey) return;
+    this.publishedBackgroundWaitKey = key;
+    this.emit('session:metadata-updated', { sessionId, metadata: { backgroundTasks } });
   }
 
   private processTeammateToolResult(
@@ -3406,6 +3415,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       return buildMetaAgentSystemPrompt('claude', workflowPreset, {
         provider: 'claude-code',
         model: this.config.model ?? undefined,
+        sessionDirective: this.frozenSessionDirective,
       });
     }
 
@@ -3452,6 +3462,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       hasOutOfBandNaming: alreadyNamedOutOfBand,
       worktreePath,
       gitContext: this.frozenGitContext,
+      sessionDirective: this.frozenSessionDirective,
       isVoiceMode,
       voiceModeCodingAgentPrompt,
       enableAgentTeams,
