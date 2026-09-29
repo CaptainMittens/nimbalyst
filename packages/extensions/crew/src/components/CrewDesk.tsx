@@ -8,6 +8,7 @@ import type { CrewChapterSummary, CrewMemberDetail, CrewMemberSnapshot } from '.
 import { CrewAvatar, CrewError, CrewModal, CrewToggle } from './CrewBits';
 import { useCrew, useCrewAction, useCrewQuery } from './CrewContext';
 import { CrewDeskPanel } from './CrewDeskPanel';
+import { CrewPaneResizer, useCrewPanes } from './CrewPanes';
 import { deriveShiftAction, describeTrigger, splitChapters, STATUS_LABEL } from './crewDeskModel';
 import { formatDateRange, formatDay, formatTokens, formatWhen } from './crewFormat';
 
@@ -15,13 +16,19 @@ export function CrewDesk({ member }: { member: CrewMemberSnapshot }) {
   const { client } = useCrew();
   const slug = member.definition.slug;
   const detail = useCrewQuery(() => client.call('member', { slug }), [slug]);
+  const { deskPanelCollapsed } = useCrewPanes();
 
   return (
     <div className="crew-desk" data-member-slug={slug} data-testid="crew-desk">
       <CrewDeskHeader member={member} />
       <div className="crew-desk-body">
         <CrewChapterTimeline member={member} detail={detail.data ?? null} loadError={detail.error} />
-        <CrewDeskPanel member={member} detail={detail.data ?? null} />
+        {!deskPanelCollapsed && (
+          <>
+            <CrewPaneResizer side="right" />
+            <CrewDeskPanel member={member} detail={detail.data ?? null} />
+          </>
+        )}
       </div>
     </div>
   );

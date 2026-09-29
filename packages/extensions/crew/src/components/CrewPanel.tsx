@@ -10,6 +10,7 @@ import { CrewDesk } from './CrewDesk';
 import { nextSeenState, type CrewSeenState } from './crewDeskModel';
 import { CrewFeed } from './CrewFeed';
 import { CrewHireDialog } from './CrewHireDialog';
+import { CrewPaneResizer, CrewPanesContext, useCrewPaneState } from './CrewPanes';
 import { CrewRoster } from './CrewRoster';
 
 export function CrewPanel({ host }: PanelHostProps) {
@@ -21,10 +22,11 @@ export function CrewPanel({ host }: PanelHostProps) {
 }
 
 function CrewLayout() {
-  const { rosterState, roster, selectedSlug, hireOpen, setHireOpen, client, refresh } = useCrew();
+  const { host, rosterState, roster, selectedSlug, hireOpen, setHireOpen, client, refresh } = useCrew();
   const members = roster?.members ?? [];
   const selected = members.find((m) => m.definition.slug === selectedSlug) ?? null;
   const isFirstRun = rosterState.status === 'ready' && members.length === 0;
+  const panes = useCrewPaneState(host, selected !== null);
 
   // Opening a desk or the feed marks its flags seen, which is what brings the
   // unread counts and the gutter badge down. Keyed on what is actually shown,
@@ -43,20 +45,27 @@ function CrewLayout() {
   }, [roster, members.length, view, unread, client, refresh]);
 
   return (
-    <div className="crew-panel" data-testid="crew-panel">
-      <CrewRoster />
-      <main className="crew-main">
-        {isFirstRun ? (
-          <CrewWelcome onHire={() => setHireOpen(true)} />
-        ) : selected ? (
-          // A different member is a different desk, never a re-used one.
-          <CrewDesk key={selected.definition.slug} member={selected} />
-        ) : (
-          <CrewFeed />
+    <CrewPanesContext.Provider value={panes}>
+      <div className="crew-panel" data-testid="crew-panel" style={panes.style}>
+        {!panes.layout.rosterCollapsed && (
+          <>
+            <CrewRoster />
+            <CrewPaneResizer side="left" />
+          </>
         )}
-      </main>
-      {hireOpen && <CrewHireDialog onClose={() => setHireOpen(false)} />}
-    </div>
+        <main className="crew-main">
+          {isFirstRun ? (
+            <CrewWelcome onHire={() => setHireOpen(true)} />
+          ) : selected ? (
+            // A different member is a different desk, never a re-used one.
+            <CrewDesk key={selected.definition.slug} member={selected} />
+          ) : (
+            <CrewFeed />
+          )}
+        </main>
+        {hireOpen && <CrewHireDialog onClose={() => setHireOpen(false)} />}
+      </div>
+    </CrewPanesContext.Provider>
   );
 }
 
