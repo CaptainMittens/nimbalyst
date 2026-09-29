@@ -1,19 +1,19 @@
 /**
- * Hire a crew member: from a starter template, by cloning someone already on
- * the crew, or by describing the job and editing the drafted definition.
+ * Hire a crew member from a starter template or by cloning someone already on
+ * the crew. Designing a new member with an agent happens in an ordinary
+ * session via `/crew:hire`, where the agent can ask questions and fix its own
+ * validation errors.
  */
 import { useMemo, useState } from 'react';
-import { MaterialSymbol } from '@nimbalyst/extension-sdk';
 import type { CrewHireRequest, CrewMemberDraft, CrewMemberSnapshot, CrewTemplate } from '../shared/types';
 import { CrewAvatar, CrewModal } from './CrewBits';
 import { useCrew, useCrewAction, useCrewQuery } from './CrewContext';
-import { errorMessage, formatScheduleTiming, formatTokens, freeSlug, slugifyCrewName } from './crewFormat';
+import { formatScheduleTiming, formatTokens, freeSlug, slugifyCrewName } from './crewFormat';
 
-type Source = 'template' | 'clone' | 'describe';
+type Source = 'template' | 'clone';
 type Picked =
   | { source: 'template'; template: CrewTemplate }
   | { source: 'clone'; member: CrewMemberSnapshot }
-  | { source: 'describe'; draft: CrewMemberDraft }
   | null;
 
 function rhythmOf(draft: Pick<CrewMemberDraft, 'schedule'>): string {
@@ -30,9 +30,7 @@ export function CrewHireDialog({ onClose }: { onClose: () => void }) {
   const { busy, error, run } = useCrewAction();
   const [source, setSource] = useState<Source>('template');
   const [picked, setPicked] = useState<Picked>(null);
-  const [form, setForm] = useState({ name: '', role: '', personality: '', directive: '' });
-  const [description, setDescription] = useState('');
-  const [drafting, setDrafting] = useState<{ status: 'idle' | 'running' } | { status: 'error'; error: string }>({ status: 'idle' });
+  const [form, setForm] = useState({ name: '', role: '', personality: '' });
 
   const takenSlugs = useMemo(() => new Set(members.map((m) => m.definition.slug)), [members]);
   const slug = freeSlug(slugifyCrewName(form.name), takenSlugs);
@@ -41,44 +39,25 @@ export function CrewHireDialog({ onClose }: { onClose: () => void }) {
   const choose = (next: Picked) => {
     setPicked(next);
     if (!next) return;
-    const def = next.source === 'template' ? next.template.definition : next.source === 'clone' ? next.member.definition : next.draft;
+    const def = next.source === 'template' ? next.template.definition : next.member.definition;
     setForm({
-      // A clone needs its own name; a template or draft suggests one.
-      name: next.source === 'clone' ? '' : next.source === 'template' ? next.template.name : def.name,
+      // A clone needs its own name; a template suggests one.
+      name: next.source === 'clone' ? '' : next.template.name,
       role: def.role,
       personality: def.personality,
-      directive: def.directive,
     });
   };
 
   const switchSource = (next: Source) => {
     setSource(next);
     setPicked(null);
-    setForm({ name: '', role: '', personality: '', directive: '' });
-  };
-
-  const draftFromDescription = async () => {
-    setDrafting({ status: 'running' });
-    try {
-      const result = await client.call('draftFromDescription', { description: description.trim() });
-      if (result.ok) {
-        choose({ source: 'describe', draft: result.draft });
-        setDrafting({ status: 'idle' });
-      } else {
-        setDrafting({ status: 'error', error: result.error });
-      }
-    } catch (err) {
-      setDrafting({ status: 'error', error: errorMessage(err) });
-    }
+    setForm({ name: '', role: '', personality: '' });
   };
 
   const buildRequest = (): CrewHireRequest | null => {
     const overrides = { name: form.name.trim(), role: form.role.trim(), personality: form.personality.trim() };
     if (picked?.source === 'template') return { source: 'template', templateId: picked.template.id, slug, overrides };
     if (picked?.source === 'clone') return { source: 'clone', sourceSlug: picked.member.definition.slug, slug, overrides };
-    if (picked?.source === 'describe') {
-      return { source: 'draft', definition: { ...picked.draft, ...overrides, directive: form.directive, slug } };
-    }
     return null;
   };
 
@@ -102,7 +81,7 @@ export function CrewHireDialog({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       headerExtra={(
         <div className="crew-segmented" role="tablist">
-          {([['template', 'Templates'], ['clone', 'Clone'], ['describe', 'Describe the job']] as const).map(([id, label]) => (
+          {([['template', 'Templates'], ['clone', 'Clone']] as const).map(([id, label]) => (
             <button
               key={id}
               type="button"
@@ -141,10 +120,7 @@ export function CrewHireDialog({ onClose }: { onClose: () => void }) {
               ? <div className="crew-empty-note" role="alert">Templates could not be loaded. <span className="crew-selectable crew-faint">{templates.error}</span></div>
               : <div className="crew-empty-note" role="status">Loading templates...</div>
           ) : templates.data.length === 0 ? (
-            <div className="crew-empty-note">
-              No templates are available.
-              <button type="button" className="crew-link-button" onClick={() => switchSource('describe')}>Describe the job instead</button>
-            </div>
+            <div className="crew-empty-note">No templates are available.</div>
           ) : (
             <div className="crew-hire-gallery" role="listbox" aria-label="Templates">
               {templates.data.map((template) => (
@@ -176,39 +152,6 @@ export function CrewHireDialog({ onClose }: { onClose: () => void }) {
           </div>
         )}
 
-        {source === 'describe' && picked === null && (
-          <div className="crew-hire-describe">
-            <label className="crew-field">
-              What should this crew member do?
-              <textarea
-                className="crew-input crew-textarea"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                disabled={drafting.status === 'running'}
-                placeholder="Every evening, read what merged today and flag anything that duplicates existing code or grows a file past 1,500 lines."
-                autoFocus
-              />
-            </label>
-            <div className="crew-row">
-              <button
-                type="button"
-                className="crew-btn crew-btn-primary"
-                disabled={description.trim().length === 0 || drafting.status === 'running'}
-                onClick={() => void draftFromDescription()}
-              >
-                <MaterialSymbol icon="edit_note" size={16} />
-                {drafting.status === 'running' ? 'Drafting...' : 'Draft the definition'}
-              </button>
-              <span className="crew-faint crew-small">
-                {drafting.status === 'running'
-                  ? 'An agent is writing a draft. This can take a few minutes.'
-                  : 'An agent drafts the definition; you review and edit it before hiring.'}
-              </span>
-            </div>
-            {drafting.status === 'error' && <p className="crew-error crew-selectable" role="alert">{drafting.error}</p>}
-          </div>
-        )}
-
         {picked !== null && (
           <div className="crew-hire-form">
             <div className="crew-hire-form-grid">
@@ -225,22 +168,18 @@ export function CrewHireDialog({ onClose }: { onClose: () => void }) {
               Personality
               <textarea className="crew-input crew-textarea-small" value={form.personality} onChange={(e) => setForm({ ...form, personality: e.target.value })} placeholder="Calm, dry, speaks in short paragraphs." />
             </label>
-            {picked.source === 'describe' && (
-              <label className="crew-field">
-                The job
-                <textarea className="crew-input crew-textarea crew-mono" value={form.directive} onChange={(e) => setForm({ ...form, directive: e.target.value })} />
-              </label>
-            )}
             <p className="crew-faint crew-small">
               {slug ? <>Saved as <span className="crew-mono">nimbalyst-local/crew/{slug}.md</span>. </> : null}
-              {picked.source === 'describe'
-                ? `Drafted with ${rhythmOf(picked.draft).toLowerCase()} runs. Model, schedule and limits can be changed in the definition file after hiring.`
-                : 'Model, schedule and limits come from the source and can be changed in the definition file after hiring.'}
+              Model, schedule and limits come from the source and can be changed in the definition file after hiring.
             </p>
           </div>
         )}
 
         {error && <div className="crew-error-box crew-selectable" role="alert">{error}</div>}
+
+        <p className="crew-hire-command-hint crew-faint crew-small">
+          To design a new member from scratch, run <span className="crew-mono">/crew:hire</span> in any agent session and describe the job.
+        </p>
       </div>
     </CrewModal>
   );

@@ -651,9 +651,9 @@ select.crew-input { height: 28px; padding: 0 6px; }
   overflow: hidden;
 }
 .crew-hire-card-meta { display: flex; flex-wrap: wrap; gap: 2px 8px; margin-top: auto; font-size: 11px; color: var(--nim-text-faint); }
-.crew-hire-describe { display: flex; flex-direction: column; gap: 10px; }
 .crew-hire-form { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: 12px; border: 1px solid var(--nim-border); background: var(--nim-bg-secondary); }
 .crew-hire-form > p { margin: 0; }
+.crew-hire-command-hint { margin: 0; }
 .crew-hire-form-grid { display: grid; grid-template-columns: 1fr; gap: 12px; }
 
 /* ─── Container queries ───────────────────────────────────────────────── */

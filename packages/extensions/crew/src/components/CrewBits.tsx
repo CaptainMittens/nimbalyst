@@ -117,14 +117,19 @@ export function CrewModal({
   headerExtra?: ReactNode;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  // Callers pass an inline onClose, and the roster poll re-renders them every
+  // few seconds. Read it through a ref so the mount-only focus below never
+  // re-runs and steals focus from a field the user is typing in.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     window.addEventListener('keydown', onKey);
-    dialogRef.current?.focus();
+    if (!dialogRef.current?.contains(document.activeElement)) dialogRef.current?.focus();
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="crew-modal-overlay" onMouseDown={onClose}>

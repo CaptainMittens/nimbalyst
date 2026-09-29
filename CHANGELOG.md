@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- Changes to existing functionality go here -->
+- Crew: design a new member with `/crew:hire` in any agent session, which asks about its schedule and notifications before hiring. It replaces the Hire dialog's "Describe the job" tab.
 
 ### Fixed
 <!-- Bug fixes go here -->
+- Typing in a Crew dialog no longer loses focus every few seconds.
 
 ### Removed
 <!-- Removed features go here -->

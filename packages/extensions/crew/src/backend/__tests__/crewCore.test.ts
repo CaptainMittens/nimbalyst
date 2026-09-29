@@ -780,4 +780,22 @@ describe('crew tools', () => {
     await replace(notesRevision('User correction B'));
     expect(await readNotes(workspace, 'ada')).toBe('Agent rewrite');
   });
+
+  it('hire works from any session, names the bad field, and never overwrites a member', async () => {
+    const workspace = makeWorkspace({ 'ada.md': ADA });
+    const runtime = runtimeAt(workspace, new FakeSessions({ now: 0 }), { now: utc('2026-09-28T16:00:00Z') });
+    const tools = createCrewToolHandlers(runtime, new CrewService(runtime));
+    const plain: ToolCallContext = { sessionId: 'user', workspacePath: workspace, caller: 'agent', sessionOwner: null };
+    const file = (weekly: string) => `\`\`\`markdown\n---\ncrew:\n  name: Ada\n  role: Plan Steward\n  schedule:\n    - weekly: ${weekly}\n      prompt: Re-rank plans.\n---\nKeep the plan ledger.\n\`\`\``;
+
+    // The shape a one-shot draft got wrong: the agent must be told which field to fix.
+    await expect(tools.hire({ definition: file('"Fri 16:00"') }, plain)).rejects.toThrow('crew.schedule[0].weekly must be');
+    await expect(tools.hire({ definition: file('{ days: [friday], time: "16:00" }'), slug: 'ada' }, plain)).rejects.toThrow('already exists');
+
+    expect(await tools.hire({ definition: file('{ days: [friday], time: "16:00" }') }, plain))
+      .toEqual({ slug: 'ada-2', name: 'Ada', role: 'Plan Steward', path: 'nimbalyst-local/crew/ada-2.md', paused: false });
+    expect(fs.readFileSync(path.join(workspace, 'nimbalyst-local', 'crew', 'ada.md'), 'utf8')).toBe(ADA);
+    const hired = (await loadCrewMembers(workspace)).find((member) => member.slug === 'ada-2');
+    expect(hired?.definition.directive).toBe('Keep the plan ledger.');
+  });
 });

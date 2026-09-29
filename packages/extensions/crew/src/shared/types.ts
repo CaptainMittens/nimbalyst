@@ -260,7 +260,6 @@ export const CREW_PANEL_TOOLS = {
   member: 'panel_member',
   templates: 'panel_templates',
   hire: 'panel_hire',
-  draftFromDescription: 'panel_draft_from_description',
   updateMember: 'panel_update_member',
   deleteMember: 'panel_delete_member',
   setPaused: 'panel_set_paused',
@@ -298,20 +297,6 @@ export type CrewHireRequest =
   | { source: 'clone'; sourceSlug: string; slug: string; overrides?: Partial<Omit<CrewMemberDraft, 'slug'>> }
   | { source: 'draft'; definition: CrewMemberDraft };
 export type CrewHireResponse = CrewMemberSnapshot;
-
-/**
- * "Describe the job": a short session drafts a definition for the user to
- * edit before hiring. Slow (one agent turn, up to a few minutes). The draft is
- * not saved; pass it to `hire` with `source: 'draft'`.
- */
-export interface CrewDraftFromDescriptionRequest {
-  description: string;
-  provider?: string;
-  model?: string;
-}
-export type CrewDraftFromDescriptionResponse =
-  | { ok: true; draft: CrewMemberDraft; sessionId: string }
-  | { ok: false; error: string; sessionId?: string };
 
 export interface CrewUpdateMemberRequest extends CrewMemberRequest {
   /** Top-level patch; nested objects replace their previous value. Slugs are immutable. */
@@ -412,7 +397,6 @@ export interface CrewPanelToolMap {
   member: [CrewMemberRequest, CrewMemberResponse];
   templates: [CrewTemplatesRequest, CrewTemplatesResponse];
   hire: [CrewHireRequest, CrewHireResponse];
-  draftFromDescription: [CrewDraftFromDescriptionRequest, CrewDraftFromDescriptionResponse];
   updateMember: [CrewUpdateMemberRequest, CrewUpdateMemberResponse];
   deleteMember: [CrewDeleteMemberRequest, CrewDeleteMemberResponse];
   setPaused: [CrewSetPausedRequest, CrewSetPausedResponse];
@@ -438,4 +422,6 @@ export const CREW_AGENT_TOOLS = {
   scheduleGet: 'schedule_get',
   scheduleSet: 'schedule_set',
   wakeMe: 'wake_me',
+  /** The only agent tool open to every session: `/crew:hire` writes a new member with it. */
+  hire: 'hire',
 } as const;
