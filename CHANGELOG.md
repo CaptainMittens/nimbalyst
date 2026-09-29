@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prevent overlapping file scans from exhausting memory while files change in large projects.
 - Sessions inside a workstream in the session list now keep their "updated" time current instead of showing a stale value such as "Just now".
 - An agent edit that changes many bullets in a long, list-heavy markdown file (such as renumbering labels) no longer freezes the window while its inline diff is built, and a slow diff is no longer rebuilt from disk right after it renders (#1606).
+- A sent prompt no longer stays duplicated at the bottom of the transcript when the agent took more than a few seconds to start the turn (#1620).
 
 ### Removed
 <!-- Removed features go here -->
