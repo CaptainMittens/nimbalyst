@@ -23,6 +23,7 @@ import {
   decodeTrackerSchemaPayload,
   encodeTrackerSchemaPatchPayload,
   encodeTrackerSchemaModelPayload,
+  TRACKER_LABEL_REGISTRY_SCHEMA_TYPE,
   TRACKER_PREDICATE_REGISTRY_SCHEMA_TYPE,
   resolveTrackerTypeInheritance,
   type TrackerDataModel,
@@ -51,7 +52,7 @@ import {
   TrackerSchemaChangeBlockedError,
   type TrackerSchemaChangeDecision,
 } from './tracker/trackerSchemaChangeGuard';
-import type { PredicateDefinition, TrackerSchemaActorRole } from '@nimbalyst/tracker-schema';
+import type { LabelRegistry, PredicateDefinition, TrackerSchemaActorRole } from '@nimbalyst/tracker-schema';
 import {
   installTrackerSchemaScopeProvider,
   runWithTrackerSchemaWorkspace,
@@ -81,6 +82,9 @@ import {
 } from './tracker/trackerSchemaProjection';
 import { readWorkspacePredicateRegistry } from './tracker/trackerPredicateRegistryFile';
 import { applyRemotePredicateRegistry } from './tracker/trackerPredicateRegistrySync';
+import { readWorkspaceLabelRegistry } from './tracker/trackerLabelRegistryFile';
+import { readTrackerWorkspaceVocabulary } from './tracker/trackerWorkspaceVocabulary';
+import { applyRemoteLabelRegistry } from './tracker/trackerLabelRegistrySync';
 import { requestTrackerSchemaFlush } from './tracker/trackerSchemaFlush';
 import {
   reloadWorkspaceSchemaFile,
@@ -265,6 +269,8 @@ function loadWorkspaceSchemas(workspacePath: string): void {
   // which keeps the last valid in-memory registry while a file is malformed.
   const localPredicates = readWorkspacePredicateRegistry(workspacePath);
   if (localPredicates) globalRegistry.setPredicates(localPredicates);
+  const localLabels = readWorkspaceLabelRegistry(workspacePath);
+  if (localLabels) globalRegistry.setLabels(localLabels);
 
   const trackersDir = path.join(workspacePath, '.nimbalyst', 'trackers');
 
@@ -480,6 +486,7 @@ function watchSchemaDirectory(workspacePath: string): void {
     reloadWorkspaceSchema,
     handleSchemaFileDeleted,
     reloadWorkspacePredicateRegistry,
+    reloadWorkspaceLabelRegistry,
   );
 }
 
@@ -495,6 +502,14 @@ export async function reloadWorkspacePredicateRegistry(workspacePath: string): P
   } else {
     globalRegistry.setWorkspacePredicateLayer(workspacePath, predicates);
   }
+}
+
+/** Reload a hand-edited labels.yaml; a parse failure keeps the registry in force. */
+export async function reloadWorkspaceLabelRegistry(workspacePath: string): Promise<void> {
+  const registry = readWorkspaceLabelRegistry(workspacePath);
+  if (registry === null) return;
+  requestTrackerSchemaFlush(workspacePath);
+  applyWorkspaceLabelRegistryInProcess(workspacePath, registry);
 }
 
 function stopWatcher(): void {
@@ -593,6 +608,19 @@ function registerIpcHandlers(): void {
     return readSchemasForWorkspace(workspacePathForEvent(event), () => {
       const model = globalRegistry.get(type);
       return model ? serializeModel(model) : null;
+    });
+  });
+
+  // The label and predicate registries of one workspace, so renderer surfaces
+  // can resolve an item's effective properties. Re-read after every
+  // `tracker-schema:changed`.
+  safeHandle('tracker-schema:get-vocabulary', async (_event, workspacePath: string) => {
+    return readTrackerWorkspaceVocabulary(workspacePath, {
+      registry: globalRegistry,
+      activeWorkspacePath: currentWorkspacePath,
+      runScoped: runWithTrackerSchemaWorkspace,
+      readLabels: readWorkspaceLabelRegistry,
+      readPredicates: readWorkspacePredicateRegistry,
     });
   });
 
@@ -1189,12 +1217,12 @@ function resolveInboundSchemaPayload(
     };
   }
 
-  if (decoded.kind === 'predicates') {
+  if (decoded.kind === 'predicates' || decoded.kind === 'labels') {
     // Routed before this function is reached (see
-    // `applyRemoteWorkspacePredicateRegistry`). Arriving here means a registry
+    // `applyRemoteWorkspaceTrackerSchemaDef`). Arriving here means a registry
     // was published under a tracker type's schema row, which is a sender bug;
     // dropping it leaves that type's definition alone.
-    console.warn(`[TrackerSchemaService] predicate registry published as tracker type '${type}'; dropped`);
+    console.warn(`[TrackerSchemaService] ${decoded.kind} registry published as tracker type '${type}'; dropped`);
     return null;
   }
 
@@ -1261,6 +1289,9 @@ export async function applyRemoteWorkspaceTrackerSchemaDef(
 
   if (def.type === TRACKER_PREDICATE_REGISTRY_SCHEMA_TYPE) {
     return applyRemoteWorkspacePredicateRegistry(workspacePath, def);
+  }
+  if (def.type === TRACKER_LABEL_REGISTRY_SCHEMA_TYPE) {
+    return applyRemoteLabelRegistry(workspacePath, def, { onApplied: applyWorkspaceLabelRegistryInProcess });
   }
 
   // A personal schema on disk is the single-axis authority for this workspace.
@@ -1345,6 +1376,16 @@ export function applyWorkspacePredicateRegistryInProcess(
     notifySchemaChanged();
   } else {
     globalRegistry.setWorkspacePredicateLayer(workspacePath, predicates);
+  }
+}
+
+/** Install a label registry for one workspace without leaking it into another open project. */
+export function applyWorkspaceLabelRegistryInProcess(workspacePath: string, registry: LabelRegistry): void {
+  if (currentWorkspacePath === null || currentWorkspacePath === workspacePath) {
+    globalRegistry.setLabels(registry);
+    notifySchemaChanged();
+  } else {
+    globalRegistry.setWorkspaceLabelLayer(workspacePath, registry);
   }
 }
 

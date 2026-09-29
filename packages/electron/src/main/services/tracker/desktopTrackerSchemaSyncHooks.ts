@@ -1,6 +1,6 @@
 /**
  * The schema-lane hooks a desktop tracker engine runs with: `tracker_type_defs`
- * for type definitions and the predicate registry lane, installed into this
+ * for type definitions and the predicate and label registry lanes, installed into this
  * process's registry. Shared by the production engine and the scripted-IPC test
  * engine so the two cannot drift.
  */
@@ -8,6 +8,7 @@
 import type { TrackerSchemaSyncHooks } from '@nimbalyst/tracker-engine';
 import {
   applyRemoteWorkspaceTrackerSchemaDef,
+  applyWorkspaceLabelRegistryInProcess,
   applyWorkspacePredicateRegistryInProcess,
   encodeTrackerSchemaDefForPush,
 } from '../TrackerSchemaService';
@@ -22,5 +23,5 @@ export function createDesktopTrackerSchemaSyncHooks(workspacePath: string): Trac
       (await listUnsyncedTrackerSchemaDefs(workspacePath)).map(encodeTrackerSchemaDefForPush),
     applyRemote: (def) => applyRemoteWorkspaceTrackerSchemaDef(workspacePath, def),
     markRejected: (type) => markTrackerSchemaDefRejected(workspacePath, type),
-  }, { onApplied: applyWorkspacePredicateRegistryInProcess });
+  }, { onApplied: applyWorkspacePredicateRegistryInProcess }, { onApplied: applyWorkspaceLabelRegistryInProcess });
 }

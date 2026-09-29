@@ -39,11 +39,32 @@ If a statement fails any test, leave it out. If an existing page fails, supersed
 - One idea per statement. Facts about the domain go in as statements with a subject, a relationship, and a value, each with a date and a source, not buried in prose.
 - State certainty. Mark what is decided, what is observed, and what is inferred. Do not present an inference as a decision.
 - Prefer updating to appending. When something changes, supersede the old statement so its history stays visible.
+- Label every page with each label that fits, and fill in what those labels ask for. A page can be a feature and a surface at once.
+- Facts that change over time are dated statements with a source, never prose. A newer value is a new statement; the old one stays as history.
 
 ## For agents
 
 - Read this page and the wiki home before writing.
 - Before adding a page, search for an existing one. Extend it or link to it.
 - Record a decision when a person makes it, in their words, attributed to them. Do not invent decisions or reasons.
-- When the wiki's structure does not fit what you need to record (a missing category or relationship), propose a change instead of forcing the content into the wrong place.
+- When the wiki's structure does not fit what you need to record (a missing label, property, or relationship), propose a change instead of forcing the content into the wrong place.
 - When you are unsure whether something passes the test, leave it out and ask.
+<!-- pack:market -->
+
+## Markets, makers and competitors
+
+- Every product sits in at least one market and names its maker. If the maker is unknown or an individual, say so on the page rather than inventing one.
+- Markets form a tree under the Markets area. Put a product in the most specific market that fits; mark the main one as primary.
+- Competition is a statement per market, not a folder. "We compete with Product A in note-taking, threat high" is one statement; the same product in a second market is a second statement, with its own threat.
+- Company facts (revenue, funding, headcount) go on the organization; product facts (pricing, licence, platforms, users, lifecycle) go on the product. Each has an as-of date and a source. A fact older than 90 days is stale; research a newer one before relying on it.
+<!-- /pack:market -->
+<!-- pack:spec -->
+
+## The spec
+
+- The spec is the part of the wiki someone would need to rebuild the project: subsystems, features, surfaces, requirements, invariants, data stores, integrations, and the wire protocols the project's own parts speak.
+- Every spec page points at its sources: the paths that implement it (with the commit they were checked against), the decisions that govern it, and the sessions where it was worked out. A spec page with no source is a guess; mark it as one.
+- Write the why and the rules, not the code. An invariant names the rule, the incident or decision behind it, and what enforces it. A requirement is one sentence a reviewer can check.
+- When the code moves, re-point the implementation statement rather than editing the prose. When a rule is knowingly broken, record that it is violated and link the bug.
+- Spec pages are not work items. Plans and tasks stay in trackers; the spec page links the decision they produced.
+<!-- /pack:spec -->
