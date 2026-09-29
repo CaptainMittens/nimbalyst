@@ -213,7 +213,9 @@ export async function applyRemoteLabelRegistry(
     }
   }
 
-  store.set(workspacePath, { ...state, syncId: def.syncId, baseline: remoteCanonical });
+  // Re-read: a push offered during the write above recorded `pushed`, and the
+  // snapshot taken before it would erase that and misread our own ack.
+  store.set(workspacePath, { ...store.get(workspacePath), syncId: def.syncId, baseline: remoteCanonical });
   options.onApplied?.(workspacePath, merged);
 
   if (keptLocal.length > 0) {
