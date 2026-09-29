@@ -94,6 +94,8 @@ import {
   resolveImmediateToolDecision as resolveImmediateToolDecisionHelper,
 } from './claudeCode/immediateToolDecision';
 import {
+  authorizeCompoundBashCommand,
+  createCompoundPartPreApprovalCheck,
   handleToolPermissionFallback as handleToolPermissionFallbackHelper,
   handleToolPermissionWithService as handleToolPermissionWithServiceHelper,
   type ToolPermissionOptions,
@@ -450,7 +452,6 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       logAgentMessage: this.logAgentMessage.bind(this),
       logSecurity: this.logSecurity.bind(this),
       trustChecker: BaseAgentProvider.trustChecker || undefined,
-      patternChecker: ClaudeCodeDeps.claudeSettingsPatternChecker || undefined,
       patternSaver: ClaudeCodeDeps.claudeSettingsPatternSaver || undefined,
       getCurrentMode: () => this.currentMode,
       setCurrentMode: (mode) => { this.currentMode = mode; },
@@ -3206,6 +3207,24 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
 
     let canUseToolCallCount = 0;
 
+    const promptForTool = (
+      toolName: string,
+      input: any,
+      options: ToolPermissionOptions,
+      warnings?: string[]
+    ) => (this.permissionService && sessionId && workspacePath)
+      ? this.handleToolPermissionWithService(
+          toolName,
+          input,
+          options,
+          sessionId,
+          workspacePath,
+          permissionsPath,
+          teammateName,
+          warnings
+        )
+      : this.handleToolPermissionFallback(toolName, input, options, sessionId, workspacePath, warnings);
+
     return async (
       toolName: string,
       input: any,
@@ -3225,20 +3244,28 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
           sessionId,
           pathForTrust
         );
+        // In Auto mode the SDK classifier escalated this call, so the user
+        // decides on the command as a whole rather than part by part.
+        const compoundDecision = !immediateDecision && toolName === 'Bash' && this.currentMode !== 'auto'
+          ? await authorizeCompoundBashCommand(
+              {
+                isPartPreApproved: createCompoundPartPreApprovalCheck(
+                  () => [this.permissions.sessionApprovedPatterns, this.permissionService?.getSessionApprovedPatterns()],
+                  ClaudeCodeDeps.claudeSettingsPatternChecker ?? undefined,
+                  workspacePath
+                ),
+                authorizePart: (partInput, warnings) => promptForTool(toolName, partInput, options, warnings),
+                logSecurity: (message, data) => this.logSecurity(message, data),
+              },
+              input
+            )
+          : null;
         if (immediateDecision) {
           result = immediateDecision;
-        } else if (this.permissionService && sessionId && workspacePath) {
-          result = await this.handleToolPermissionWithService(
-            toolName,
-            input,
-            options,
-            sessionId,
-            workspacePath,
-            permissionsPath,
-            teammateName
-          );
+        } else if (compoundDecision) {
+          result = compoundDecision;
         } else {
-          result = await this.handleToolPermissionFallback(toolName, input, options, sessionId, workspacePath);
+          result = await promptForTool(toolName, input, options);
         }
       } catch (error) {
         console.error(`[canUseTool] #${callNum} EXCEPTION tool="${toolName}" after ${Date.now() - callStart}ms:`, error);
@@ -3298,7 +3325,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     sessionId: string,
     workspacePath: string,
     permissionsPath: string | undefined,
-    teammateName: string | undefined
+    teammateName: string | undefined,
+    warnings?: string[]
   ): Promise<{ behavior: 'allow' | 'deny'; updatedInput?: any; message?: string }> {
     return handleToolPermissionWithServiceHelper(
       {
@@ -3314,7 +3342,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
         sessionId,
         workspacePath,
         permissionsPath,
-        teammateName
+        teammateName,
+        warnings
       }
     );
   }
@@ -3324,7 +3353,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     input: any,
     options: ToolPermissionOptions,
     sessionId: string | undefined,
-    workspacePath: string | undefined
+    workspacePath: string | undefined,
+    warnings?: string[]
   ): Promise<{ behavior: 'allow' | 'deny'; updatedInput?: any; message?: string }> {
     return handleToolPermissionFallbackHelper(
       {
@@ -3346,6 +3376,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
         options,
         sessionId,
         workspacePath,
+        warnings,
       }
     );
   }

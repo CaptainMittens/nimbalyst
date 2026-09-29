@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Typing in a Crew dialog no longer loses focus every few seconds.
 - Context menus and popovers no longer open under the title bar, where the first item (such as the file tree's "New Markdown File") could not be clicked.
 - When two teammates added labels or predicates to a shared knowledge graph at the same time, one of the additions could be dropped.
+- Compound Bash commands no longer show a permission prompt after your own Claude Code PreToolUse hook has allowed them.
 
 ### Removed
 <!-- Removed features go here -->
