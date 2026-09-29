@@ -26,6 +26,7 @@
  * the room never rewrites the file for nothing.
  */
 
+import fs from 'fs';
 import PrivateSettingsStore from '../../utils/privateSettingsStore';
 import type { TrackerSchemaLocalChange } from '@nimbalyst/tracker-engine';
 import type { PredicateDefinition } from '@nimbalyst/tracker-schema';
@@ -41,6 +42,7 @@ import {
 import { logger } from '../../utils/logger';
 import {
   readWorkspacePredicateRegistry,
+  workspacePredicateRegistryPath,
   writeWorkspacePredicateRegistry,
 } from './trackerPredicateRegistryFile';
 import { requestTrackerSchemaFlush } from './trackerSchemaFlush';
@@ -106,18 +108,25 @@ function parseBaseline(json: string | null): PredicateDefinition[] | null {
 /**
  * The registry's entry in the schema outbox, or nothing.
  *
- * An unreadable local copy is a half-typed hand edit and is never offered. An
- * empty one is never offered either: a peer with no `predicates.yaml` reads as
- * empty, and "this peer has no file" must not clear the team's verbs.
+ * An unreadable local copy is a half-typed hand edit and is never offered. A
+ * missing one is never offered either: a peer with no `predicates.yaml` reads
+ * as empty, and "this peer has no file" must not clear the team's verbs. An
+ * existing file emptied after this peer applied a non-empty room registry is
+ * the removal of the last verb, and is offered like any other edit.
  */
 export function listUnsyncedPredicateRegistry(
   workspacePath: string,
   options: PredicateRegistryLaneOptions = {},
 ): TrackerSchemaLocalChange[] {
   const local = readWorkspacePredicateRegistry(workspacePath);
-  if (!local || local.length === 0) return [];
+  if (!local) return [];
   const store = options.state ?? getDefaultStateStore();
   const state = store.get(workspacePath);
+  if (local.length === 0) {
+    const emptiedOnPurpose = fs.existsSync(workspacePredicateRegistryPath(workspacePath))
+      && (parseBaseline(state.baseline)?.length ?? 0) > 0;
+    if (!emptiedOnPurpose) return [];
+  }
   const canonical = canonicalPredicateRegistryJson(local);
   if (canonical === state.baseline || canonical === state.rejected) return [];
   if (state.pushed !== canonical) store.set(workspacePath, { ...state, pushed: canonical });
