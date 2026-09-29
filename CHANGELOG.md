@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 <!-- Bug fixes go here -->
 - Typing in a Crew dialog no longer loses focus every few seconds.
+- Context menus and popovers no longer open under the title bar, where the first item (such as the file tree's "New Markdown File") could not be clicked.
 
 ### Removed
 <!-- Removed features go here -->
