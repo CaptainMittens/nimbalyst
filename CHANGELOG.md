@@ -13,27 +13,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- Changes to existing functionality go here -->
-- Android: create worktrees, workstreams, and Meta Agent sessions, choose the model each time you create a session, browse and edit synced documents in a Files tab, and cancel or archive sessions, bringing the app closer to iOS.
-- Add GPT-6.1 Sol to the Codex and OpenAI model pickers and make it the default.
-- Crew: design a new member with `/crew:hire` in any agent session, which asks about its schedule and notifications before hiring. It replaces the Hire dialog's "Describe the job" tab.
-- Quick Track's Cmd+Enter now creates the item and closes the popup without switching to Tracker mode.
 
 ### Fixed
 <!-- Bug fixes go here -->
-- Typing in a Crew dialog no longer loses focus every few seconds.
-- Context menus and popovers no longer open under the title bar, where the first item (such as the file tree's "New Markdown File") could not be clicked.
-- When two teammates added labels or predicates to a shared knowledge graph at the same time, one of the additions could be dropped.
-- Compound Bash commands no longer show a permission prompt after your own Claude Code PreToolUse hook has allowed them.
-- Codex auto-review and subagent threads no longer appear in the session list as separate sessions titled "# AGENTS.md instructions".
-- With several projects open, a tracker type an agent defines in a background project's window now shows up in that window's tracker pane without a reload.
-- A Claude Agent session that had worked inside a git worktree Nimbalyst didn't create no longer stays stuck on "running" when its background command finishes after the turn ends.
-- Messages in an open transcript no longer flash and redraw each time a running session reports progress.
-- The Quick Track title field now spans the full width of the popup instead of scrolling after a few words.
-
-- Android no longer drops the model list the desktop app sends, so sessions created on Android use the model you pick instead of always the desktop default.
 
 ### Removed
 <!-- Removed features go here -->
+
+## [0.79.1] - 2026-09-30
+
+
+### Added
+- Android: create worktrees, workstreams, and Meta Agent sessions, pick a model per session, edit synced documents in a Files tab, and cancel or archive sessions.
+- GPT-6.1 Sol in the Codex and OpenAI model pickers, now the default Codex model.
+- `/crew:hire` designs a new Crew member from any agent session, replacing the Hire dialog's "Describe the job" tab.
+
+### Changed
+- Quick Track's Cmd+Enter creates the item and closes the popup without switching to Tracker mode; the title field now spans the popup.
+
+### Fixed
+- Typing in a Crew dialog no longer loses focus every few seconds.
+- Context menus and popovers no longer open under the title bar, where their first item could not be clicked.
+- Concurrent label or predicate additions by two teammates to a shared knowledge graph no longer drop one of them.
+- Compound Bash commands no longer prompt for permission after a user PreToolUse hook has allowed them.
+- Codex auto-review and subagent threads no longer appear as separate "# AGENTS.md instructions" sessions.
+- Tracker types defined in a background project's window now appear in its tracker pane without a reload.
+- Claude Agent sessions in an externally created worktree no longer stay stuck on "running" after a background command finishes.
+- Transcript messages no longer flash and redraw while a session is streaming.
 
 ## [0.79.0] - 2026-09-29
 
