@@ -6,7 +6,6 @@
  */
 
 import type {
-  CrewDraftFromDescriptionResponse,
   CrewFeedRequest,
   CrewFeedEntry,
   CrewHireRequest,
@@ -24,7 +23,6 @@ import {
   isValidCrewSlug,
   parseCrewMemberFile,
   serializeCrewMember,
-  sessionModelId,
   slugFromName,
   splitCrewFile,
 } from './crewDefinition';
@@ -36,9 +34,6 @@ import { chapterSummaries, delegatedSummaries, type MemberSessions } from './cre
 import { mergeFeeds, parseJournalFeed } from './crewJournal';
 import type { CrewRuntime } from './crewRuntime';
 
-const DRAFT_OWNER_KEY = '_draft';
-const DRAFT_TIMEOUT_MS = 3 * 60_000;
-const DRAFT_POLL_MS = 2_000;
 const ROSTER_RECONCILE_MS = 60_000;
 
 const EMPTY_SESSIONS: MemberSessions = { chapters: [], delegated: [], lastRunAtMs: null, shiftStartsMs: [] };
@@ -246,49 +241,33 @@ export class CrewService {
   }
 
   /**
-   * "Describe the job": one short session drafts a definition file. Owned
-   * under a reserved key so it never reads as a member's work. The draft is
-   * returned for the user to edit, never saved here.
+   * `/crew:hire`: an agent in an ordinary session interviews the user, then
+   * hands the whole definition file here. Validation errors are thrown with
+   * their frontmatter paths so the agent can fix the file and call again.
    */
-  async draftFromDescription(input: { description: string; provider?: string; model?: string }): Promise<CrewDraftFromDescriptionResponse> {
-    const description = input.description?.trim();
-    if (!description) return { ok: false, error: 'Describe the job first.' };
-    const example = getCrewTemplate('ada')!.definition;
-    const provider = input.provider ?? 'claude-code';
-    const model = input.model ?? (provider === 'claude-code' ? 'sonnet' : 'gpt-6-sol');
-    const prompt = [
-      'Draft a crew member definition file for this job. A crew member is a long-running agent with a role, a personality, a schedule, and a job description.',
-      '',
-      `Job: ${description}`,
-      '',
-      'Reply with ONLY the file, in exactly this format (YAML frontmatter under a `crew:` key, then the job instructions as the markdown body). Choose a short first name, a role, a distinct color, a one-paragraph personality, a realistic schedule, and quiet hours. Keep provider and model as given.',
-      '',
-      '```markdown',
-      serializeCrewMember({ ...example, provider, model }).trim(),
-      '```',
-    ].join('\n');
-    const { sessionId } = await this.runtime.sessions.create({
-      prompt,
-      provider,
-      model: sessionModelId({ provider, model }),
-      ownerKey: DRAFT_OWNER_KEY,
-      name: 'Crew: drafting a member',
-    });
-    const deadline = this.runtime.now() + DRAFT_TIMEOUT_MS;
-    let response: string | null = null;
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, DRAFT_POLL_MS));
-      const status = await this.runtime.sessions.getStatus(sessionId).catch(() => null);
-      if (!status || status.status === 'running' || (status.queuedPromptCount ?? 0) > 0) continue;
-      const result = await this.runtime.sessions.getResult(sessionId).catch(() => null);
-      if (result?.lastResponse) {
-        response = result.lastResponse;
-        break;
-      }
-      if (status.status === 'error') break;
+  async hireFromFile(text: string, requestedSlug?: string): Promise<CrewMemberSnapshot> {
+    const file = unfenceDefinition(text);
+    let name: unknown;
+    try {
+      name = (splitCrewFile(file).frontmatter as { crew?: { name?: unknown } } | undefined)?.crew?.name;
+    } catch {
+      name = undefined;
     }
-    if (!response) return { ok: false, error: 'The drafting session did not produce a definition in time.', sessionId };
-    return parseDraftResponse(response, sessionId);
+    let slug: string;
+    if (requestedSlug) {
+      if (!isValidCrewSlug(requestedSlug)) throw new Error(`"${requestedSlug}" is not a valid slug: use lowercase letters, digits, and dashes`);
+      if (await crewFiles.loadCrewMember(this.workspacePath, requestedSlug)) throw new Error(`A crew member named "${requestedSlug}" already exists; pick another slug`);
+      slug = requestedSlug;
+    } else {
+      slug = await this.freeSlug((typeof name === 'string' && slugFromName(name)) || 'member');
+    }
+    const parsed = parseCrewMemberFile(slug, crewDefinitionPath(this.workspacePath, slug), `${file}\n`);
+    if (!parsed.ok) {
+      throw new Error(`The definition did not validate: ${parsed.errors.map((error) => `${error.path} ${error.message}`).join('; ')}`);
+    }
+    const { sourcePath: _sourcePath, ...definition } = parsed.definition;
+    void _sourcePath;
+    return this.hire({ source: 'draft', definition });
   }
 
   private validateDraft(draft: CrewMemberDraft): void {
@@ -374,22 +353,8 @@ export class CrewService {
   }
 }
 
-/** Pulls the definition file out of a drafting session's reply. */
-export function parseDraftResponse(response: string, sessionId: string): CrewDraftFromDescriptionResponse {
-  const fenced = /```(?:markdown|md|yaml)?\s*\n(---[\s\S]*?)```/.exec(response);
-  const text = (fenced ? fenced[1] : response.slice(Math.max(0, response.indexOf('---')))).trim();
-  let name: unknown;
-  try {
-    name = (splitCrewFile(text).frontmatter as { crew?: { name?: unknown } } | undefined)?.crew?.name;
-  } catch {
-    name = undefined;
-  }
-  const slug = (typeof name === 'string' && slugFromName(name)) || 'new-member';
-  const parsed = parseCrewMemberFile(slug, `${slug}.md`, `${text}\n`);
-  if (!parsed.ok) {
-    return { ok: false, error: `The draft did not validate: ${parsed.errors.map((error) => `${error.path} ${error.message}`).join('; ')}`, sessionId };
-  }
-  const { sourcePath: _sourcePath, ...draft } = parsed.definition;
-  void _sourcePath;
-  return { ok: true, draft, sessionId };
+/** Agents often wrap the file in a code fence; the file itself starts at `---`. */
+function unfenceDefinition(text: string): string {
+  const fenced = /^\s*```[a-z]*\s*\n([\s\S]*?)\n```\s*$/.exec(text);
+  return (fenced ? fenced[1] : text).trim();
 }

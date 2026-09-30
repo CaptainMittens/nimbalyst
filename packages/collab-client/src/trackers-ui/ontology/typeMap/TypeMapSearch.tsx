@@ -4,6 +4,7 @@
  */
 import { useMemo, useState } from 'react';
 import { autoUpdate, flip, FloatingPortal, offset, shift, size, useFloating } from '@floating-ui/react';
+import { windowControlsClearance } from '@nimbalyst/runtime/ui/floating/windowControlsClearance';
 import type { TypeMapRelationship, TypeMapType } from '../ontologyLabelMap';
 import type { MapSelection } from './TypeMapCanvas';
 
@@ -24,7 +25,7 @@ export function TypeMapSearch({ types, relationships, typeById, onPick }: TypeMa
     open,
     placement: 'bottom-start',
     whileElementsMounted: autoUpdate,
-    middleware: [offset(4), flip({ padding: 8 }), shift({ padding: 8 }), size({ apply: ({ rects, elements }) => { elements.floating.style.minWidth = `${Math.max(260, rects.reference.width)}px`; } })],
+    middleware: [offset(4), flip({ padding: 8 }), shift({ padding: 8 }), windowControlsClearance(), size({ apply: ({ rects, elements }) => { elements.floating.style.minWidth = `${Math.max(260, rects.reference.width)}px`; } })],
   });
 
   const hits = useMemo<Hit[]>(() => {

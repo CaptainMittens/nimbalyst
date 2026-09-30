@@ -422,6 +422,8 @@ export class TrackerSyncEngine {
    */
   private readonly pendingLaneIds = new Map<string, string>();
 
+  private schemaApplyChain: Promise<unknown> = Promise.resolve();
+
   private readonly schemaOutbox = new TrackerSchemaOutbox({
     hooks: () => this.config.schemaSync,
     isOpen: () => this.ws?.readyState === WebSocket.OPEN,
@@ -1536,7 +1538,18 @@ export class TrackerSyncEngine {
     return true;
   }
 
-  private async applySchemaEnvelope(envelope: TrackerSchemaEnvelope): Promise<boolean> {
+  /**
+   * Socket messages are dispatched without awaiting each other, and a host's
+   * `applyRemote` awaits file writes. Unserialized, an older delivery can finish
+   * after a newer one and leave the older content and syncId in place.
+   */
+  private applySchemaEnvelope(envelope: TrackerSchemaEnvelope): Promise<boolean> {
+    const run = this.schemaApplyChain.then(() => this.applySchemaEnvelopeNow(envelope));
+    this.schemaApplyChain = run.catch(() => undefined);
+    return run;
+  }
+
+  private async applySchemaEnvelopeNow(envelope: TrackerSchemaEnvelope): Promise<boolean> {
     const hooks = this.config.schemaSync;
     if (!hooks) return true;
 

@@ -111,7 +111,18 @@ export const CREW_AGENT_TOOL_DESCRIPTORS: CrewToolDescriptor[] = [
 ];
 
 // Only crew members' own sessions (and their delegated work) see the agent tools.
-for (const tool of CREW_AGENT_TOOL_DESCRIPTORS) tool.audience = 'owned-sessions';
+for (const tool of CREW_AGENT_TOOL_DESCRIPTORS) tool.audience = tool.name === CREW_AGENT_TOOLS.roster ? 'all' : 'owned-sessions';
+
+// Hiring happens from the user's own session (`/crew:hire`), so every session sees it.
+CREW_AGENT_TOOL_DESCRIPTORS.push({
+  name: CREW_AGENT_TOOLS.hire,
+  description: 'Add a crew member by writing its definition file (nimbalyst-local/crew/<slug>.md). Pass the whole file: YAML frontmatter under a `crew:` key, then the job instructions as the markdown body. Confirm the draft with the user first. If it does not validate, the error names each bad field; fix those and call again.',
+  inputSchema: obj({
+    definition: { type: 'string', description: 'The complete definition file, starting with `---`.' },
+    slug: { type: 'string', description: 'Optional file name (lowercase letters, digits, dashes). Defaults to one derived from crew.name.' },
+  }, ['definition']),
+  audience: 'all',
+});
 
 export const CREW_PANEL_TOOL_DESCRIPTORS: CrewToolDescriptor[] = Object.values(CREW_PANEL_TOOLS).map((name) => ({
   name,
@@ -180,7 +191,9 @@ export function createCrewToolHandlers(runtime: CrewRuntime, service: CrewServic
       });
     },
     [CREW_AGENT_TOOLS.roster]: async (_args, call) => {
-      const self = callerSlug(call);
+      // Read-only, so any session may call it (a hiring session checks for duplicate roles); `you` is only set for a crew caller.
+      const owner = call?.sessionOwner;
+      const self = owner?.extensionId === CREW_EXTENSION_ID ? owner.key : undefined;
       const roster = await service.roster();
       return {
         members: roster.members.map(({ definition, runtime: state }) => ({
@@ -221,6 +234,16 @@ export function createCrewToolHandlers(runtime: CrewRuntime, service: CrewServic
       });
       return { ok: true, wakeAt: new Date(atMs).toISOString() };
     },
+    [CREW_AGENT_TOOLS.hire]: async (args) => {
+      const { definition } = await service.hireFromFile(str(args, 'definition', true)!, str(args, 'slug'));
+      return {
+        slug: definition.slug,
+        name: definition.name,
+        role: definition.role,
+        path: `nimbalyst-local/crew/${definition.slug}.md`,
+        paused: definition.paused === true,
+      };
+    },
   };
 
   const panel: Record<string, CrewToolHandler> = {
@@ -228,11 +251,6 @@ export function createCrewToolHandlers(runtime: CrewRuntime, service: CrewServic
     [CREW_PANEL_TOOLS.member]: async (args) => service.member(slugArg(args)),
     [CREW_PANEL_TOOLS.templates]: async () => service.templates(),
     [CREW_PANEL_TOOLS.hire]: async (args) => service.hire(args as unknown as CrewHireRequest),
-    [CREW_PANEL_TOOLS.draftFromDescription]: async (args) => service.draftFromDescription({
-      description: str(args, 'description', true)!,
-      ...(str(args, 'provider') ? { provider: str(args, 'provider') } : {}),
-      ...(str(args, 'model') ? { model: str(args, 'model') } : {}),
-    }),
     [CREW_PANEL_TOOLS.updateMember]: async (args) =>
       service.update(slugArg(args), (args.changes ?? {}) as Partial<Omit<CrewMemberDraft, 'slug'>>),
     [CREW_PANEL_TOOLS.deleteMember]: async (args) => service.remove(slugArg(args)),

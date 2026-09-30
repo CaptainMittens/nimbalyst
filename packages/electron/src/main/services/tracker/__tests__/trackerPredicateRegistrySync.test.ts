@@ -336,6 +336,23 @@ describe('vocabulary lanes, one peer at a time', () => {
     expect(listUnsyncedLabelRegistry(workspacePath, { state })).toEqual([]);
   });
 
+  it('keeps a push offered mid-apply, so its own ack is not read as a deletion', async () => {
+    const base = registry([{ id: 'capability', label: 'Capability' }]);
+    const withTopic = registry([...base.labels, { id: 'topic', label: 'Topic' }]);
+    const state = createInMemoryLabelRegistrySyncStateStore();
+    state.set(workspacePath, { syncId: 1, baseline: canonicalLabelRegistryJson(base), pushed: null, rejected: null });
+    await writeWorkspaceLabelRegistry(workspacePath, withTopic);
+
+    // The flush reads the file while the teammate's registry is being written.
+    const applying = applyRemoteLabelRegistry(workspacePath,
+      labelsDef(registry([...base.labels, { id: 'feature', label: 'Feature' }]), 2), { state });
+    expect(listUnsyncedLabelRegistry(workspacePath, { state })).toHaveLength(1);
+    await applying;
+
+    await applyRemoteLabelRegistry(workspacePath, labelsDef(withTopic, 3), { state });
+    expect(readWorkspaceLabelRegistry(workspacePath)!.labels.map(l => l.id).sort()).toEqual(['capability', 'feature', 'topic']);
+  });
+
   it('publishes a registry emptied on purpose, but never a missing file', async () => {
     const base = registry([{ id: 'feature', label: 'Feature' }]);
     const state = createInMemoryLabelRegistrySyncStateStore();
