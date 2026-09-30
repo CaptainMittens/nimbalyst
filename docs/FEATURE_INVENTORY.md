@@ -275,11 +275,13 @@ Companion app; pairs with a desktop over encrypted sync. Voice mode is not inclu
 - Email magic link and Google OAuth login
 - Synced projects and sessions with unread state and desktop connection indicator
 - Session transcript viewing (WebView)
-- Start a desktop-backed session from Android
+- Create sessions, worktrees, workstreams, and Meta Agent sessions (when the desktop alpha is on) on a chosen desktop, choosing the model at creation from the desktop's list
+- Files tab: browse and edit synced project markdown documents
+- Cancel running sessions, archive/unarchive, and move sessions into workstreams
+- Project Actions from the composer
 - Submit prompts with image attachments
 - Answer interactive prompts (tool permissions, questions, plan approvals) from mobile
 - Queued prompt management
-- AI model picker (synced from desktop)
 - Push notifications for agent/session updates, with tap-to-open routing and an in-app toggle
 - In-app account deletion (permanently removes the account and all synced data)
 
