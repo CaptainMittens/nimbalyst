@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 <!-- Bug fixes go here -->
+- A Mermaid diagram with a syntax error no longer leaves stray error graphics behind that could push a project window's title bar out of view.
 
 ### Removed
 <!-- Removed features go here -->
