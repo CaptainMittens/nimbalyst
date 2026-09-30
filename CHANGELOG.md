@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- Changes to existing functionality go here -->
+- Android: create worktrees, workstreams, and Meta Agent sessions, choose the model each time you create a session, browse and edit synced documents in a Files tab, and cancel or archive sessions, bringing the app closer to iOS.
 - Crew: design a new member with `/crew:hire` in any agent session, which asks about its schedule and notifications before hiring. It replaces the Hire dialog's "Describe the job" tab.
 
 ### Fixed
@@ -24,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Codex auto-review and subagent threads no longer appear in the session list as separate sessions titled "# AGENTS.md instructions".
 - With several projects open, a tracker type an agent defines in a background project's window now shows up in that window's tracker pane without a reload.
 - A Claude Agent session that had worked inside a git worktree Nimbalyst didn't create no longer stays stuck on "running" when its background command finishes after the turn ends.
+- Messages in an open transcript no longer flash and redraw each time a running session reports progress.
+
+- Android no longer drops the model list the desktop app sends, so sessions created on Android use the model you pick instead of always the desktop default.
 
 ### Removed
 <!-- Removed features go here -->

@@ -695,6 +695,12 @@ interface SessionUpdateFields extends Partial<SessionData> {
 
 const EMPTY_SESSION_TODOS: unknown[] = [];
 
+/** Update fields mirrored into sessionRegistryAtom by updateSessionStoreAtom. */
+const REGISTRY_UPDATE_FIELDS = [
+  'title', 'updatedAt', 'isArchived', 'isPinned', 'parentSessionId', 'worktreeId',
+  'provider', 'model', 'sessionType', 'uncommittedCount',
+] as const satisfies ReadonlyArray<keyof SessionUpdateFields>;
+
 /**
  * Unified session update atom.
  * SINGLE update point for all session metadata changes.
@@ -718,7 +724,10 @@ export const updateSessionStoreAtom = atom(
       set(sessionStoreAtom(sessionId), { ...current, ...normalizedUpdates });
     }
 
-    // 2. Always update registry with metadata fields
+    // 2. Update registry with metadata fields. Skip updates that carry none
+    // (tokenUsage arrives every assistant step): a new registry Map re-renders
+    // the session list and every session reference in open transcripts.
+    if (!REGISTRY_UPDATE_FIELDS.some(field => updates[field] !== undefined)) return;
     const registry = new Map(get(sessionRegistryAtom));
     const meta = registry.get(sessionId);
     if (meta) {
