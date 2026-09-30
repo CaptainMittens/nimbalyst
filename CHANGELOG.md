@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 <!-- Changes to existing functionality go here -->
 - Android: create worktrees, workstreams, and Meta Agent sessions, choose the model each time you create a session, browse and edit synced documents in a Files tab, and cancel or archive sessions, bringing the app closer to iOS.
+- Add GPT-6.1 Sol to the Codex and OpenAI model pickers and make it the default.
 - Crew: design a new member with `/crew:hire` in any agent session, which asks about its schedule and notifications before hiring. It replaces the Hire dialog's "Describe the job" tab.
 
 ### Fixed
