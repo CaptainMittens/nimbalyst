@@ -333,7 +333,13 @@ class SyncManagerApiTest {
         assertTrue(controls.single().getAsJsonObject("payload").get("isArchived").asBoolean)
         assertEquals("ws-1", sent("indexUpdate").single().getAsJsonObject("session").get("parentSessionId").asString)
 
-        // Nothing is left parked: the next reconnect publishes none of it again.
+        // Once the room has answered every ping, delivery is proven and nothing is
+        // left parked: the next reconnect publishes none of it again.
+        var answered = 0
+        while (answered < sent("ping").size) {
+            deliver("pong") {}
+            answered++
+        }
         reconnectIndex()
         assertTrue(sent("indexClientMetadataPatch").isEmpty() && sent("sessionControl").isEmpty())
     }
