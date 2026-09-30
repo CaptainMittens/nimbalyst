@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When two teammates added labels or predicates to a shared knowledge graph at the same time, one of the additions could be dropped.
 - Compound Bash commands no longer show a permission prompt after your own Claude Code PreToolUse hook has allowed them.
 - Codex auto-review and subagent threads no longer appear in the session list as separate sessions titled "# AGENTS.md instructions".
+- With several projects open, a tracker type an agent defines in a background project's window now shows up in that window's tracker pane without a reload.
 
 ### Removed
 <!-- Removed features go here -->
