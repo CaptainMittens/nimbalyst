@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Android: create worktrees, workstreams, and Meta Agent sessions, choose the model each time you create a session, browse and edit synced documents in a Files tab, and cancel or archive sessions, bringing the app closer to iOS.
 - Add GPT-6.1 Sol to the Codex and OpenAI model pickers and make it the default.
 - Crew: design a new member with `/crew:hire` in any agent session, which asks about its schedule and notifications before hiring. It replaces the Hire dialog's "Describe the job" tab.
+- Quick Track's Cmd+Enter now creates the item and closes the popup without switching to Tracker mode.
 
 ### Fixed
 <!-- Bug fixes go here -->
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - With several projects open, a tracker type an agent defines in a background project's window now shows up in that window's tracker pane without a reload.
 - A Claude Agent session that had worked inside a git worktree Nimbalyst didn't create no longer stays stuck on "running" when its background command finishes after the turn ends.
 - Messages in an open transcript no longer flash and redraw each time a running session reports progress.
+- The Quick Track title field now spans the full width of the popup instead of scrolling after a few words.
 
 - Android no longer drops the model list the desktop app sends, so sessions created on Android use the model you pick instead of always the desktop default.
 
