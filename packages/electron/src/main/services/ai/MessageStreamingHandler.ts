@@ -127,6 +127,7 @@ import { addGitignoreBypass } from '../../file/WorkspaceEventBus';
 import { getSyncProvider, isDesktopTrulyAway } from '../SyncManager';
 import { requestMobilePush } from './mobilePushRequest';
 import { createAskUserQuestionListeners } from './askUserQuestionListeners';
+import { createTeammateIdleWakeListener } from './teammateIdleWake';
 // The per-session pending-prompt bit is derived from the set of prompts still
 // open, so one prompt settling cannot clear the indicator for another that is
 // still waiting on the user. Refs #1549.
@@ -1114,58 +1115,31 @@ export class MessageStreamingHandler {
     };
     this.installListener(provider, 'session:providerSessionReceived', onProviderSessionReceived);
 
-    // Listen for teammate messages when the lead is idle (no active query).
-    // When the lead is active, messages are delivered via interrupt + streamInput
-    // inside ClaudeCodeProvider.sendMessage(). This handler covers the idle case
-    // by triggering a new sendMessage call with the teammate's message.
-    const onTeammateMessageWhileIdle = async (data: {
-      sessionId: string;
-      message: string;
-    }) => {
-      if (!data.sessionId) {
-        logger.main.warn('[AIService] teammate:messageWhileIdle with no sessionId');
-        return;
-      }
-      // Guard: don't trigger sendMessage if session was already ended
-      // (e.g., all teammates completed between message queue and this handler)
-      const sessionStateManager = getSessionStateManager();
-      if (!sessionStateManager.isSessionActive(data.sessionId)) {
-        logger.main.info(`[AIService] Ignoring teammate message for ended session ${data.sessionId}`);
-        return;
-      }
-      logger.main.info(`[AIService] Teammate message while lead idle, triggering sendMessage for session ${data.sessionId}`);
-      try {
-        // Ensure the session is marked as running so the UI shows the stop button.
-        // sendMessageHandler also calls startSession, but there can be a gap between
-        // the setImmediate and when that runs. Re-calling startSession is safe (idempotent).
-        await sessionStateManager.startSession({
-          sessionId: data.sessionId,
-          workspacePath: effectiveWorkspacePath,
-        });
-
-        const targetWindow = findWindowByWorkspace(effectiveWorkspacePath);
-        if (targetWindow && !targetWindow.isDestroyed()) {
-          // Create a mock event and call sendMessage directly
-          const mockEvent = {
-            sender: targetWindow.webContents,
-            senderFrame: targetWindow.webContents.mainFrame,
-          } as Electron.IpcMainInvokeEvent;
-
-          if (this.svc.sendMessageHandler) {
-            // Fire-and-forget: sendMessage will stream results to the renderer
-            setImmediate(async () => {
-              try {
-                await this.svc.sendMessageHandler!(mockEvent, data.message, {} as any, data.sessionId, effectiveWorkspacePath);
-              } catch (err) {
-                logger.main.error('[AIService] Failed to process teammate message while idle:', err);
-              }
-            });
-          }
+    // Wake the lead when a teammate message or finished background task
+    // arrives after its turn ended. See teammateIdleWake.ts.
+    const sessionStateManagerForWake = getSessionStateManager();
+    const onTeammateMessageWhileIdle = createTeammateIdleWakeListener({
+      isSessionActive: (id) => sessionStateManagerForWake.isSessionActive(id),
+      startSession: (options) => sessionStateManagerForWake.startSession(options),
+      endSession: (id) => sessionStateManagerForWake.endSession(id),
+      turnWorkspacePath: () => effectiveWorkspacePath,
+      resolveOwnerWorkspacePath: getWorkspacePathForSession,
+      findWindow: (wakePath) => findWindowByWorkspace(wakePath),
+      sendMessage: async (targetWindow, message, wakeSessionId, wakePath) => {
+        if (!this.svc.sendMessageHandler) {
+          throw new Error('sendMessageHandler is not registered');
         }
-      } catch (error) {
-        logger.main.error('[AIService] Failed to handle teammate message while idle:', error);
-      }
-    };
+        const mockEvent = {
+          sender: targetWindow.webContents,
+          senderFrame: targetWindow.webContents.mainFrame,
+        } as Electron.IpcMainInvokeEvent;
+        return this.svc.sendMessageHandler(mockEvent, message, {} as any, wakeSessionId, wakePath);
+      },
+      defer: (fn) => { setImmediate(fn); },
+      logInfo: (message) => logger.main.info(message),
+      logWarn: (message) => logger.main.warn(message),
+      logError: (message, error) => logger.main.error(`${message}:`, error),
+    });
     this.installListener(provider, 'teammate:messageWhileIdle', onTeammateMessageWhileIdle);
 
     // Listen for all teammates completing. When the lead finished but teammates

@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Compound Bash commands no longer show a permission prompt after your own Claude Code PreToolUse hook has allowed them.
 - Codex auto-review and subagent threads no longer appear in the session list as separate sessions titled "# AGENTS.md instructions".
 - With several projects open, a tracker type an agent defines in a background project's window now shows up in that window's tracker pane without a reload.
+- A Claude Agent session that had worked inside a git worktree Nimbalyst didn't create no longer stays stuck on "running" when its background command finishes after the turn ends.
 
 ### Removed
 <!-- Removed features go here -->
