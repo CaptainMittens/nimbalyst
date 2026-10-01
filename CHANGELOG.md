@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Mermaid diagram with a syntax error no longer leaves stray error graphics behind that could push a project window's title bar out of view.
 - Clicking an editor screenshot in the transcript now enlarges it over the whole window instead of only the transcript pane.
 - macOS: opening the menu bar panel or island no longer removes Nimbalyst from the Dock and Cmd+Tab.
+- Windows: projects directly under a drive root (such as `D:\Project`) can now send prompts instead of failing with a "workspace path is too shallow" error.
 
 ### Removed
 <!-- Removed features go here -->
