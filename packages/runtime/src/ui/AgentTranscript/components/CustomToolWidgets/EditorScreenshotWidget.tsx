@@ -14,6 +14,7 @@
 import React, { useState, useEffect } from 'react';
 import type { CustomToolWidgetProps } from './index';
 import { parseToolResult } from '../../../../ai/server/transcript/toolResultParser';
+import { FullscreenModal } from '../FullscreenModal';
 import { ZoomableImageSurface } from '../ZoomableImageSurface';
 
 /**
@@ -327,20 +328,6 @@ export const EditorScreenshotWidget: React.FC<CustomToolWidgetProps> = ({
     ? `data:${imageData.mimeType};base64,${imageData.imageBase64}`
     : null;
 
-  // Close lightbox on Escape key
-  useEffect(() => {
-    if (!showLightbox) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setShowLightbox(false);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [showLightbox]);
-
   return (
     <div className="editor-screenshot-widget rounded bg-nim-secondary border border-nim overflow-hidden">
       <div className="flex items-center gap-2 p-2">
@@ -385,19 +372,15 @@ export const EditorScreenshotWidget: React.FC<CustomToolWidgetProps> = ({
         </div>
       )}
 
-      {/* Lightbox modal */}
-      {showLightbox && imageSrc && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-[color-mix(in_srgb,var(--nim-bg)_90%,transparent)] backdrop-blur"
-          onClick={() => setShowLightbox(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Image preview"
+      {/* Lightbox modal. Portaled to document.body so a transformed or
+          contained transcript ancestor can't clip it to the transcript pane. */}
+      {imageSrc && (
+        <FullscreenModal
+          isOpen={showLightbox}
+          onClose={() => setShowLightbox(false)}
+          ariaLabel="Image preview"
+          contentClassName="h-[92dvh] w-[96vw] max-w-[1400px] overflow-hidden rounded-lg border border-nim bg-nim shadow-2xl"
         >
-          <div
-            className="h-[92vh] w-[96vw] max-w-[1400px] overflow-hidden rounded-lg border border-nim bg-nim shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
             <ZoomableImageSurface
               src={imageSrc}
               alt={fileName}
@@ -418,8 +401,7 @@ export const EditorScreenshotWidget: React.FC<CustomToolWidgetProps> = ({
                 </button>
               )}
             />
-          </div>
-        </div>
+        </FullscreenModal>
       )}
     </div>
   );
