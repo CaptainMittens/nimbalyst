@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS: opening the menu bar panel or island no longer removes Nimbalyst from the Dock and Cmd+Tab.
 - Android: a prompt is no longer lost when you leave the session mid-send or the connection has silently dropped, and a phone left offline in the background no longer gets signed out.
 - Android: the app no longer crashes at launch while the system WebView is updating, after moving to a new phone, or on devices without a browser or camera app.
+- iOS: the "Sync interrupted" notice now clears once the app reconnects after being backgrounded, and is shown as a smaller, quieter strip.
 - Windows: projects directly under a drive root (such as `D:\Project`) can now send prompts instead of failing with a "workspace path is too shallow" error.
 
 ### Removed

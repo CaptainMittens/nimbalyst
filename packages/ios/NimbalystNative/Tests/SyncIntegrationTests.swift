@@ -465,6 +465,24 @@ final class SyncIntegrationTests: XCTestCase {
         XCTAssertEqual(sync.syncError?.kind, .transport)
     }
 
+    /// Backgrounding drops the socket and reports a transport error; the
+    /// reconnect on return is what that error was waiting for, so it clears.
+    /// Any other kind is not answered by a reconnect and stays.
+    @MainActor
+    func testReconnectClearsTransportErrorButNotOtherKinds() throws {
+        let sync = manager(SendRecorder(), requestTimeout: .seconds(30))
+        _ = try sync.createWorktree(projectId: "/test/project")
+
+        sync.indexClient.onConnectionStateChanged?(false)
+        XCTAssertEqual(sync.syncError?.kind, .transport)
+        sync.indexClient.onConnectionStateChanged?(true)
+        XCTAssertNil(sync.syncError)
+
+        sync.report(SyncError(kind: .storage, message: "disk full"))
+        sync.indexClient.onConnectionStateChanged?(true)
+        XCTAssertEqual(sync.syncError?.kind, .storage)
+    }
+
     // MARK: - Error surface (R-D-2, R-D-3)
 
     /// R-D-2: a frame can be delivered and the socket error arrive after it, so

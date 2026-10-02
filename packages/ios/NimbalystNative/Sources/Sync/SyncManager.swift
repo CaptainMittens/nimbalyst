@@ -79,8 +79,7 @@ public final class SyncManager: ObservableObject {
     private var pendingSessionDrafts: [String: String] = [:]
 
     /// The last sync failure worth showing the user, or nil once it clears.
-    /// Fed by the request registry and by the decrypt/storage paths that used to
-    /// log and return. Rendering lives outside the sync layer.
+    /// Fed by the request registry and the decrypt/storage paths.
     @Published public private(set) var syncError: SyncError?
 
     /// Collapses a burst of same-kind failures into one banner. See
@@ -561,8 +560,9 @@ public final class SyncManager: ObservableObject {
                 self?.connectedDevices = []
             }
             if connected {
-                // Re-publish the optimistic local writes whose send never
-                // landed, from the rows as they read now.
+                // A transport error is what this reconnect answers. Parked
+                // writes re-publish next; one that fails again reports again.
+                if self?.syncError?.kind == .transport { self?.clearSyncError() }
                 self?.requests.reconnect()
                 // Versioned replication probes first; the probe's
                 // unknown_message_type answer is what falls back to the
