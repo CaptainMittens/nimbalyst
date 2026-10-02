@@ -2395,6 +2395,7 @@ describe('handleTrackerUpdate description / collab body', () => {
       .mockResolvedValueOnce({ rows: [trackerRow] })                          // notifyTrackerItemUpdated read
       .mockResolvedValueOnce({ rows: [trackerRow] })                          // refreshedRow read for sync block
       .mockResolvedValueOnce({ rows: [trackerRow] })                          // postSyncRow read
+      .mockResolvedValueOnce({ rows: [] })                                    // DELETE body-link edges (body has no links)
       .mockResolvedValueOnce({ rows: [{ type_tags: ['bug'] }] });             // re-read type_tags
     return trackerRow;
   }

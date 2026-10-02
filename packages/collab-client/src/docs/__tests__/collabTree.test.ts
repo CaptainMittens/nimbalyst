@@ -21,11 +21,16 @@ import {
   renameCollabDocumentPath,
   resolveCollabCreateTargetFolderId,
   pruneEmptyFolders,
+  projectPagesAsFolders,
+  type CollabTreeDocumentNode,
   type CollabTreeFolderNode,
+  type CollabTreeItemNode,
+  type CollabTreeNode,
   type CollabTreeTypeNode,
   type CollabTypeTreeResolver,
 } from '../collabTree';
-import type { SharedDocument, SharedFolder, SharedTypePlacement } from '../types';
+import { buildCollabPageTree, buildCollabTreeForScope } from '../collabPageTree';
+import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedTypePlacement } from '../types';
 
 function makeDocument(
   documentId: string,
@@ -512,6 +517,98 @@ describe('collabTree', () => {
       expect(modules.id).toBe('type:module');
       expect(modules.children.map((node) => node.name)).toEqual(['Identity']);
       expect(pruneEmptyFolders(tree).map((node) => node.id)).toContain('type:competitor');
+    });
+  });
+
+  describe('one page tree (pageTree snapshots)', () => {
+    const typePlacement = (typeId: string, parentFolderId: string | null): SharedTypePlacement => ({
+      typeId, projectId: null, parentFolderId, sortOrder: 0, createdBy: 'u', createdAt: 1, updatedAt: 1,
+    });
+    const itemPlacement = (itemId: string, parentId: string | null): SharedItemPlacement => ({
+      itemId, projectId: null, parentId, sortOrder: 0, createdBy: 'u', createdAt: 1, updatedAt: 1,
+    });
+    const items: Record<string, { typeId: string; title: string }> = {
+      'mod-sync': { typeId: 'module', title: 'Sync engine' },
+      'mod-tracker': { typeId: 'module', title: 'Tracker engine' },
+      'lib-yjs': { typeId: 'library', title: 'Yjs' },
+    };
+    const resolver: CollabTypeTreeResolver = {
+      typeName: (typeId) => ({ module: 'Modules', library: 'Libraries' } as Record<string, string>)[typeId] ?? null,
+      typeLabel: (typeId) => ({ module: 'Module', library: 'Library' } as Record<string, string>)[typeId] ?? null,
+      itemsOfType: (typeId) => Object.entries(items)
+        .filter(([, item]) => item.typeId === typeId)
+        .map(([itemId, item]) => ({ itemId, title: item.title })),
+      item: (itemId) => (items[itemId] ? { itemId, ...items[itemId] } : null),
+    };
+    const ids = (nodes: CollabTreeNode[]) => nodes.map((node) => node.id);
+    const childrenOf = (node: CollabTreeNode | undefined) =>
+      (node && 'children' in node ? node.children ?? [] : []) as CollabTreeNode[];
+
+    it('nests pages under pages, with paths from the page chain', () => {
+      const tree = buildCollabPageTree([
+        makeDocument('arch', 'Architecture'),
+        makeDocument('overview', 'Overview', 1, 'arch'),
+        makeDocument('deep', 'Specs/Deep', 1, 'overview'),
+      ]);
+      expect(ids(tree)).toEqual(['document:arch']);
+      const overview = childrenOf(tree[0])[0] as CollabTreeDocumentNode;
+      expect(overview).toMatchObject({ id: 'document:overview', path: 'Architecture/Overview' });
+      // A legacy full-path title contributes only its leaf.
+      expect(childrenOf(overview)[0]).toMatchObject({ name: 'Deep', path: 'Architecture/Overview/Deep' });
+    });
+
+    it('shows a placed item under its page and an unplaced one under its type', () => {
+      const tree = buildCollabPageTree(
+        [makeDocument('arch', 'Architecture'), makeDocument('overview', 'Overview', 1, 'arch')],
+        {
+          resolver,
+          typePlacements: [typePlacement('module', 'arch')],
+          itemPlacements: [itemPlacement('mod-sync', 'overview')],
+        },
+      );
+      const arch = tree[0];
+      expect(ids(childrenOf(arch))).toEqual(['type:module', 'document:overview']);
+      const modules = childrenOf(arch)[0] as CollabTreeTypeNode;
+      // The type's count is every item of the type, wherever it lives.
+      expect(modules.count).toBe(2);
+      expect(ids(modules.children)).toEqual(['item:mod-tracker']);
+      const placed = childrenOf(childrenOf(arch)[1])[0] as CollabTreeItemNode;
+      expect(placed).toMatchObject({
+        id: 'item:mod-sync', itemId: 'mod-sync', typeId: 'module', name: 'Sync engine',
+        typeLabel: 'Module', placed: true, path: 'Architecture/Overview/Sync engine',
+      });
+    });
+
+    it('roots an item placed at root and leaves one with a missing page under its type', () => {
+      const tree = buildCollabPageTree([], {
+        resolver,
+        typePlacements: [typePlacement('module', null)],
+        itemPlacements: [itemPlacement('mod-sync', null), itemPlacement('mod-tracker', 'gone')],
+      });
+      expect(ids(tree)).toEqual(['type:module', 'item:mod-sync']);
+      expect(ids((tree[0] as CollabTreeTypeNode).children)).toEqual(['item:mod-tracker']);
+    });
+
+    it('never shows a type-page document as a row', () => {
+      const docs = [makeDocument('type-page:module', 'Modules'), makeDocument('notes', 'Notes')];
+      expect(ids(buildCollabPageTree(docs))).toEqual(['document:notes']);
+      expect(projectPagesAsFolders(docs).map((folder) => folder.folderId)).toEqual(['notes']);
+    });
+
+    it('keeps every page of a corrupt parent cycle in the tree', () => {
+      const tree = buildCollabPageTree([makeDocument('a', 'A', 1, 'b'), makeDocument('b', 'B', 1, 'a')]);
+      const all: string[] = [];
+      const walk = (nodes: CollabTreeNode[]) => nodes.forEach((node) => { all.push(node.id); walk(childrenOf(node)); });
+      walk(tree);
+      expect(all.sort()).toEqual(['document:a', 'document:b']);
+    });
+
+    it('keeps the folder tree unchanged when the snapshot is not a page tree', () => {
+      const documents = [makeDocument('d-spec', 'Architecture', 1, 'f-spec')];
+      const folders = [makeFolder('f-spec', 'Spec')];
+      expect(buildCollabTreeForScope({ pageTree: false, documents, folders }))
+        .toEqual(buildCollabTreeAdaptive(documents, folders));
+      expect(ids(buildCollabTreeForScope({ pageTree: true, documents, folders }))).toEqual(['document:d-spec']);
     });
   });
 });

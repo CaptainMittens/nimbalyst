@@ -3,8 +3,15 @@ import { type ReadReceipt, type UnreadEntitySnapshot } from '../../../runtime/sr
 import { type CollabDocsCapability, type CollabHost, type CollabScope } from '../core/index';
 import { type ChangedSharedDoc } from './collabDiscovery';
 import type { CollabDocsDataSource } from './dataSource';
-import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
+import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedTypePlacement } from './types';
 export type CollabTreeFilter = 'all' | 'favorites' | 'updated';
+/** Outcome of a placement write, once the store has confirmed or refused it. */
+export type CollabPlacementWriteResult = {
+    ok: true;
+} | {
+    ok: false;
+    error: string;
+};
 export type CollabDocsUIStatus = 'disconnected' | 'connecting' | 'syncing' | 'connected' | 'error';
 export interface CollabDiscoveryState {
     favorites?: string[];
@@ -110,6 +117,9 @@ export interface CollabDocsSessionAtoms {
     trashedSharedDocuments: Atom<SharedDocument[]>;
     sharedFolders: ListAtom<SharedFolder>;
     typePlacements: ListAtom<SharedTypePlacement>;
+    itemPlacements: ListAtom<SharedItemPlacement>;
+    /** True when the tree is the one page tree (documents nest in documents). */
+    pageTree: Atom<boolean>;
     syncStatus: WritableAtom<CollabDocsUIStatus, [CollabDocsUIStatus], void>;
     hasTeam: WritableAtom<boolean, [boolean], void>;
     activeTeamUserId: Atom<string | null>;
@@ -181,6 +191,28 @@ export interface CollabDocsSession {
     placeType(typeId: string, parentFolderId: string | null): Promise<void>;
     moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number): Promise<void>;
     removeTypePlacement(typeId: string): Promise<void>;
+    /** True once the snapshot said the tree is the one page tree. */
+    isPageTree(): boolean;
+    /** Page tree: move a page under another page (null = root). Refuses a cycle. */
+    movePage(documentId: string, parentId: string | null): boolean;
+    /**
+     * Page tree: remove a page and every page below it, the way a folder delete
+     * worked (types and items placed under them fall back, nothing else goes).
+     * The prose of a type placed outside the subtree is moved out first.
+     */
+    removePage(documentId: string): void;
+    /** How many documents besides the page itself `removePage` would remove. */
+    pageRemovalCount(documentId: string): number;
+    /**
+     * Place a typed page (tracker item) under a page, or at root with null.
+     * Resolves `{ ok: true }` only once the store confirmed the placement (the
+     * server's broadcast for this item, or the local write for Personal), and
+     * `{ ok: false, error }` on a refusal or timeout, after rolling back.
+     */
+    setItemPlacement(itemId: string, parentId: string | null, sortOrder?: number): Promise<CollabPlacementWriteResult>;
+    /** Send a typed page back under its type. Same outcome contract as `setItemPlacement`. */
+    removeItemPlacement(itemId: string): Promise<CollabPlacementWriteResult>;
+    getItemPlacements(): SharedItemPlacement[];
     toggleFavorite(documentId: string): void;
     recordOpened(documentId: string): void;
     markDocumentViewed(documentId: string, updatedAt: number | null): Promise<void>;

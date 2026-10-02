@@ -19,6 +19,7 @@ import type {
 } from '@nimbalyst/collab-protocol';
 import type { TeamJwt, TeamMemberId } from '../auth/jwtScopes';
 import type { TypePlacementCallbacks } from './teamTypePlacements';
+import type { ItemPlacementCallbacks } from './teamItemPlacements';
 
 export type {
   TeamClientMessage,
@@ -37,6 +38,10 @@ export type {
   TeamTypePlacementBroadcastMessage,
   TeamTypePlacementRemoveBroadcastMessage,
   TypePlacementNode,
+  TeamItemPlacementIndexSyncResponseMessage,
+  TeamItemPlacementBroadcastMessage,
+  TeamItemPlacementRemoveBroadcastMessage,
+  ItemPlacementNode,
   TeamProjectAccessChangedMessage,
   TeamDocumentCommentNotifyMessage,
   TeamDocumentCommentNotifyAckMessage,
@@ -56,7 +61,7 @@ export type ServerTeamState = ProtocolTeamState;
 // Configuration
 // ============================================================================
 
-export interface TeamSyncConfig extends TypePlacementCallbacks {
+export interface TeamSyncConfig extends TypePlacementCallbacks, ItemPlacementCallbacks {
   /** WebSocket server URL (e.g., wss://sync.nimbalyst.com) */
   serverUrl: string;
 

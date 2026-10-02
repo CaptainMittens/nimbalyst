@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { usePersonalPageBody } from '../usePersonalPageBody';
+import { flushPersonalPageBody, usePersonalPageBody } from '../usePersonalPageBody';
 
 let invoke: ReturnType<typeof vi.fn>;
 
@@ -137,5 +137,25 @@ describe('usePersonalPageBody', () => {
     expect(bodyCalls('personal-pages:update-body')).toEqual([
       ['personal-pages:update-body', '/ws', 'pdoc-1', 'a, unsaved', 1],
     ]);
+  });
+
+  it('lets another surface flush the debounced edit and wait until it is stored', async () => {
+    const { result } = await renderLoaded({ content: 'a', version: 1 });
+    let store: () => void = () => {};
+    invoke.mockImplementation(() => new Promise((resolve) => { store = () => resolve({ version: 2 }); }));
+    act(() => result.current.onEdit('a, typed just now'));
+
+    let settled = false;
+    const flushed = flushPersonalPageBody('/ws', 'pdoc-1').then(() => { settled = true; });
+    await act(async () => {});
+    expect(bodyCalls('personal-pages:update-body')).toEqual([
+      ['personal-pages:update-body', '/ws', 'pdoc-1', 'a, typed just now', 1],
+    ]);
+    expect(settled).toBe(false);
+
+    await act(async () => { store(); await flushed; });
+    expect(settled).toBe(true);
+    // No open editor for a page: nothing to wait for.
+    await expect(flushPersonalPageBody('/ws', 'other')).resolves.toBeUndefined();
   });
 });

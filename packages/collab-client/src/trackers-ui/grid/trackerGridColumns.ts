@@ -465,6 +465,22 @@ export function buildGridActionsColumn(): ColumnRegular {
   };
 }
 
+/** A read-only text column whose value the host computed into the row under `id`. */
+export function buildDerivedGridColumn(column: { id: string; label: string; width?: number }): ColumnRegular {
+  return {
+    prop: column.id,
+    name: column.label,
+    size: column.width ?? 200,
+    minSize: 60,
+    sortable: false,
+    readonly: true,
+    cellTemplate: (createElement: HyperFunc<VNode>, props: CellTemplateProp) => {
+      const text = String(props.model?.[column.id] ?? '');
+      return textNode(createElement, text, text);
+    },
+  };
+}
+
 /**
  * Header template: the label plus a filter affordance. Rendered in RevoGrid's
  * hyperscript, so the click handler hands the anchor rect back to React and the

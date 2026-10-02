@@ -5,6 +5,8 @@ export interface TrackerReferenceNodeRendererProps {
     referenceKey: string;
     nodeKey: NodeKey;
     view: TrackerReferenceView;
+    /** Predicate id of the relation this link states; null for a plain link. */
+    relation?: string | null;
 }
 export declare function setTrackerReferenceNodeRenderer(renderer: ComponentType<TrackerReferenceNodeRendererProps> | undefined): void;
 export declare function getTrackerReferenceNodeRenderer(): ComponentType<TrackerReferenceNodeRendererProps> | undefined;

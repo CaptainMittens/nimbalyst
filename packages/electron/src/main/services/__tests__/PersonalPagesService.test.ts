@@ -23,6 +23,8 @@ vi.mock('../../database/initialize', () => ({ getDatabase: () => null }));
 vi.mock('../../HistoryManager', () => ({ historyManager: { createSnapshot: vi.fn() } }));
 
 import { SQLiteDatabase } from '../../database/sqlite/SQLiteDatabase';
+import { runMigrations } from '../../database/sqlite/MigrationRunner';
+import { loadBetterSqlite } from '../../database/sqlite/betterSqliteLoader';
 import { PersonalPagesService, personalDocHistoryKey } from '../PersonalPagesService';
 
 const SCHEMA_DIR = path.resolve(__dirname, '..', '..', 'database', 'sqlite', 'schemas');
@@ -56,10 +58,12 @@ describe('PersonalPagesService', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('keeps folders, placements, documents and bodies across a second launch', async () => {
+  it('keeps pages, placements, documents and bodies across a second launch', async () => {
     let service = await open();
+    // A folder command from an older renderer makes a page.
     await service.command(WS, { type: 'register-folder', folderId: 'f1', name: 'Specs', parentFolderId: null, sortOrder: 1 });
     await service.command(WS, { type: 'set-type-placement', typeId: 'decision', parentFolderId: 'f1', sortOrder: 2 });
+    await service.command(WS, { type: 'set-item-placement', itemId: 'item-1', parentId: 'f1', sortOrder: 3 });
     await service.command(WS, {
       type: 'register-document', documentId: 'd1', title: 'Intro', documentType: 'markdown', parentFolderId: 'f1',
       metadata: { metadataVersion: 2, fileExtension: '.md', editorId: 'markdown' },
@@ -74,16 +78,78 @@ describe('PersonalPagesService', () => {
 
     service = await open();
     const snapshot = await service.snapshot(WS);
-    expect(snapshot.containers).toEqual([expect.objectContaining({ folderId: 'f1', name: 'Specs', parentFolderId: null, sortOrder: 1, createdBy: 'local' })]);
+    expect(snapshot.pageTree).toBe(true);
+    expect(snapshot.containers).toEqual([]);
     expect(snapshot.typePlacements).toEqual([expect.objectContaining({ typeId: 'decision', parentFolderId: 'f1', sortOrder: 2, projectId: null })]);
-    expect(snapshot.items).toEqual([expect.objectContaining({
-      documentId: 'd1', title: 'Intro', documentType: 'markdown', parentFolderId: 'f1', teamProjectId: null,
-      metadataVersion: 2, fileExtension: '.md', editorId: 'markdown', createdBy: 'local', trashedAt: null,
-    })]);
-    expect(typeof snapshot.items[0].createdAt).toBe('number');
+    expect(snapshot.itemPlacements).toEqual([expect.objectContaining({ itemId: 'item-1', parentId: 'f1', sortOrder: 3, projectId: null })]);
+    expect(snapshot.items).toEqual([
+      expect.objectContaining({ documentId: 'f1', title: 'Specs', documentType: 'markdown', parentFolderId: null }),
+      expect.objectContaining({
+        documentId: 'd1', title: 'Intro', documentType: 'markdown', parentFolderId: 'f1', teamProjectId: null,
+        metadataVersion: 2, fileExtension: '.md', editorId: 'markdown', createdBy: 'local', trashedAt: null,
+      }),
+    ]);
+    expect(snapshot.items[0]).not.toHaveProperty('metadataVersion');
+    expect(typeof snapshot.items[1].createdAt).toBe('number');
     expect(await service.getBody(WS, 'd1')).toEqual({ content: '# Hello', version: 1 });
     // Another workspace sees none of it.
     expect((await service.snapshot('/ws/other')).items).toEqual([]);
+  });
+
+  it('turns an older build\'s folders into pages, keeps the folder rows, and stays converted on a second launch', async () => {
+    // An older build's database: every migration up to 0049, with its rows.
+    const dbDir = path.join(tmp, 'sqlite-db');
+    const olderSchemas = path.join(tmp, 'schemas-before-0050');
+    fs.mkdirSync(dbDir, { recursive: true });
+    fs.cpSync(SCHEMA_DIR, olderSchemas, { recursive: true });
+    for (const file of fs.readdirSync(olderSchemas)) {
+      if (Number(file.slice(0, 4)) >= 50) fs.rmSync(path.join(olderSchemas, file));
+    }
+    const Sqlite = loadBetterSqlite();
+    const older = new Sqlite(path.join(dbDir, 'nimbalyst.sqlite'));
+    expect(() => runMigrations(older, olderSchemas)).toThrow();
+    expect(older.prepare('SELECT MAX(version) AS v FROM _migrations').get()).toEqual({ v: 49 });
+    const at = '2026-09-01T10:00:00.000Z';
+    older.exec(`
+      INSERT INTO personal_page_folders (workspace_path, folder_id, parent_folder_id, name, sort_order, created_at, updated_at)
+      VALUES ('${WS}', 'f-arch', NULL, 'Architecture', 1, '${at}', '${at}'),
+             ('${WS}', 'f-specs', 'f-arch', 'Specs', 2, '${at}', '${at}'),
+             ('/ws/other', 'f-other', NULL, 'Elsewhere', 0, '${at}', '${at}');
+      INSERT INTO personal_page_documents (workspace_path, document_id, title, document_type, metadata_version, parent_folder_id, body, body_version, created_at, updated_at)
+      VALUES ('${WS}', 'd1', 'Intro', 'markdown', 2, 'f-specs', '# Intro', 3, '${at}', '${at}');
+      INSERT INTO personal_page_type_placements (workspace_path, type_id, parent_folder_id, sort_order, created_at, updated_at)
+      VALUES ('${WS}', 'decision', 'f-arch', 0, '${at}', '${at}');
+    `);
+    older.close();
+
+    let service = await open();
+    let snapshot = await service.snapshot(WS);
+    expect(snapshot.pageTree).toBe(true);
+    expect(snapshot.containers).toEqual([]);
+    expect(snapshot.items.map((doc) => [doc.documentId, doc.title, doc.parentFolderId, doc.documentType])).toEqual([
+      ['d1', 'Intro', 'f-specs', 'markdown'],
+      ['f-arch', 'Architecture', null, 'markdown'],
+      ['f-specs', 'Specs', 'f-arch', 'markdown'],
+    ]);
+    expect(snapshot.typePlacements).toEqual([expect.objectContaining({ typeId: 'decision', parentFolderId: 'f-arch' })]);
+    expect(snapshot.itemPlacements).toEqual([]);
+    expect(await service.getBody(WS, 'f-arch')).toEqual({ content: '', version: 0 });
+    expect(await service.getBody(WS, 'd1')).toEqual({ content: '# Intro', version: 3 });
+    expect((await service.snapshot('/ws/other')).items.map((doc) => doc.documentId)).toEqual(['f-other']);
+    // The folder rows stay, marked, as the record of the old tree.
+    const { rows } = await db.query<{ folder_id: string; converted_at: string | null }>(
+      'SELECT folder_id, converted_at FROM personal_page_folders ORDER BY folder_id',
+    );
+    expect(rows.map((row) => row.folder_id)).toEqual(['f-arch', 'f-other', 'f-specs']);
+    expect(rows.every((row) => typeof row.converted_at === 'string')).toBe(true);
+
+    // Delete a converted page; the second launch must not bring it back.
+    await service.command(WS, { type: 'remove-document', documentId: 'f-specs' });
+    service.dispose();
+    await db.close();
+    service = await open();
+    snapshot = await service.snapshot(WS);
+    expect(snapshot.items.map((doc) => doc.documentId)).toEqual(['d1', 'f-arch']);
   });
 
   it('trashes and restores a document without deleting it', async () => {
@@ -95,47 +161,76 @@ describe('PersonalPagesService', () => {
     expect((await service.snapshot(WS)).items[0].trashedAt).toBeNull();
   });
 
-  it('refuses to move a folder into its own descendant', async () => {
+  it('refuses to move a page into its own descendant or under a missing page', async () => {
     const service = await open();
-    await service.command(WS, { type: 'register-folder', folderId: 'a', name: 'A', parentFolderId: null, sortOrder: 0 });
-    await service.command(WS, { type: 'register-folder', folderId: 'b', name: 'B', parentFolderId: 'a', sortOrder: 0 });
-    await expect(service.command(WS, { type: 'move-folder', folderId: 'a', parentFolderId: 'b' })).rejects.toThrow(/cycle|descendant/i);
+    await service.command(WS, { type: 'register-document', documentId: 'a', title: 'A', documentType: 'markdown', parentFolderId: null });
+    await service.command(WS, { type: 'register-document', documentId: 'b', title: 'B', documentType: 'markdown', parentFolderId: 'a' });
+    await expect(service.command(WS, { type: 'move-document', documentId: 'a', parentFolderId: 'b' })).rejects.toThrow(/cycle|descendant/i);
     await expect(service.command(WS, { type: 'move-folder', folderId: 'a', parentFolderId: 'a' })).rejects.toThrow();
-    const folders = (await service.snapshot(WS)).containers;
-    expect(folders.find((f) => f.folderId === 'a')?.parentFolderId).toBeNull();
+    await expect(service.command(WS, { type: 'set-item-placement', itemId: 'i', parentId: 'gone', sortOrder: 0 })).rejects.toThrow(/Unknown personal page/);
+    const pages = (await service.snapshot(WS)).items;
+    expect(pages.find((page) => page.documentId === 'a')?.parentFolderId).toBeNull();
   });
 
-  it('removes a folder subtree with its documents and placements', async () => {
+  it('removes a page subtree, letting types and typed pages placed in it fall back', async () => {
     const service = await open();
     await service.command(WS, { type: 'register-folder', folderId: 'a', name: 'A', parentFolderId: null, sortOrder: 0 });
     await service.command(WS, { type: 'register-folder', folderId: 'b', name: 'B', parentFolderId: 'a', sortOrder: 0 });
     await service.command(WS, { type: 'register-document', documentId: 'd1', title: 'Deep', documentType: 'markdown', parentFolderId: 'b' });
     await service.command(WS, { type: 'register-document', documentId: 'd2', title: 'Root', documentType: 'markdown', parentFolderId: null });
     await service.command(WS, { type: 'set-type-placement', typeId: 'bug', parentFolderId: 'b', sortOrder: 0 });
+    await service.command(WS, { type: 'set-item-placement', itemId: 'in-b', parentId: 'b', sortOrder: 0 });
+    await service.command(WS, { type: 'set-item-placement', itemId: 'at-root', parentId: null, sortOrder: 0 });
     await service.command(WS, { type: 'remove-folder', folderId: 'a' });
     const snapshot = await service.snapshot(WS);
-    expect(snapshot.containers).toEqual([]);
     expect(snapshot.typePlacements).toEqual([]);
+    expect(snapshot.itemPlacements.map((p) => p.itemId)).toEqual(['at-root']);
     expect(snapshot.items.map((d) => d.documentId)).toEqual(['d2']);
   });
 
-  it('keeps a folder moved out of the subtree before the removal, even mid-removal', async () => {
+  it('keeps a type page\'s prose with its type across moves and subtree removal', async () => {
+    const service = await open();
+    const page = (documentId: string, parentFolderId: string | null) =>
+      service.command(WS, { type: 'register-document', documentId, title: documentId, documentType: 'markdown', parentFolderId });
+    await page('p', null);
+    await page('q', null);
+    await page('p-child', 'p');
+    await service.command(WS, { type: 'set-type-placement', typeId: 'module', parentFolderId: 'p', sortOrder: 0 });
+    await service.command(WS, { type: 'set-type-placement', typeId: 'person', parentFolderId: 'p-child', sortOrder: 0 });
+    await page('type-page:module', 'p');
+    await page('type-page:person', 'p-child');
+    // Prose left under P by an older build while its type sits under Q.
+    await page('type-page:stale', 'p');
+    await service.command(WS, { type: 'set-type-placement', typeId: 'stale', parentFolderId: 'q', sortOrder: 0 });
+    await service.command(WS, { type: 'move-document', documentId: 'type-page:stale', parentFolderId: 'p' });
+
+    // Moving the type moves its prose.
+    await service.command(WS, { type: 'set-type-placement', typeId: 'module', parentFolderId: 'q', sortOrder: 0 });
+    const parentOf = async (id: string) =>
+      (await service.snapshot(WS)).items.find((doc) => doc.documentId === id)?.parentFolderId;
+    expect(await parentOf('type-page:module')).toBe('q');
+
+    await service.command(WS, { type: 'remove-folder', folderId: 'p' });
+    const ids = (await service.snapshot(WS)).items.map((doc) => doc.documentId).sort();
+    // person's type was inside P, so its prose went too; stale's was outside, so it moved out.
+    expect(ids).toEqual(['q', 'type-page:module', 'type-page:stale']);
+    expect(await parentOf('type-page:stale')).toBe('q');
+  });
+
+  it('keeps a page moved out of the subtree before the removal, even mid-removal', async () => {
     const service = await open();
     const seed = async (svc: PersonalPagesService) => {
       await svc.command(WS, { type: 'register-folder', folderId: 'a', name: 'A', parentFolderId: null, sortOrder: 0 });
       await svc.command(WS, { type: 'register-folder', folderId: 'b', name: 'B', parentFolderId: 'a', sortOrder: 0 });
       await svc.command(WS, { type: 'register-document', documentId: 'in-b', title: 'In B', documentType: 'markdown', parentFolderId: 'b' });
     };
-    const survivors = async () => {
-      const snapshot = await service.snapshot(WS);
-      return { folders: snapshot.containers.map((f) => f.folderId), docs: snapshot.items.map((d) => d.documentId) };
-    };
+    const survivors = async () => (await service.snapshot(WS)).items.map((d) => d.documentId);
 
     // Sequential: the move lands first.
     await seed(service);
     await service.command(WS, { type: 'move-folder', folderId: 'b', parentFolderId: null });
     await service.command(WS, { type: 'remove-folder', folderId: 'a' });
-    expect(await survivors()).toEqual({ folders: ['b'], docs: ['in-b'] });
+    expect(await survivors()).toEqual(['b', 'in-b']);
     await service.command(WS, { type: 'remove-folder', folderId: 'b' });
 
     // Interleaved: the move commits after remove-folder has started, right
@@ -154,7 +249,7 @@ describe('PersonalPagesService', () => {
       notify,
     });
     await racing.command(WS, { type: 'remove-folder', folderId: 'a' });
-    expect(await survivors()).toEqual({ folders: ['b'], docs: ['in-b'] });
+    expect(await survivors()).toEqual(['b', 'in-b']);
   });
 
   it('returns a conflict with the current content on a stale expectedVersion', async () => {
@@ -175,18 +270,48 @@ describe('PersonalPagesService', () => {
 describe('PersonalPagesService on PGLite', () => {
   // Runs the worker.js mirror DDL itself, so the PGLite schema cannot drift
   // from what this store queries without failing here.
-  const mirrorDdl = () => {
+  const mirrorDdl = (version = '0049') => {
     const source = fs.readFileSync(path.resolve(__dirname, '..', '..', 'database', 'worker.js'), 'utf8');
-    const start = source.indexOf('Mirror of SQLite migration 0049');
+    const start = source.indexOf(`Mirror of SQLite migration ${version}`);
     const ddl = source.slice(start).match(/exec\(`([\s\S]*?)`\)/);
-    if (start < 0 || !ddl) throw new Error('0049 mirror block not found in worker.js');
+    if (start < 0 || !ddl) throw new Error(`${version} mirror block not found in worker.js`);
     return ddl[1];
   };
+
+  it('turns folders into pages once, keeping the folder rows, across launches', async () => {
+    const { PGlite } = await import('@electric-sql/pglite');
+    const pglite = new PGlite();
+    try {
+      await pglite.exec(mirrorDdl('0049'));
+      await pglite.exec(`
+        INSERT INTO personal_page_folders (workspace_path, folder_id, parent_folder_id, name, sort_order, created_at, updated_at)
+        VALUES ('${WS}', 'f-arch', NULL, 'Architecture', 1, NOW(), NOW()), ('${WS}', 'f-specs', 'f-arch', 'Specs', 2, NOW(), NOW());
+        INSERT INTO personal_page_documents (workspace_path, document_id, title, document_type, parent_folder_id, created_at, updated_at)
+        VALUES ('${WS}', 'd1', 'Intro', 'markdown', 'f-specs', NOW(), NOW());
+      `);
+      await pglite.exec(mirrorDdl('0050'));
+      const pages = async () => (await pglite.query<{ document_id: string; title: string; parent_folder_id: string | null }>(
+        `SELECT document_id, title, parent_folder_id FROM personal_page_documents ORDER BY document_id`,
+      )).rows.map((row) => [row.document_id, row.title, row.parent_folder_id]);
+      expect(await pages()).toEqual([['d1', 'Intro', 'f-specs'], ['f-arch', 'Architecture', null], ['f-specs', 'Specs', 'f-arch']]);
+      const marked = await pglite.query<{ n: number }>('SELECT COUNT(*)::int AS n FROM personal_page_folders WHERE converted_at IS NOT NULL');
+      expect(marked.rows[0].n).toBe(2);
+
+      // The worker reruns the block on every launch: a deleted page stays deleted.
+      await pglite.query(`DELETE FROM personal_page_documents WHERE document_id = 'f-specs'`);
+      await pglite.exec(mirrorDdl('0049'));
+      await pglite.exec(mirrorDdl('0050'));
+      expect(await pages()).toEqual([['d1', 'Intro', 'f-specs'], ['f-arch', 'Architecture', null]]);
+    } finally {
+      await pglite.close();
+    }
+  });
 
   it('round-trips the tree, trash timestamps and a body conflict', async () => {
     const { PGlite } = await import('@electric-sql/pglite');
     const pglite = new PGlite();
-    await pglite.exec(mirrorDdl());
+    await pglite.exec(mirrorDdl('0049'));
+    await pglite.exec(mirrorDdl('0050'));
     const db = {
       query: (sql: string, params?: unknown[]) => pglite.query(sql, params) as Promise<{ rows: any[] }>,
       runTransaction: async (statements: Array<{ sql: string; params?: unknown[] }>) => {
@@ -205,12 +330,22 @@ describe('PersonalPagesService on PGLite', () => {
       expect(await service.updateBody(WS, 'd1', 'stale', 0)).toEqual({ conflict: true, version: 1, content: 'first' });
 
       const snapshot = await service.snapshot(WS);
-      expect(snapshot.containers[0]).toMatchObject({ folderId: 'f1', sortOrder: 1.5 });
-      expect(snapshot.items[0]).toMatchObject({ documentId: 'd1', trashedAt: 1_700_000_000_000, parentFolderId: 'f1' });
-      expect(typeof snapshot.items[0].createdAt).toBe('number');
+      expect(snapshot.items[0]).toMatchObject({ documentId: 'f1', title: 'Specs', parentFolderId: null });
+      expect(snapshot.items[1]).toMatchObject({ documentId: 'd1', trashedAt: 1_700_000_000_000, parentFolderId: 'f1' });
+      expect(typeof snapshot.items[1].createdAt).toBe('number');
+      await service.command(WS, { type: 'set-item-placement', itemId: 'item-1', parentId: 'f1', sortOrder: 0.5 });
+      expect((await service.snapshot(WS)).itemPlacements).toEqual([expect.objectContaining({ itemId: 'item-1', sortOrder: 0.5 })]);
+
+      // Prose of a type placed outside the removed page survives at its type's parent (root here).
+      await service.command(WS, { type: 'register-document', documentId: 'type-page:task', title: 'Tasks', documentType: 'markdown', parentFolderId: 'f1' });
+      await service.command(WS, { type: 'set-type-placement', typeId: 'task', parentFolderId: null, sortOrder: 0 });
+      await service.command(WS, { type: 'move-document', documentId: 'type-page:task', parentFolderId: 'f1' });
 
       await service.command(WS, { type: 'remove-folder', folderId: 'f1' });
-      expect(await service.snapshot(WS)).toEqual({ items: [], containers: [], typePlacements: [] });
+      const after = await service.snapshot(WS);
+      expect(after.items.map((doc) => [doc.documentId, doc.parentFolderId])).toEqual([['type-page:task', null]]);
+      expect(after.itemPlacements).toEqual([]);
+      expect(after.typePlacements.map((placement) => placement.typeId)).toEqual(['task']);
     } finally {
       await pglite.close();
     }

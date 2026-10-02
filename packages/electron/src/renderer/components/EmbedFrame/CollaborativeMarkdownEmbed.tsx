@@ -57,11 +57,13 @@ import type { CollaborativeEmbedProviderResource } from '../../services/Collabor
 interface CollaborativeMarkdownEmbedProps {
   host: EditorHost;
   resource: CollaborativeEmbedProviderResource;
+  /** The fixed formatting toolbar while editable; a page body uses the floating one. */
+  toolbar?: boolean;
 }
 
 export const CollaborativeMarkdownEmbed: React.FC<
   CollaborativeMarkdownEmbedProps
-> = ({ host, resource }) => {
+> = ({ host, resource, toolbar = true }) => {
   const [readOnly, setReadOnly] = useState(host.readOnly !== false);
   useEffect(() => {
     // `onReadOnlyChanged` invokes the callback immediately with the current
@@ -118,8 +120,8 @@ export const CollaborativeMarkdownEmbed: React.FC<
   );
 
   const editorConfig = useMemo(
-    () => ({ editable: !readOnly, showToolbar: !readOnly }),
-    [readOnly]
+    () => ({ editable: !readOnly, showToolbar: toolbar && !readOnly }),
+    [readOnly, toolbar]
   );
 
   const documentPath = useMemo(

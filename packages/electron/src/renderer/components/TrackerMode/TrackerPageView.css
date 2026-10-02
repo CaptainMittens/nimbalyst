@@ -1,0 +1,58 @@
+/**
+ * A typed page reads as a document tab: the header, Links and notices line up
+ * with the editor's text column (the editor's own horizontal padding), and the
+ * body grows with its content so the page scrolls as one column.
+ */
+
+.tracker-page-view-header,
+.tracker-page-view-gutter,
+.tracker-page-view-links {
+  padding-left: 46px;
+  padding-right: 46px;
+}
+
+.tracker-page-view-header {
+  padding-top: 20px;
+}
+
+.tracker-page-view-links {
+  padding-top: 12px;
+  padding-bottom: 48px;
+}
+
+.tracker-page-view-links .tracker-links-section {
+  border-top: 1px solid var(--nim-border);
+  padding-top: 12px;
+}
+
+/* One row with the type chip first: the chips join the row instead of
+   forming a block of their own (which wrapped below the type chip). */
+.tracker-page-view-props .tracker-field-pills {
+  display: contents;
+}
+
+/* Values stay on one line; the chip's title carries the full text. */
+.tracker-page-view-props .tracker-field-pill-labeled {
+  max-width: 280px;
+}
+
+.tracker-page-view-add-field {
+  padding: 2px 6px;
+}
+
+/* The editor reserves 400px below the last line for a tab that is all body;
+   here the Links section follows the body, so keep a normal gap. */
+.tracker-page-view-body .ContentEditable__root {
+  padding-bottom: 24px;
+  min-height: 120px;
+}
+
+/* Matches the editor's own narrow-window padding. */
+@media (max-width: 1025px) {
+  .tracker-page-view-header,
+  .tracker-page-view-gutter,
+  .tracker-page-view-links {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+}

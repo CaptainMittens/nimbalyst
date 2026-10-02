@@ -17,6 +17,8 @@ export interface TrackerReferenceNodeRendererProps {
   referenceKey: string;
   nodeKey: NodeKey;
   view: TrackerReferenceView;
+  /** Predicate id of the relation this link states; null for a plain link. */
+  relation?: string | null;
 }
 
 let trackerReferenceNodeRenderer:

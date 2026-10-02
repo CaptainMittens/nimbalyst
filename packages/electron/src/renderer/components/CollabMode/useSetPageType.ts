@@ -1,0 +1,243 @@
+/**
+ * The real effects behind `setPageType` for one Pages section: reading the
+ * page body (team room or local store), creating and publishing the item
+ * through the normal creation path, the read-back IPC, the docs session's
+ * placement and trash commands, and reopening the item in the page's tab spot.
+ */
+
+import { useCallback, useState } from 'react';
+import { store } from '@nimbalyst/runtime/store';
+import { globalRegistry } from '@nimbalyst/tracker-schema';
+import {
+  buildTrackerCreatePayload,
+  formatTrackerValidationErrors,
+} from '@nimbalyst/runtime/plugins/TrackerPlugin/models/trackerCreatePayload';
+import { buildCollabUri, isCollabUri, parseCollabUri } from '@nimbalyst/collab-protocol';
+import type { CollabScope } from '@nimbalyst/collab-client/core';
+import type { CollabDocsSession, SharedDocument } from '@nimbalyst/collab-client/docs';
+import { PERSONAL_PAGE_TAB_PREFIX, useTabsActions, type TabData } from '../../contexts/TabsContext';
+import { readHeadlessCollabDocContent } from '../../services/HeadlessCollabDocument';
+import {
+  buildDocumentReplicaCacheKey,
+  getDocumentReplicaCache,
+  type DocumentReplicaAcquisition,
+} from '../../services/DocumentReplicaCache';
+import { errorNotificationService } from '../../services/ErrorNotificationService';
+import { getCollabConfig } from '../../utils/collabDocumentOpener';
+import { openPageTab } from './collabPageTabs';
+import { flushPersonalPageBody } from './usePersonalPageBody';
+import {
+  setPageType,
+  type CreatedPageItem,
+  type ItemBodyCheck,
+  type ItemPlacementResult,
+  type PageCopy,
+  type PageTypeLane,
+  type SetPageTypeDependencies,
+} from './setPageType';
+
+type TabsActions = ReturnType<typeof useTabsActions>;
+
+export interface SetPageTypeContext {
+  lane: PageTypeLane;
+  workspacePath: string;
+  session: CollabDocsSession;
+  /** Team only: the org the page's room belongs to. */
+  teamScope: CollabScope | null;
+  tabsActions: TabsActions;
+}
+
+function isPageTab(tab: TabData, lane: PageTypeLane, pageId: string): boolean {
+  if (lane === 'personal') return tab.filePath === `${PERSONAL_PAGE_TAB_PREFIX}${pageId}`;
+  if (!isCollabUri(tab.filePath)) return false;
+  try {
+    return parseCollabUri(tab.filePath).documentId === pageId;
+  } catch {
+    return false;
+  }
+}
+
+/** The item takes the page tab's place in the strip; the page tab closes. */
+function openItemInPlace(context: SetPageTypeContext, itemId: string, pageId: string, title: string): void {
+  const { tabsActions, lane } = context;
+  const before = tabsActions.getSnapshot();
+  const pageTab = [...before.tabs.values()].find((tab) => isPageTab(tab, lane, pageId));
+  const pageIndex = pageTab ? before.tabOrder.indexOf(pageTab.id) : -1;
+  const itemTabId = openPageTab(tabsActions.addTab, { kind: 'tracker', artifactId: itemId, title });
+  if (!pageTab) return;
+  const itemIndex = itemTabId ? tabsActions.getSnapshot().tabOrder.indexOf(itemTabId) : -1;
+  if (itemIndex >= 0 && pageIndex >= 0) tabsActions.reorderTabs(itemIndex, pageIndex);
+  tabsActions.removeTab(pageTab.id);
+}
+
+function countChildren(session: CollabDocsSession, pageId: string): number {
+  const pages = session.getDocuments().filter((document) => document.parentFolderId === pageId).length;
+  const types = store.get(session.atoms.typePlacements).filter((placement) => placement.parentFolderId === pageId).length;
+  const items = session.getItemPlacements().filter((placement) => placement.parentId === pageId).length;
+  return pages + types + items;
+}
+
+const OPEN_EDITOR_FLUSH_TIMEOUT_MS = 8_000;
+
+/**
+ * Get an open editor's last edits stored before the page is copied. A personal
+ * page saves on an 800ms debounce; a team page's tab holds its own room
+ * connection, whose outbox can still carry edits the server has not seen.
+ */
+async function flushPageEditor(context: SetPageTypeContext, pageId: string): Promise<void> {
+  if (context.lane === 'personal') {
+    await flushPersonalPageBody(context.workspacePath, pageId);
+    return;
+  }
+  const { teamScope, tabsActions } = context;
+  if (!teamScope) return;
+  const pageTab = [...tabsActions.getSnapshot().tabs.values()].find((tab) => isPageTab(tab, 'team', pageId));
+  const config = pageTab ? getCollabConfig(teamScope, pageTab.filePath) : undefined;
+  if (!config) return;
+  const cache = getDocumentReplicaCache();
+  const key = buildDocumentReplicaCacheKey({ accountId: config.accountId, orgId: config.orgId, documentId: config.documentId });
+  if (!cache.has(key)) return;
+  let acquisition: DocumentReplicaAcquisition;
+  try {
+    // Only join the tab's live connection; never open a new one here.
+    acquisition = await cache.acquire(key, () => Promise.reject(new Error('The page editor closed')));
+  } catch {
+    return;
+  }
+  try {
+    if (!(await acquisition.syncProvider.flushWithAck(OPEN_EDITOR_FLUSH_TIMEOUT_MS))) {
+      throw new Error('the page has edits that have not reached the team yet');
+    }
+  } finally {
+    acquisition.release();
+  }
+}
+
+async function readPageMarkdown(context: SetPageTypeContext, pageId: string): Promise<PageCopy> {
+  if (context.lane === 'personal') {
+    const body = (await window.electronAPI.invoke('personal-pages:get-body', context.workspacePath, pageId)) as
+      { content: string; version: number } | null;
+    return { markdown: body?.content ?? '', version: body?.version };
+  }
+  if (!context.teamScope) throw new Error('This project is not connected to its team.');
+  return {
+    markdown: await readHeadlessCollabDocContent(buildCollabUri(context.teamScope.orgId, pageId), context.workspacePath),
+  };
+}
+
+/** Personal: the stored version. Team: the room's text, read again. */
+async function pageUnchangedSince(context: SetPageTypeContext, pageId: string, copy: PageCopy): Promise<boolean> {
+  await flushPageEditor(context, pageId);
+  const current = await readPageMarkdown(context, pageId);
+  return context.lane === 'personal'
+    ? current.version === copy.version && current.markdown === copy.markdown
+    : current.markdown === copy.markdown;
+}
+
+/**
+ * The session resolves `{ ok }` once the placement is stored (3b-T). Anything
+ * else is unconfirmed, and an unconfirmed placement never lets the page go.
+ */
+async function placeItem(session: CollabDocsSession, itemId: string, parentId: string | null): Promise<ItemPlacementResult> {
+  const result: unknown = await session.setItemPlacement(itemId, parentId);
+  if (result && typeof result === 'object' && 'ok' in result) {
+    const placed = result as { ok: boolean; error?: string };
+    return placed.ok ? { ok: true } : { ok: false, error: placed.error || 'the placement was refused' };
+  }
+  return { ok: false, error: 'the placement was not confirmed' };
+}
+
+async function createItem(
+  context: SetPageTypeContext,
+  input: { typeId: string; title: string; markdown: string },
+): Promise<CreatedPageItem> {
+  const { workspacePath } = context;
+  const itemId = `${globalRegistry.get(input.typeId)?.idPrefix || input.typeId.slice(0, 3)}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+  const built = buildTrackerCreatePayload(
+    input.typeId,
+    { title: input.title, content: input.markdown, creationRequestId: itemId },
+    { workspacePath, generateId: () => itemId },
+  );
+  if (!built.ok) throw new Error(formatTrackerValidationErrors(built.errors));
+  const payload = built.payload;
+  // The page was already visible to the team, so a draft-by-default team type
+  // still publishes it; otherwise the page would vanish for teammates.
+  if (context.lane === 'team' && payload.draftByDefault) {
+    payload.customFields = { ...payload.customFields, share: { status: 'team', body: 'team' } };
+  }
+  const result = await window.electronAPI.documentService.createTrackerItem(payload);
+  if (!result.success) throw new Error(result.error || 'Could not create the item');
+  let publication = result.publication ?? { itemId, status: 'local' as const };
+  if (publication.status === 'pending') {
+    // Publishes the metadata, seeds the body room from the saved body and
+    // waits for the room's acknowledgment.
+    publication = await window.electronAPI.documentService.publishTrackerCreation({ workspacePath, itemId });
+  }
+  return { itemId, publication: publication.status, ...(publication.error ? { error: publication.error } : {}) };
+}
+
+export function buildSetPageTypeDependencies(context: SetPageTypeContext, title: string): SetPageTypeDependencies {
+  const { session, workspacePath, lane } = context;
+  return {
+    childCount: (pageId) => countChildren(session, pageId),
+    flushPageEditor: (pageId) => flushPageEditor(context, pageId),
+    readPageMarkdown: (pageId) => readPageMarkdown(context, pageId),
+    createItem: (input) => createItem(context, input),
+    verifyItemBody: (itemId, markdown) => window.electronAPI.invoke('tracker-page-type:check-body', {
+      workspacePath,
+      itemId,
+      expected: markdown,
+      lane,
+    }) as Promise<ItemBodyCheck>,
+    removeItem: async (itemId) => {
+      const result = await window.electronAPI.documentService.deleteTrackerItem({ itemId });
+      if (!result.success) throw new Error(result.error || 'Delete failed');
+    },
+    setItemPlacement: (itemId, parentId) => placeItem(session, itemId, parentId),
+    pageUnchangedSince: (pageId, copy) => pageUnchangedSince(context, pageId, copy),
+    trashPage: async (pageId) => session.trashDocument(pageId),
+    openItem: (itemId, pageId) => openItemInPlace(context, itemId, pageId, title),
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  };
+}
+
+/** Runs Set type for the picked page and reports anything short of success. */
+export function useSetPageType(workspacePath: string, teamScope: CollabScope | null) {
+  const tabsActions = useTabsActions();
+  const [running, setRunning] = useState(false);
+
+  const run = useCallback(async (
+    lane: PageTypeLane,
+    session: CollabDocsSession,
+    page: SharedDocument,
+    typeId: string,
+  ): Promise<boolean> => {
+    setRunning(true);
+    try {
+      const title = page.title.trim() || 'Untitled';
+      const outcome = await setPageType(
+        {
+          lane,
+          typeId,
+          page: {
+            documentId: page.documentId,
+            title,
+            documentType: page.documentType,
+            parentId: page.parentFolderId ?? null,
+          },
+        },
+        buildSetPageTypeDependencies({ lane, workspacePath, session, teamScope, tabsActions }, title),
+      );
+      if (outcome.status === 'refused') {
+        errorNotificationService.showWarning('Cannot set the type', outcome.message, { allowDuplicate: true });
+      } else if (outcome.status === 'failed') {
+        errorNotificationService.showError('Set type did not finish', outcome.message);
+      }
+      return outcome.status === 'done';
+    } finally {
+      setRunning(false);
+    }
+  }, [workspacePath, teamScope, tabsActions]);
+
+  return { run, running };
+}

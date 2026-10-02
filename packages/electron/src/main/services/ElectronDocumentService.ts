@@ -27,7 +27,7 @@ import {
   reindexItemRelationshipsAfterWrite,
   reindexItemsRelationships,
   trackerRowUpdatedToIso,
-  rebuildWorkspaceRelationshipIndex,
+  ensureWorkspaceRelationshipIndex,
 } from './tracker/trackerRelationshipIndexStore';
 import { propagateInverseRelationships } from './tracker/inverseRelationshipWrites';
 import { applyRelationshipFieldWrites } from './tracker/relationshipFieldWrite';
@@ -2341,6 +2341,9 @@ export class ElectronDocumentService implements DocumentService {
         [row.id, newBodyVersion, contentJson]
       );
     }
+    // Body links are relationship edges; keep them with the write.
+    await reindexItemRelationshipsAfterWrite(row.workspace, row.id, data, globalRegistry.get(row.type)?.fields ?? [],
+      trackerRowUpdatedToIso(updateResult.rows[0]?.updated), database as any, content ?? null);
 
     if (updateResult.rows.length > 0) {
       const item = this.rowToTrackerItem(updateResult.rows[0]);
@@ -2747,6 +2750,8 @@ export class ElectronDocumentService implements DocumentService {
             [resolvedRow.id, newBodyVersion, contentJson]
           );
         }
+        await reindexItemRelationshipsAfterWrite(resolvedRow.workspace, resolvedRow.id, mergedData, fieldDefs,
+          null, database as any, normalizedDescription ?? null);
       } else {
         await database.query(
           `UPDATE tracker_items SET data = $1, updated = NOW() WHERE id = $2`,
@@ -4380,27 +4385,12 @@ export function setupDocumentServiceHandlers(resolver: DocumentServiceResolver) 
   // per workspace on first request, then return incoming links for an item. The
   // UI resolves source titles from its already-loaded items map, so we return
   // only the edge identity.
-  // Throttle full-workspace rebuilds: cheap enough to re-run so MCP/agent writes
-  // (which don't reindex incrementally) surface in backlinks, but not on every
-  // rapid item open. UI field edits reindex their own item immediately.
-  const relationshipIndexBuiltAt = new Map<string, number>();
-  const RELATIONSHIP_INDEX_TTL_MS = 2000;
-
-  async function ensureRelationshipIndex(workspace: string): Promise<void> {
-    const last = relationshipIndexBuiltAt.get(workspace) ?? 0;
-    if (Date.now() - last < RELATIONSHIP_INDEX_TTL_MS) return;
-    relationshipIndexBuiltAt.set(workspace, Date.now()); // set before await to dedupe concurrent builds
-    try {
-      await rebuildWorkspaceRelationshipIndex(
-        workspace,
-        (type) => globalRegistry.get(type)?.fields ?? [],
-        database as any,
-      );
-    } catch (err) {
-      relationshipIndexBuiltAt.delete(workspace); // allow a retry on next request
-      console.error('[DocumentService] relationship index build failed:', err);
-    }
-  }
+  // Rebuilds are throttled per workspace (shared with the Links section IPC).
+  const ensureRelationshipIndex = (workspace: string) => ensureWorkspaceRelationshipIndex(
+    workspace,
+    (type) => globalRegistry.get(type)?.fields ?? [],
+    database as any,
+  );
 
   safeHandle('document-service:tracker-item-backlinks', async (_event, payload: { itemId: string }) => {
     try {

@@ -34,6 +34,8 @@ interface CollaborativeEmbedEditorProps {
    * or an editor that never registers, simply has no viewport.
    */
   onViewportRegistered?: (viewport: EditorViewport | null) => void;
+  /** Markdown only: the fixed formatting toolbar while editable (default on). */
+  toolbar?: boolean;
 }
 
 export const CollaborativeEmbedEditor: React.FC<
@@ -44,6 +46,7 @@ export const CollaborativeEmbedEditor: React.FC<
   readOnly = true,
   onConnectionReleased,
   onViewportRegistered,
+  toolbar,
 }) => {
   const { theme } = useTheme();
   const themeRef = useRef(theme);
@@ -199,7 +202,7 @@ export const CollaborativeEmbedEditor: React.FC<
     // `acquisition` is non-null whenever `host` is -- they are built from the
     // same memo -- but narrowing needs it said out loud.
     return acquisition === null ? null : (
-      <CollaborativeMarkdownEmbed host={host} resource={acquisition.resource} />
+      <CollaborativeMarkdownEmbed host={host} resource={acquisition.resource} toolbar={toolbar} />
     );
   }
 

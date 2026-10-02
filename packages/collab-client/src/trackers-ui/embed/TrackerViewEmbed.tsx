@@ -19,7 +19,7 @@ import { useTrackerViewRows } from '../useTrackerViewRows';
 import { resolveViewMode } from '../resolveViewMode';
 import { TrackerListView } from '../TrackerListView';
 import { TrackerBoardSurface } from '../board/TrackerBoardSurface';
-import { TrackerGridSurface } from '../grid/TrackerGridSurface';
+import { TrackerGridSurface, type TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
 
 const DEFAULT_BODY_HEIGHT_PX = 420;
 const MODE_LABEL: Record<string, string> = {
@@ -50,6 +50,8 @@ export interface TrackerViewEmbedProps {
   variant?: 'card' | 'page';
   /** Body height in pixels for the `card` variant. */
   height?: number;
+  /** Read-only columns after the fields, in table mode (a type page's Where). */
+  derivedColumns?: readonly TrackerGridDerivedColumn[];
 }
 
 /** Draws a view the caller supplies, without looking it up among the saved views. */
@@ -59,6 +61,7 @@ export function TrackerViewEmbed({
   onOpenItem,
   variant = 'card',
   height,
+  derivedColumns,
 }: TrackerViewEmbedProps): JSX.Element {
   const { identity, capabilities } = useTrackersUI();
   const records = useTrackerDataSelector((state) => state.records);
@@ -74,6 +77,7 @@ export function TrackerViewEmbed({
       onOpenItem={onOpenItem}
       height={height ?? DEFAULT_BODY_HEIGHT_PX}
       variant={variant}
+      derivedColumns={derivedColumns}
     />
   );
 }
@@ -88,6 +92,7 @@ function LoadedViewEmbed({
   onOpenItem,
   height,
   variant,
+  derivedColumns,
 }: {
   view: SavedView;
   records: TrackerRecord[];
@@ -98,6 +103,7 @@ function LoadedViewEmbed({
   onOpenItem?: (itemId: string) => void;
   height: number;
   variant: 'card' | 'page';
+  derivedColumns?: readonly TrackerGridDerivedColumn[];
 }): JSX.Element {
   const { definition } = view;
   // Readiness is a property of the whole dependency graph, so it reads every record.
@@ -122,6 +128,7 @@ function LoadedViewEmbed({
           resolveRelationshipLabel={resolveRelationshipLabel}
           onOpenItem={onOpenItem}
           loaded={loaded}
+          derivedColumns={derivedColumns}
         />
       );
       break;

@@ -1,6 +1,6 @@
 import type { CollabCommandResult, CollabDataChange, CollabDataSnapshot, CollabDataSource, Unsubscribe } from '../core/index';
-import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
-export type { SharedTypePlacement } from './types';
+import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedTypePlacement } from './types';
+export type { SharedItemPlacement, SharedTypePlacement } from './types';
 export type CollabDocsCommand = {
     type: 'register-document';
     documentId: string;
@@ -60,12 +60,24 @@ export type CollabDocsCommand = {
 } | {
     type: 'refresh-type-placements';
 } | {
+    type: 'set-item-placement';
+    itemId: string;
+    parentId: string | null;
+    sortOrder: number;
+} | {
+    type: 'remove-item-placement';
+    itemId: string;
+} | {
+    type: 'refresh-item-placements';
+} | {
     type: 'reconnect';
 };
 export interface CollabDocsCommandResult extends CollabCommandResult {
     folders?: SharedFolder[] | null;
     /** `refresh-type-placements` only: the server list, or null on timeout. */
     typePlacements?: SharedTypePlacement[] | null;
+    /** `refresh-item-placements` only: the server list, or null on timeout. */
+    itemPlacements?: SharedItemPlacement[] | null;
     /**
      * `register-document` only: whether the server confirmed the index row is
      * committed. `false` means unconfirmed (older server, or queued offline) —
@@ -85,6 +97,14 @@ export interface CollabDocsCommandResult extends CollabCommandResult {
  */
 export interface CollabDocsSnapshot extends CollabDataSnapshot<SharedDocument, SharedFolder> {
     typePlacements?: SharedTypePlacement[];
+    /** Typed pages placed in the tree; authoritative when present, like `typePlacements`. */
+    itemPlacements?: SharedItemPlacement[];
+    /**
+     * True once the store has converted folders into pages: the tree is built
+     * from documents (`parentFolderId` names the parent page) and `containers`
+     * is ignored. Absent from an older server, which keeps the folder tree.
+     */
+    pageTree?: boolean;
 }
 export type CollabDocsDataChange = Exclude<CollabDataChange<SharedDocument, SharedFolder>, {
     type: 'snapshot';

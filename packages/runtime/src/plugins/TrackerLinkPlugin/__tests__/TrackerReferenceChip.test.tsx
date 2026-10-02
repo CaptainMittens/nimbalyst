@@ -9,8 +9,12 @@ import {
   upsertTrackerItemAtom,
 } from '../../TrackerPlugin/trackerDataAtoms';
 import { TrackerReferenceChip } from '../TrackerReferenceChip';
-import { createEditor } from 'lexical';
+import { $getNodeByKey, $getRoot, $createParagraphNode, createEditor } from 'lexical';
+import { LexicalComposerContext, createLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+import { globalRegistry, type PredicateDefinition } from '@nimbalyst/tracker-schema';
 import { $createTrackerReferenceNode, TrackerReferenceNode } from '../TrackerReferenceNode';
+import { trackerReferenceRelationOptions } from '../TrackerReferenceRelationMenu';
+import { TrackerReferenceSourceProvider } from '../trackerReferenceSource';
 
 const trackerRecord: TrackerRecord = {
   id: 'bug_1',
@@ -37,7 +41,8 @@ describe('TrackerReferenceChip', () => {
   it.each(['chip', 'card', 'statements'] as const)('preserves %s view through DOM copy/paste', (view) => {
     const editor = createEditor({ nodes: [TrackerReferenceNode], onError: error => { throw error; } });
     editor.update(() => {
-      const node = $createTrackerReferenceNode('NIM-1', view);
+      const relation = view === 'card' ? 'built-on' : null;
+      const node = $createTrackerReferenceNode('NIM-1', view, relation);
       const dom = node.createDOM({ namespace: 'test', theme: { trackerReference: 'host-theme' } });
       expect(dom.classList.contains('host-theme')).toBe(true);
       if (view !== 'chip') expect(dom.classList.contains(`tracker-reference--${view}`)).toBe(true);
@@ -45,6 +50,7 @@ describe('TrackerReferenceChip', () => {
       const conversion = TrackerReferenceNode.importDOM()!.span(exported)!;
       const restored = conversion.conversion(exported)!.node as TrackerReferenceNode;
       expect(restored.getView()).toBe(view);
+      expect(restored.getRelation()).toBe(relation);
       expect(restored.getReferenceKey()).toBe('NIM-1');
       expect(node.isInline()).toBe(true);
       expect(node.updateDOM(restored)).toBe(false);
@@ -55,6 +61,62 @@ describe('TrackerReferenceChip', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('offers the relations allowed for the page pair and stores the chosen one on the node', async () => {
+    const predicates: PredicateDefinition[] = [
+      { id: 'fixes', label: 'fixes', inverseLabel: 'fixed by', subjectKinds: ['module'], objectKinds: ['bug'], valueShape: 'entity', direction: 'directed' },
+      { id: 'built-on', label: 'built on', subjectKinds: ['module'], objectKinds: ['technology'], valueShape: 'entity', direction: 'directed' },
+      { id: 'cost', label: 'cost', subjectKinds: ['*'], valueShape: 'quantity', direction: 'directed' },
+    ];
+    // The registry wiring resolves both kinds through `extends`.
+    const fakeRegistry = {
+      getAllPredicates: () => predicates,
+      getPredicate: (id: string) => predicates.find(p => p.id === id),
+      get: (type: string) => (type === 'service' ? { extends: 'module' } : undefined),
+    };
+    expect(trackerReferenceRelationOptions(fakeRegistry, 'service', 'bug').map(o => o.predicateId)).toEqual(['fixes']);
+
+    const previous = globalRegistry.getAllPredicates();
+    globalRegistry.setPredicates(predicates);
+    try {
+      const editor = createEditor({ nodes: [TrackerReferenceNode], onError: error => { throw error; } });
+      let nodeKey = '';
+      editor.update(() => {
+        const node = $createTrackerReferenceNode('NIM-1');
+        $getRoot().append($createParagraphNode().append(node));
+        nodeKey = node.getKey();
+      }, { discrete: true });
+      const store = createStore();
+      store.set(trackerItemsMapAtom, new Map([[trackerRecord.id, trackerRecord]]));
+      const chip = (relation: string | null) => (
+        <Provider store={store}>
+          <LexicalComposerContext.Provider value={[editor, createLexicalComposerContext(null, null)]}>
+            <TrackerReferenceSourceProvider value={{ itemId: 'mod_1', type: 'module' }}>
+              <TrackerReferenceChip referenceKey="NIM-1" nodeKey={nodeKey} relation={relation} />
+            </TrackerReferenceSourceProvider>
+          </LexicalComposerContext.Provider>
+        </Provider>
+      );
+      const { container, rerender } = render(chip(null));
+      fireEvent.click(container.querySelector<HTMLElement>('.tracker-reference-chip')!);
+
+      const radios = screen.getAllByRole('radio');
+      expect(radios.map(r => r.getAttribute('data-relation'))).toEqual(['fixes', '']);
+      expect(radios[1].getAttribute('aria-checked')).toBe('true');
+      await act(async () => {
+        fireEvent.click(radios[0]);
+      });
+      expect(editor.getEditorState().read(() => ($getNodeByKey(nodeKey) as TrackerReferenceNode).getRelation())).toBe('fixes');
+
+      // Read-only: the stored relation shows, with no choice.
+      editor.setEditable(false);
+      rerender(chip('fixes'));
+      expect(screen.queryAllByRole('radio')).toHaveLength(0);
+      expect(document.querySelector('.tracker-reference-relation')?.textContent).toBe('Linked as fixes');
+    } finally {
+      globalRegistry.setPredicates(previous);
+    }
   });
 
   it('uses canonical theme tokens for the shared chip and preview', () => {

@@ -181,6 +181,7 @@ const COPY_TABLES: readonly string[] = [
   'personal_page_folders',
   'personal_page_documents',
   'personal_page_type_placements',
+  'personal_page_item_placements',
 ];
 
 /**

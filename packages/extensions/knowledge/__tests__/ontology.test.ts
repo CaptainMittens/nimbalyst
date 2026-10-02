@@ -105,9 +105,8 @@ describe('knowledge ontology references', () => {
     for (const predicate of all) {
       expect(predicate.inverseLabel, predicate.id).toBeTruthy();
       for (const kind of predicate.subjectKinds) expect(KINDS).toContain(kind);
-      for (const qualifier of Object.values(predicate.qualifiers ?? {})) {
-        for (const target of qualifier.targetTrackerTypes ?? []) expect(KINDS).toContain(target);
-      }
+      // A relation is a named predicate with an inverse; packs ship no qualifiers.
+      expect(predicate, predicate.id).not.toHaveProperty('qualifiers');
     }
   });
 

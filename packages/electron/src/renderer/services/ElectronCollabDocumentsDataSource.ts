@@ -10,9 +10,10 @@ import type {
   CollabDocsSnapshot,
   SharedDocument,
   SharedFolder,
+  SharedItemPlacement,
   SharedTypePlacement,
 } from '@nimbalyst/collab-client/docs';
-import type { TypePlacementNode } from '@nimbalyst/collab-protocol';
+import type { ItemPlacementNode, TypePlacementNode } from '@nimbalyst/collab-protocol';
 import {
   TeamSyncProvider,
   type TeamDocIndexEntry,
@@ -23,6 +24,7 @@ import {
 import { asTeamMemberId } from '@nimbalyst/runtime/auth/jwtScopes';
 import { appendCollabUrlQuery, createProxiedWebSocket } from '../utils/proxiedWebSocket';
 import { teamMemberDisplayName } from '../utils/teamMemberDisplayName';
+import { ItemPlacementConfirmations } from './itemPlacementConfirmations';
 
 export interface ElectronCollabDocumentsDataSourceEvents {
   observeStatus?: (status: ReturnType<TeamSyncProvider['getStatus']>, error?: unknown) => void;
@@ -42,6 +44,8 @@ export interface ElectronCollabDocumentsDataSourceOptions {
   getJwt: TeamSyncConfig['getJwt'];
   events?: ElectronCollabDocumentsDataSourceEvents;
   createProvider?: (config: TeamSyncConfig) => TeamSyncProvider;
+  /** How long an item placement write waits for the server; defaults to 6s. */
+  placementConfirmTimeoutMs?: number;
 }
 
 /** True when the main-process WebSocket proxy IPC is reachable. */
@@ -93,6 +97,18 @@ function mapTypePlacement(placement: TypePlacementNode): SharedTypePlacement {
   };
 }
 
+function mapItemPlacement(placement: ItemPlacementNode): SharedItemPlacement {
+  return {
+    itemId: placement.itemId,
+    projectId: placement.projectId,
+    parentId: placement.parentId,
+    sortOrder: placement.sortOrder,
+    createdBy: placement.createdBy,
+    createdAt: placement.createdAt,
+    updatedAt: placement.updatedAt,
+  };
+}
+
 function mapMember(member: TeamMemberInfo): TeamMemberSummary {
   return {
     memberId: asTeamMemberId(member.userId),
@@ -107,6 +123,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
   private readonly listeners = new Set<(change: CollabDocsDataChange) => void>();
   private readonly memberListeners = new Set<() => void>();
   private readonly provider: TeamSyncProvider;
+  private readonly placementConfirmations: ItemPlacementConfirmations;
   private readonly observeStatus?: ElectronCollabDocumentsDataSourceEvents['observeStatus'];
   private connectPromise: Promise<void> | null = null;
   private disposed = false;
@@ -115,6 +132,8 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     const { scope, events = {} } = options;
     const { observeStatus, ...providerEvents } = events;
     this.observeStatus = observeStatus;
+    const confirmations = new ItemPlacementConfirmations(options.placementConfirmTimeoutMs);
+    this.placementConfirmations = confirmations;
     const emitSnapshot = () => this.emit({
       type: 'snapshot',
       snapshot: this.currentSnapshot(),
@@ -149,7 +168,21 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       onTypePlacementsLoaded: emitSnapshot,
       onTypePlacementChanged: emitSnapshot,
       onTypePlacementsRemoved: emitSnapshot,
+      // Each also settles the author's pending write; see itemPlacementConfirmations.
+      onItemPlacementsLoaded: (placements) => {
+        confirmations.placementsLoaded(placements);
+        emitSnapshot();
+      },
+      onItemPlacementChanged: (placement) => {
+        confirmations.placementChanged(placement);
+        emitSnapshot();
+      },
+      onItemPlacementsRemoved: (itemIds) => {
+        confirmations.placementsRemoved(itemIds);
+        emitSnapshot();
+      },
       onStatusChange: (status) => {
+        confirmations.connectionChanged(status === 'connected');
         this.emit({ type: 'status', status });
         observeStatus?.(status);
       },
@@ -281,6 +314,24 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
           ok: true,
           typePlacements: (await this.provider.refreshTypePlacements())?.map(mapTypePlacement) ?? null,
         };
+      // Resolve only once the server confirmed; reject on a refusal or timeout.
+      case 'set-item-placement': {
+        const confirmed = this.placementConfirmations.expect(command.itemId, { parentId: command.parentId });
+        this.provider.setItemPlacement(command.itemId, command.parentId, command.sortOrder);
+        await confirmed;
+        return { ok: true };
+      }
+      case 'remove-item-placement': {
+        const confirmed = this.placementConfirmations.expect(command.itemId, null);
+        this.provider.removeItemPlacement(command.itemId);
+        await confirmed;
+        return { ok: true };
+      }
+      case 'refresh-item-placements':
+        return {
+          ok: true,
+          itemPlacements: (await this.provider.refreshItemPlacements())?.map(mapItemPlacement) ?? null,
+        };
       case 'reconnect':
         this.provider.reconnectNow();
         return { ok: true };
@@ -291,16 +342,21 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     if (this.disposed) return;
     this.disposed = true;
     this.listeners.clear();
+    this.placementConfirmations.dispose();
     this.provider.destroy();
   }
 
   private currentSnapshot(): CollabDocsSnapshot {
     // Omitted until the server has sent a list, so the session keeps its own.
     const typePlacements = this.provider.getTypePlacements();
+    const itemPlacements = this.provider.getItemPlacements();
     return {
       items: this.provider.getDocuments().map(mapDocument),
       containers: this.provider.getFolders().map(mapFolder),
       ...(typePlacements ? { typePlacements: typePlacements.map(mapTypePlacement) } : {}),
+      ...(itemPlacements ? { itemPlacements: itemPlacements.map(mapItemPlacement) } : {}),
+      // The server's snapshot flag: its folders are now pages.
+      ...(this.provider.isPageTree() ? { pageTree: true } : {}),
     };
   }
 

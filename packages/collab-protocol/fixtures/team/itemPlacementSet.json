@@ -1,0 +1,7 @@
+{
+  "type": "itemPlacementSet",
+  "itemId": "NIM-42",
+  "projectId": "project-1",
+  "parentId": "page-1",
+  "sortOrder": 2
+}

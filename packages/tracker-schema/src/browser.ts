@@ -21,7 +21,9 @@
 export * from './TrackerDataModel.js';
 export * from './citationLocator.js';
 export * from './predicateRegistry.js';
+export * from './predicateRelations.js';
 export * from './labelRegistry.js';
+export * from './labelPropertyQualifiers.js';
 export {
   validateLabelRegistry,
   type LabelRegistryValidation,

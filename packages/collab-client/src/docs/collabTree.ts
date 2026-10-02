@@ -1,4 +1,12 @@
-import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
+import {
+  TYPE_PAGE_DOCUMENT_PREFIX,
+  type SharedDocument,
+  type SharedFolder,
+  type SharedItemPlacement,
+  type SharedTypePlacement,
+} from './types';
+
+export { TYPE_PAGE_DOCUMENT_PREFIX } from './types';
 
 export interface CollabTreeFolderNode {
   id: string;
@@ -23,6 +31,8 @@ export interface CollabTreeDocumentNode {
   path: string;
   name: string;
   document: SharedDocument;
+  /** Child pages, types and placed items; only in a page tree. */
+  children?: CollabTreeNode[];
 }
 
 /**
@@ -48,6 +58,10 @@ export interface CollabTreeItemNode {
   typeId: string;
   path: string;
   name: string;
+  /** Singular type name shown faintly beside the row (page tree only). */
+  typeLabel?: string;
+  /** True when the item has a tree placement of its own. */
+  placed?: boolean;
 }
 
 export type CollabTreeNode =
@@ -63,10 +77,14 @@ export type CollabTreeNode =
 export interface CollabTypeTreeResolver {
   /** Display name of a type, or null when the type is unknown here. */
   typeName(typeId: string): string | null;
+  /** Singular display name ("Module" for "Modules"); falls back to `typeName`. */
+  typeLabel?(typeId: string): string | null;
   /** The type this one `extends`, if any. */
   typeExtends?(typeId: string): string | null;
   /** Items of a type, in display order. */
   itemsOfType(typeId: string): Array<{ itemId: string; title: string; sortKey?: string | number }>;
+  /** One item by id, for an item placed outside its type; null when unknown here. */
+  item?(itemId: string): { itemId: string; title: string; typeId: string } | null;
   /** Types a user may place, for the "Place type..." menu. */
   listedTypes?(): Array<{ typeId: string; name: string; icon?: string }>;
 }
@@ -327,6 +345,10 @@ const TREE_NODE_RANK: Record<CollabTreeNode['type'], number> = {
   item: 3,
 };
 
+/** A typed page placed in the tree is a page: it sorts among pages by name. */
+const treeNodeRank = (node: CollabTreeNode): number =>
+  node.type === 'item' && node.placed ? TREE_NODE_RANK.document : TREE_NODE_RANK[node.type];
+
 const compareTypeNodes = (left: CollabTreeTypeNode, right: CollabTreeTypeNode): number =>
   (left.placement.sortOrder - right.placement.sortOrder)
   || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
@@ -334,7 +356,8 @@ const compareTypeNodes = (left: CollabTreeTypeNode, right: CollabTreeTypeNode): 
 
 /** Folders, then placed types (by sortOrder), then documents (by name). */
 function compareTreeNodes(left: CollabTreeNode, right: CollabTreeNode): number {
-  if (left.type !== right.type) return TREE_NODE_RANK[left.type] - TREE_NODE_RANK[right.type];
+  const rank = treeNodeRank(left) - treeNodeRank(right);
+  if (rank !== 0) return rank;
   if (left.type === 'type' && right.type === 'type') return compareTypeNodes(left, right);
   return left.name.localeCompare(right.name, undefined, {
     numeric: true,
@@ -342,12 +365,14 @@ function compareTreeNodes(left: CollabTreeNode, right: CollabTreeNode): number {
   });
 }
 
-function sortTreeNodes(nodes: CollabTreeNode[]): CollabTreeNode[] {
+/** @internal Shared with `collabPageTree.ts`. */
+export function sortTreeNodes(nodes: CollabTreeNode[]): CollabTreeNode[] {
   nodes.sort(compareTreeNodes);
   // A type node's children keep their built order: subtypes, then items in
   // the resolver's order.
   for (const node of nodes) {
     if (node.type === 'folder') sortTreeNodes(node.children);
+    else if (node.type === 'document' && node.children) sortTreeNodes(node.children);
   }
   return nodes;
 }
@@ -357,13 +382,19 @@ function sortTreeNodes(nodes: CollabTreeNode[]): CollabTreeNode[] {
  * root). A type whose `extends` chain reaches another placed type nests inside
  * that type's node instead. Placements the resolver cannot name are skipped.
  */
-function attachTypeNodes(
+export type CollabTreeContainer = { path: string; children: CollabTreeNode[] };
+
+/** @internal Shared with `collabPageTree.ts`. */
+export function attachTypeNodes(
   roots: CollabTreeNode[],
-  folderNodeById: (folderId: string) => CollabTreeFolderNode | undefined,
+  folderNodeById: (folderId: string) => CollabTreeContainer | undefined,
   input: CollabTypePlacementInput | undefined,
+  /** Items placed elsewhere in the tree; still counted, not listed. */
+  placedItemIds?: ReadonlySet<string>,
 ): void {
   if (!input || input.placements.length === 0) return;
   const { resolver } = input;
+  const typeLabel = (typeId: string) => resolver.typeLabel?.(typeId) ?? resolver.typeName(typeId) ?? undefined;
 
   const nodes = new Map<string, CollabTreeTypeNode>();
   for (const placement of input.placements) {
@@ -428,18 +459,23 @@ function attachTypeNodes(
     node.path = joinCollabPath(parentPath, node.name);
     const nested = (subtypes.get(node.typeId) ?? []).sort(compareTypeNodes);
     for (const child of nested) finalize(child, node.path);
-    const items: CollabTreeItemNode[] = resolver.itemsOfType(node.typeId).map((item) => {
-      const name = item.title || item.itemId;
-      return {
-        id: `item:${item.itemId}`,
-        type: 'item',
-        itemId: item.itemId,
-        typeId: node.typeId,
-        path: joinCollabPath(node.path, name),
-        name,
-      };
-    });
-    node.count = items.length;
+    const allItems = resolver.itemsOfType(node.typeId);
+    const label = placedItemIds ? typeLabel(node.typeId) : undefined;
+    const items: CollabTreeItemNode[] = allItems
+      .filter((item) => !placedItemIds?.has(item.itemId))
+      .map((item) => {
+        const name = item.title || item.itemId;
+        return {
+          id: `item:${item.itemId}`,
+          type: 'item',
+          itemId: item.itemId,
+          typeId: node.typeId,
+          path: joinCollabPath(node.path, name),
+          name,
+          ...(label ? { typeLabel: label } : {}),
+        };
+      });
+    node.count = allItems.length;
     node.children = [...nested, ...items];
   };
   for (const node of nodes.values()) {
@@ -704,7 +740,7 @@ export function filterCollabTree(nodes: CollabTreeNode[], query: string): Collab
   };
 
   const filterNode = (node: CollabTreeNode): CollabTreeNode | null => {
-    if (node.type === 'document' || node.type === 'item') {
+    if (node.type === 'item' || (node.type === 'document' && !node.children?.length)) {
       return nodeMatchesQuery(node) ? node : null;
     }
 
@@ -720,7 +756,7 @@ export function filterCollabTree(nodes: CollabTreeNode[], query: string): Collab
       return filteredChildren.length === 0 ? null : { ...node, children: filteredChildren };
     }
 
-    const filteredChildren = node.children
+    const filteredChildren = (node.children ?? [])
       .map(filterNode)
       .filter((child): child is CollabTreeNode => child !== null);
 
@@ -737,4 +773,77 @@ export function filterCollabTree(nodes: CollabTreeNode[], query: string): Collab
   return nodes
     .map(filterNode)
     .filter((node): node is CollabTreeNode => node !== null);
+}
+
+export const isTypePageDocumentId = (documentId: string): boolean =>
+  documentId.startsWith(TYPE_PAGE_DOCUMENT_PREFIX);
+
+/**
+ * Every page as a folder-shaped row, for a page tree. Paths, crumbs, pickers
+ * and the create flow resolve a parent through the folder list; in a page tree
+ * any page can be a parent, so each one stands in as a folder with its own id.
+ * Type-page documents are excluded: the type node stands for them.
+ */
+export function projectPagesAsFolders(documents: SharedDocument[]): SharedFolder[] {
+  return documents
+    .filter((document) => document.trashedAt == null && !isTypePageDocumentId(document.documentId))
+    .map((document) => ({
+      folderId: document.documentId,
+      parentFolderId: document.parentFolderId ?? null,
+      name: getCollabNodeName(document.title) || document.title || UNRESOLVED_SHARED_DOCUMENT_NAME,
+      sortOrder: 0,
+      createdBy: document.createdBy,
+      createdAt: document.createdAt,
+      // Not `updatedAt`: a body edit is not a change to the page as a parent.
+      updatedAt: document.createdAt,
+      ...(document.decryptFailed ? { decryptFailed: true } : {}),
+    }));
+}
+
+/** A page and every page below it, root first. Tolerates parent cycles. */
+export function collectPageSubtree(documents: SharedDocument[], pageId: string): string[] {
+  return collectFolderSubtree(projectPagesAsFolders(documents), pageId);
+}
+
+export interface CollabPageRemovalPlan {
+  /** The page, its descendant pages and the prose of types placed among them. */
+  removedIds: string[];
+  /** Everything removed except the page itself, for the confirmation. */
+  childCount: number;
+  /**
+   * Type-page prose sitting in the subtree whose type is placed outside it:
+   * moved to the type's parent (or root) before the removal, never deleted.
+   */
+  relocate: Array<{ documentId: string; parentId: string | null }>;
+}
+
+/**
+ * What removing a page takes with it. A `type-page:<typeId>` document belongs
+ * to its type, not to the page it happens to sit under: it goes with the
+ * subtree only when the type itself is placed inside it.
+ */
+export function planPageRemoval(
+  documents: SharedDocument[],
+  typePlacements: SharedTypePlacement[],
+  pageId: string,
+): CollabPageRemovalPlan {
+  // Trashed pages count too: the store removes every descendant document.
+  const all = documents.map((document) => ({ ...document, trashedAt: null }));
+  const pages = new Set(collectPageSubtree(all, pageId));
+  const existingPages = new Set(projectPagesAsFolders(all).map((page) => page.folderId));
+  const removedIds = [...pages];
+  const relocate: CollabPageRemovalPlan['relocate'] = [];
+  for (const document of all) {
+    if (!isTypePageDocumentId(document.documentId)) continue;
+    if (!document.parentFolderId || !pages.has(document.parentFolderId)) continue;
+    const typeId = document.documentId.slice(TYPE_PAGE_DOCUMENT_PREFIX.length);
+    const placementParent = typePlacements.find((placement) => placement.typeId === typeId)?.parentFolderId ?? null;
+    if (placementParent && pages.has(placementParent)) {
+      removedIds.push(document.documentId);
+    } else {
+      const parentId = placementParent && existingPages.has(placementParent) ? placementParent : null;
+      relocate.push({ documentId: document.documentId, parentId });
+    }
+  }
+  return { removedIds, childCount: removedIds.length - 1, relocate };
 }

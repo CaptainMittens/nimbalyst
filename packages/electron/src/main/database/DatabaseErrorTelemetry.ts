@@ -165,6 +165,7 @@ const CORE_TABLE_NAMES = new Set([
   'orgs',
   'personal_page_documents',
   'personal_page_folders',
+  'personal_page_item_placements',
   'personal_page_type_placements',
   'project_access',
   'project_file_sync_baseline',

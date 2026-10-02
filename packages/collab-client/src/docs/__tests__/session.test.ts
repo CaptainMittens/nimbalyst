@@ -433,6 +433,105 @@ describe('CollabDocsSession', () => {
     expect(store.get(harness.session.atoms.typePlacements)).toEqual([placed('person', null)]);
   });
 
+  it('builds the page tree from documents and moves, removes and places pages through it', async () => {
+    const child = (documentId: string, title: string, parentFolderId: string | null) => ({ ...document(documentId, title), parentFolderId });
+    const harness = createHarness(SCOPE, {
+      // A path in a title must not start the folder migration in a page tree.
+      documents: [child('arch', 'Architecture', null), child('overview', 'Specs/Overview', 'arch'), child('leaf', 'Leaf', 'overview')],
+    });
+    (harness.dataSource.snapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [child('arch', 'Architecture', null), child('overview', 'Specs/Overview', 'arch'), child('leaf', 'Leaf', 'overview')],
+      containers: [{ folderId: 'projection', name: 'Ignored', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+      itemPlacements: [{ itemId: 'item-1', projectId: 'p1', parentId: 'leaf', sortOrder: 1, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+      pageTree: true,
+    });
+    await harness.session.start();
+    expect(harness.session.isPageTree()).toBe(true);
+    expect(harness.commands.some((command) => command.type === 'register-folder')).toBe(false);
+    // Every page stands in as a folder, so paths and pickers resolve parents.
+    expect(harness.session.getFolders().map((folder) => [folder.folderId, folder.name, folder.parentFolderId]))
+      .toEqual([['arch', 'Architecture', null], ['overview', 'Overview', 'arch'], ['leaf', 'Leaf', 'overview']]);
+
+    expect(harness.session.movePage('arch', 'leaf')).toBe(false);
+    expect(harness.session.movePage('leaf', null)).toBe(true);
+    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'leaf', parentFolderId: null });
+
+    await harness.session.setItemPlacement('item-2', 'overview');
+    expect(harness.commands).toContainEqual(expect.objectContaining({ type: 'set-item-placement', itemId: 'item-2', parentId: 'overview' }));
+    await harness.session.removeItemPlacement('item-1');
+    expect(harness.commands).toContainEqual({ type: 'remove-item-placement', itemId: 'item-1' });
+
+    harness.session.removePage('arch');
+    expect(harness.session.getDocuments().map((doc) => doc.documentId)).toEqual(['leaf']);
+    // The placement under a removed page falls back under its type.
+    expect(harness.session.getItemPlacements()).toEqual([]);
+    expect(harness.commands).toContainEqual({ type: 'remove-folder', folderId: 'arch' });
+
+    // A later snapshot without the flag does not drop back to folders.
+    harness.emitData({ type: 'snapshot', snapshot: { items: [], containers: [] } });
+    expect(harness.session.isPageTree()).toBe(true);
+  });
+
+  it('keeps a type page\'s prose with its type when the type moves or a page subtree is removed', async () => {
+    const at = (documentId: string, parentFolderId: string | null) => ({ ...document(documentId, documentId), parentFolderId });
+    const typeAt = (typeId: string, parentFolderId: string | null): SharedTypePlacement => ({
+      typeId, projectId: 'p1', parentFolderId, sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1,
+    });
+    const harness = createHarness(SCOPE);
+    (harness.dataSource.snapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [
+        at('p', null), at('q', null), at('p-child', 'p'),
+        at('type-page:module', 'p'), at('type-page:person', 'p-child'), at('type-page:stale', 'p'),
+      ],
+      containers: [],
+      typePlacements: [typeAt('module', 'p'), typeAt('person', 'p-child'), typeAt('stale', 'q')],
+      pageTree: true,
+    });
+    await harness.session.start();
+
+    // Moving a type moves its prose document with it.
+    await harness.session.moveTypePlacement('module', 'q');
+    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'type-page:module', parentFolderId: 'q' });
+
+    // Removing P: the prose of a type placed outside P (module, now under Q;
+    // stale, placed under Q by an older client) is moved out first; the prose of
+    // a type placed inside goes with the subtree and is counted.
+    expect(harness.session.pageRemovalCount('p')).toBe(2);
+    harness.session.removePage('p');
+    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'type-page:stale', parentFolderId: 'q' });
+    const remaining = harness.session.getDocuments().map((doc) => [doc.documentId, doc.parentFolderId ?? null]);
+    expect(remaining).toEqual(expect.arrayContaining([['q', null], ['type-page:module', 'q'], ['type-page:stale', 'q']]));
+    expect(remaining.map(([id]) => id)).not.toContain('type-page:person');
+    const moveIndex = harness.commands.findIndex((c) => c.type === 'move-document' && c.documentId === 'type-page:stale');
+    const removeIndex = harness.commands.findIndex((c) => c.type === 'remove-folder');
+    expect(moveIndex).toBeLessThan(removeIndex);
+  });
+
+  it('reports the real outcome of an item placement and rolls back a refused one', async () => {
+    const harness = createHarness(SCOPE);
+    (harness.dataSource.snapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [{ ...document('p'), parentFolderId: null }],
+      containers: [],
+      itemPlacements: [{ itemId: 'i1', projectId: 'p1', parentId: null, sortOrder: 1, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+      pageTree: true,
+    });
+    await harness.session.start();
+
+    await expect(harness.session.setItemPlacement('i1', 'p')).resolves.toEqual({ ok: true });
+    expect(harness.session.getItemPlacements()[0].parentId).toBe('p');
+
+    const command = harness.dataSource.command as ReturnType<typeof vi.fn>;
+    command.mockRejectedValueOnce(new Error('timed out waiting for the server'));
+    await expect(harness.session.setItemPlacement('i1', null)).resolves.toEqual({ ok: false, error: 'timed out waiting for the server' });
+    expect(harness.session.getItemPlacements()[0].parentId).toBe('p');
+
+    command.mockRejectedValueOnce(new Error('refused'));
+    await expect(harness.session.removeItemPlacement('i1')).resolves.toEqual({ ok: false, error: 'refused' });
+    expect(harness.session.getItemPlacements().map((placement) => placement.itemId)).toEqual(['i1']);
+    await expect(harness.session.removeItemPlacement('i1')).resolves.toEqual({ ok: true });
+    expect(harness.session.getItemPlacements()).toEqual([]);
+  });
+
   it('owns retry, replacement, and teardown through the host scope contract', async () => {
     const scopeListener: { current?: (scope: CollabScope | null) => void } = {};
     const first = createHarness(LIFECYCLE_SCOPE);

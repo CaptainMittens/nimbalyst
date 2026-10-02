@@ -77,24 +77,64 @@ export const CollabTypeNodeRow: React.FC<{
   </button>
 );
 
+/** Move destination that sends a typed page back under its type node. */
+export const UNDER_TYPE = '__under_type__';
+/** A page id, null for root, or `UNDER_TYPE`. */
+export type CollabPageMoveTarget = string | null;
+
+/** Page-tree hooks for a typed page's row: its menu and dragging it to a page. */
+export interface CollabItemRowActions {
+  onContextMenu: (event: React.MouseEvent, node: CollabTreeItemNode) => void;
+  onDragStart: (node: CollabTreeItemNode) => void;
+  onDragEnd: () => void;
+}
+
+/**
+ * A type's item. In the page tree (`typeLabel` set) it is a page: page icon,
+ * its type shown faintly. In the folder tree it is a numbered entry.
+ */
 export const CollabTypeItemRow: React.FC<{
   node: CollabTreeItemNode;
   position: number;
   indent: number;
   onOpen: () => void;
-}> = ({ node, position, indent, onOpen }) => (
+  actions?: CollabItemRowActions;
+}> = ({ node, position, indent, onOpen, actions }) => (
   <button
     type="button"
     className="collab-tree-item-row w-full flex items-center text-left file-tree-file"
     style={{ paddingLeft: indent }}
     data-testid="collab-tree-item-row"
+    data-item-id={node.itemId}
     onClick={onOpen}
+    onContextMenu={actions ? (event) => actions.onContextMenu(event, node) : undefined}
+    draggable={!!actions}
+    onDragStart={actions ? (event) => {
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', node.itemId);
+      actions.onDragStart(node);
+    } : undefined}
+    onDragEnd={actions?.onDragEnd}
     title={node.path}
   >
-    <span className="collab-tree-item-number w-[18px] mr-1.5 shrink-0 text-right text-[11px] text-[var(--nim-text-faint)]">
-      {position}
-    </span>
-    <span className="file-tree-name">{node.name}</span>
+    {node.typeLabel ? (
+      <>
+        <span className="file-tree-spacer" />
+        <span className="file-tree-icon"><MaterialSymbol icon="description" size={16} /></span>
+        <span className="file-tree-name">{node.name}</span>
+        <span className="collab-tree-item-type ml-auto mr-1 pl-1.5 shrink-0 text-[11px] text-[var(--nim-text-faint)]">
+          {node.typeLabel}
+        </span>
+      </>
+    ) : (
+      <>
+        <span className="collab-tree-item-number w-[18px] mr-1.5 shrink-0 text-right text-[11px] text-[var(--nim-text-faint)]">
+          {position}
+        </span>
+        <span className="file-tree-name">{node.name}</span>
+      </>
+    )}
   </button>
 );
 
@@ -110,7 +150,8 @@ export const CollabTypeTreeBranch: React.FC<{
   onDragStart: (typeId: string) => void;
   onDragEnd: () => void;
   renderSubtypes: (nodes: CollabTreeTypeNode[]) => React.ReactNode;
-}> = ({ node, indent, expanded, onToggle, onOpenType, onOpenItem, onContextMenu, onDragStart, onDragEnd, renderSubtypes }) => {
+  itemActions?: CollabItemRowActions;
+}> = ({ node, indent, expanded, onToggle, onOpenType, onOpenItem, onContextMenu, onDragStart, onDragEnd, renderSubtypes, itemActions }) => {
   const subtypes = node.children.filter((child): child is CollabTreeTypeNode => child.type === 'type');
   const items = node.children.filter((child): child is CollabTreeItemNode => child.type === 'item');
   return (
@@ -143,6 +184,7 @@ export const CollabTypeTreeBranch: React.FC<{
               position={index + 1}
               indent={indent + 16}
               onOpen={() => onOpenItem(item.itemId)}
+              actions={itemActions}
             />
           ))}
         </>

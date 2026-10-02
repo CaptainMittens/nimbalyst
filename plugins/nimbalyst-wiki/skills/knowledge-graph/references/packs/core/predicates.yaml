@@ -3,11 +3,9 @@
 #
 # The verbs a graph is allowed to use, stored as claims (dated, cited, with
 # history). This is the claim half of the vocabulary; field-stored properties
-# and labels are in `labels.yaml` next to this file. A predicate earns its place
-# by having qualifiers that a reader needs in order to act on the statement.
-# "Product A integrates with Product B" is close to useless on its own; "via
-# which connector, for which operations, tested against which version" is the
-# part someone can use.
+# and labels are in `labels.yaml` next to this file. A relation is a named
+# predicate with an inverse label and nothing more: what connects two pages is
+# said in the prose of the page that links them, not in fields on the edge.
 #
 # Every subject is declared against `entity`: what a page is lives in its
 # labels, so a new label satisfies these with no edit here. The knowledge-setup
@@ -20,26 +18,6 @@ predicates:
     valueShape: entity
     direction: directed
     transitive: false
-    qualifiers:
-      via:
-        type: relationship
-        targetTrackerTypes: [entity]
-        required: true
-        label: Via
-        description: The connector or mechanism the integration runs through.
-      operations:
-        type: array
-        itemType: string
-        required: true
-        label: Operations
-        description: What the integration can actually do. An integration with no named operations is a logo on a page.
-      authentication:
-        type: string
-        label: Authentication
-      testedClientVersion:
-        type: string
-        label: Tested client version
-        description: The version this was observed against. Absent means documented, not observed.
 
   - id: implements-protocol
     label: implements
@@ -47,15 +25,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      role:
-        type: select
-        options: [client, server, both]
-        required: true
-        label: Role
-      specVersion:
-        type: string
-        label: Spec version
 
   - id: provided-by
     label: is provided by
@@ -78,14 +47,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      optional:
-        type: boolean
-        label: Optional
-        description: True when the requirement is only for a subset of use.
-      minimumVersion:
-        type: string
-        label: Minimum version
 
   - id: imports-format
     label: imports
@@ -93,11 +54,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      fidelity:
-        type: select
-        options: [full, partial, lossy, unknown]
-        label: Fidelity
 
   - id: exports-format
     label: exports
@@ -105,11 +61,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      fidelity:
-        type: select
-        options: [full, partial, lossy, unknown]
-        label: Fidelity
 
   # `boolean-assessment`, not `boolean`, on purpose: support has to be able to
   # say "partial" and "unknown". Collapsing those to false is how a documented
@@ -120,16 +71,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: boolean-assessment
     direction: directed
-    qualifiers:
-      level:
-        type: select
-        options: [full, partial, none, unknown]
-        required: true
-        label: Level
-      surface:
-        type: string
-        label: Surface
-        description: Where the capability is available -- desktop, web, CLI, mobile.
 
   - id: inspired-by
     label: is inspired by
@@ -137,11 +78,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      what:
-        type: string
-        label: What
-        description: The idea or design that was borrowed.
 
   - id: depends-on
     label: depends on
@@ -149,8 +85,3 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      risk:
-        type: select
-        options: [low, medium, high]
-        label: Risk

@@ -23,15 +23,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers:
-      commit:
-        type: string
-        label: Commit
-        description: The commit the path was checked against.
-      repo:
-        type: string
-        label: Repository
-        description: The repository, when the project spans more than one.
 
   - id: stores-in
     label: stores data in
@@ -39,11 +30,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      what:
-        type: string
-        label: What
-        description: The data kept there.
 
   - id: exposed-on
     label: is exposed on
@@ -74,11 +60,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      issue:
-        type: string
-        label: Issue
-        description: The bug that tracks the breach.
 
   # valueText is the session id.
   - id: discussed-in
@@ -87,10 +68,3 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers:
-      sessionTitle:
-        type: string
-        label: Session
-      date:
-        type: date
-        label: Date

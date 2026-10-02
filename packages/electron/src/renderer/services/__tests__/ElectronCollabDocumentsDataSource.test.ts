@@ -51,6 +51,19 @@ describe('ElectronCollabDocumentsDataSource', () => {
         createdAt: 1,
         updatedAt: 2,
       }]),
+      getItemPlacements: vi.fn(() => [{
+        itemId: 'item-1',
+        projectId: 'project-one',
+        parentId: 'doc-1',
+        sortOrder: 2,
+        createdBy: 'member-one',
+        createdAt: 1,
+        updatedAt: 2,
+      }]),
+      isPageTree: vi.fn(() => true),
+      setItemPlacement: vi.fn(),
+      removeItemPlacement: vi.fn(),
+      refreshItemPlacements: vi.fn(async () => null),
       getTeamState: vi.fn(() => ({ members: [] })),
       updateDocumentTitle: vi.fn(async () => undefined),
       refreshFolders: vi.fn(async () => []),
@@ -79,6 +92,8 @@ describe('ElectronCollabDocumentsDataSource', () => {
       })],
       containers: [expect.objectContaining({ folderId: 'folder-1', name: 'Folder' })],
       typePlacements: [expect.objectContaining({ typeId: 'module', parentFolderId: 'folder-1' })],
+      itemPlacements: [expect.objectContaining({ itemId: 'item-1', parentId: 'doc-1', sortOrder: 2 })],
+      pageTree: true,
     });
     config.onDocumentChanged?.({
       documentId: 'doc-2',
@@ -101,18 +116,84 @@ describe('ElectronCollabDocumentsDataSource', () => {
     await source.command({ type: 'remove-type-placement', typeId: 'module' });
     await expect(source.command({ type: 'refresh-type-placements' }))
       .resolves.toEqual({ ok: true, typePlacements: null });
+    await expect(source.command({ type: 'refresh-item-placements' }))
+      .resolves.toEqual({ ok: true, itemPlacements: null });
 
     expect(changes).toEqual(['items-upserted', 'containers-removed', 'snapshot', 'status']);
     expect(provider.setTypePlacement).toHaveBeenCalledWith('module', null, 4);
     expect(provider.removeTypePlacement).toHaveBeenCalledWith('module');
     // No server list yet (older server): the snapshot must not claim an empty one.
     provider.getTypePlacements.mockReturnValueOnce(null as never);
-    expect(await source.snapshot()).not.toHaveProperty('typePlacements');
+    provider.getItemPlacements.mockReturnValueOnce(null as never);
+    provider.isPageTree.mockReturnValueOnce(false);
+    const olderServer = await source.snapshot();
+    expect(olderServer).not.toHaveProperty('typePlacements');
+    expect(olderServer).not.toHaveProperty('itemPlacements');
+    expect(olderServer).not.toHaveProperty('pageTree');
     expect(observeStatus).toHaveBeenCalledWith('connected');
     expect(provider.updateDocumentTitle).toHaveBeenCalledWith('doc-1', 'Renamed');
     expect(provider.connect).toHaveBeenCalledTimes(1);
     source.dispose();
     expect(provider.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('settles an item placement write on the server\'s broadcast, a refusal, or a timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let config!: TeamSyncConfig;
+      const placement = (itemId: string, parentId: string | null) => ({
+        itemId, projectId: 'project-one', parentId, sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1,
+      });
+      const provider = {
+        connect: vi.fn(async () => undefined),
+        getStatus: vi.fn(() => 'connected' as const),
+        getDocuments: vi.fn(() => []),
+        getFolders: vi.fn(() => []),
+        getTypePlacements: vi.fn(() => null),
+        getItemPlacements: vi.fn(() => null),
+        isPageTree: vi.fn(() => true),
+        setItemPlacement: vi.fn(),
+        removeItemPlacement: vi.fn(),
+        destroy: vi.fn(),
+      };
+      const source = new ElectronCollabDocumentsDataSource({
+        scope,
+        getJwt: async () => asTeamJwt('team-jwt'),
+        createProvider: (nextConfig) => {
+          config = nextConfig;
+          return provider as any;
+        },
+      });
+      const settled = (promise: Promise<unknown>) => promise.then(() => 'ok', (error: Error) => error.message);
+
+      // Confirmed by the broadcast for this item, not by an unrelated one.
+      const set = settled(source.command({ type: 'set-item-placement', itemId: 'i1', parentId: 'page-1', sortOrder: 0 }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(provider.setItemPlacement).toHaveBeenCalledWith('i1', 'page-1', 0);
+      config.onItemPlacementChanged?.(placement('other', 'page-1') as never);
+      config.onItemPlacementChanged?.(placement('i1', 'page-1') as never);
+      expect(await set).toBe('ok');
+
+      const remove = settled(source.command({ type: 'remove-item-placement', itemId: 'i1' }));
+      await vi.advanceTimersByTimeAsync(0);
+      config.onItemPlacementsRemoved?.(['i1']);
+      expect(await remove).toBe('ok');
+
+      // A refusal: TeamSync re-reads the list after a server error, and the
+      // list does not hold the change.
+      const refused = settled(source.command({ type: 'set-item-placement', itemId: 'i2', parentId: 'page-2', sortOrder: 0 }));
+      await vi.advanceTimersByTimeAsync(0);
+      config.onItemPlacementsLoaded?.([placement('i2', null)] as never);
+      expect(await refused).toMatch(/refused/);
+
+      // No answer within 6 seconds.
+      const silent = settled(source.command({ type: 'remove-item-placement', itemId: 'i3' }));
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(await silent).toMatch(/did not confirm/);
+      source.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // The team socket must not be opened with the browser WebSocket: Chromium

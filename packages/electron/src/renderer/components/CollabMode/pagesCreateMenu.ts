@@ -21,6 +21,10 @@ export function composePagesCreateMenu(
     onSelect: menu.onNewFolder,
   });
 
+  // A page tree has no folders: a folder is a page with an empty body.
+  const folderItems = (menu: CollabSidebarCreateMenu, id: string, label: string) =>
+    (menu.pageTree ? [] : [folderItem(menu, id, label)]);
+
   if (!team) {
     return {
       mode: 'collab',
@@ -28,7 +32,7 @@ export function composePagesCreateMenu(
       heading: { label: 'Personal', icon: 'person' },
       onPrimary: primary.onPrimary,
       primaryTrailing: primary.primaryTrailing,
-      items: [...primary.items, folderItem(primary, 'folder', 'New folder')],
+      items: [...primary.items, ...folderItems(primary, 'folder', 'New folder')],
     };
   }
 
@@ -40,7 +44,7 @@ export function composePagesCreateMenu(
     primaryTrailing: team.primaryTrailing,
     items: [
       ...team.items,
-      folderItem(team, 'folder', 'New folder'),
+      ...folderItems(team, 'folder', 'New folder'),
       ...(personal
         ? [
           {
@@ -51,7 +55,8 @@ export function composePagesCreateMenu(
             trailing: personal.primaryTrailing,
             onSelect: personal.onPrimary,
           },
-          { ...folderItem(personal, 'personal-folder', 'New personal folder'), separatorBefore: false },
+          ...folderItems(personal, 'personal-folder', 'New personal folder')
+            .map((item) => ({ ...item, separatorBefore: false })),
         ]
         : []),
     ],

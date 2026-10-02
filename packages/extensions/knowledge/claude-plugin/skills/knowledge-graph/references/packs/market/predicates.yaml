@@ -4,7 +4,7 @@
 # organizations and products. Needs the core pack.
 #
 # "Competitor" is a relationship, not a location: the project competes with a
-# product IN a market, at a threat level that belongs to that market.
+# product, and the market they compete in is that product's `in-market`.
 predicates:
   - id: in-market
     label: is in market
@@ -12,11 +12,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: directed
-    qualifiers:
-      primary:
-        type: boolean
-        label: Primary
-        description: The market the product is mainly known for.
 
   - id: made-by
     label: is made by
@@ -31,31 +26,12 @@ predicates:
     subjectKinds: [entity]
     valueShape: entity
     direction: symmetric
-    qualifiers:
-      market:
-        type: relationship
-        targetTrackerTypes: [entity]
-        label: Market
-        description: "The market (a page labeled market) this competition is in. Threat is per market."
-      threat:
-        type: select
-        options: [low, medium, high, critical]
-        label: Threat
-      overlap:
-        type: string
-        label: Overlap
-      difference:
-        type: string
-        label: Difference
-      reviewedAt:
-        type: date
-        label: Reviewed
 
   # --- Dated facts ----------------------------------------------------------
   #
   # A fact is a claim, not a field, because it changes and needs a date and a
-  # source. `asOf` is required (`asOfPrecision` says whether it is a day, month
-  # or year; a month is stored as its first day); the display value goes in
+  # source. The claim records `asOf` (`asOfPrecision` says whether it is a day,
+  # month or year; a month is stored as its first day); the display value goes in
   # `claim.valueText`; quantity facts also carry `amount` and `unit` (USD,
   # people, users, seats); sources go in `claim.citations`. The current value is
   # the latest `asOf` among asserted claims. Organization facts: annual-revenue,
@@ -68,25 +44,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: quantity
     direction: directed
-    qualifiers: &quantityFact
-      asOf:
-        type: date
-        required: true
-        label: As of
-        description: When the value was true. The current value is the latest asOf among asserted claims.
-      asOfPrecision: &asOfPrecision
-        type: select
-        options: [day, month, year]
-        label: As-of precision
-        description: How precise asOf is. Absent means day. A month-precision date is the first of the month.
-      amount:
-        type: number
-        label: Amount
-        description: The number behind valueText, in `unit`.
-      unit:
-        type: string
-        label: Unit
-        description: USD, people, users, or seats.
 
   - id: funding-total
     label: total funding
@@ -94,7 +51,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: quantity
     direction: directed
-    qualifiers: *quantityFact
 
   - id: valuation
     label: valuation
@@ -102,7 +58,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: quantity
     direction: directed
-    qualifiers: *quantityFact
 
   - id: last-round
     label: last round
@@ -110,16 +65,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers:
-      asOf: &asOf
-        type: date
-        required: true
-        label: As of
-        description: When the value was true. The current value is the latest asOf among asserted claims.
-      asOfPrecision: *asOfPrecision
-      stage:
-        type: string
-        label: Stage
 
   - id: headcount
     label: headcount
@@ -127,7 +72,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: quantity
     direction: directed
-    qualifiers: *quantityFact
 
   - id: founded
     label: founded
@@ -135,9 +79,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers: &textFact
-      asOf: *asOf
-      asOfPrecision: *asOfPrecision
 
   - id: hq
     label: headquarters
@@ -145,7 +86,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers: *textFact
 
   - id: pricing
     label: pricing
@@ -153,7 +93,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers: *textFact
 
   - id: license
     label: license
@@ -161,7 +100,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers: *textFact
 
   - id: platforms
     label: platforms
@@ -169,7 +107,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers: *textFact
 
   - id: launched
     label: launched
@@ -177,7 +114,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: text
     direction: directed
-    qualifiers: *textFact
 
   - id: users
     label: users
@@ -185,7 +121,6 @@ predicates:
     subjectKinds: [entity]
     valueShape: quantity
     direction: directed
-    qualifiers: *quantityFact
 
   # `claim.valueText` is one of: active, declining, unmaintained, defunct. The
   # predicate registry cannot declare a select's options yet, so they are in
@@ -196,4 +131,3 @@ predicates:
     subjectKinds: [entity]
     valueShape: select
     direction: directed
-    qualifiers: *textFact

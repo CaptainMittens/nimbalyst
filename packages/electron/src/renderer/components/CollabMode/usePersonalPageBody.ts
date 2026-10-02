@@ -31,6 +31,19 @@ type UpdateBodyResult = { version: number } | { conflict: true; version: number;
 
 const PERSONAL_PAGE_HISTORY_PREFIX = 'personal-doc://';
 
+/** Open editors' "save now and wait" hooks, by workspace and page. */
+const openPageFlushers = new Map<string, () => Promise<void>>();
+const flusherKey = (workspacePath: string, documentId: string) => `${workspacePath}\x1f${documentId}`;
+
+/**
+ * Save whatever an open editor for this page has not stored yet, and wait for
+ * it. Resolves at once when no editor has the page open; rejects when the edit
+ * could not be saved. Callers that copy the stored body run this first.
+ */
+export function flushPersonalPageBody(workspacePath: string, documentId: string): Promise<void> {
+  return openPageFlushers.get(flusherKey(workspacePath, documentId))?.() ?? Promise.resolve();
+}
+
 /** The local-history key main records personal page snapshots under. */
 export function personalPageHistoryKey(documentId: string): string {
   return `${PERSONAL_PAGE_HISTORY_PREFIX}${documentId}`;
@@ -101,6 +114,7 @@ export function usePersonalPageBody({
   const versionRef = useRef<number | undefined>(undefined);
   const pendingRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
+  const inFlightSaveRef = useRef<Promise<void> | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedRef = useRef(false);
   const mountedRef = useRef(true);
@@ -151,7 +165,7 @@ export function usePersonalPageBody({
     const markdown = pendingRef.current;
     pendingRef.current = null;
     inFlightRef.current = true;
-    (window.electronAPI.invoke(
+    inFlightSaveRef.current = (window.electronAPI.invoke(
       'personal-pages:update-body',
       workspacePath,
       documentId,
@@ -211,6 +225,31 @@ export function usePersonalPageBody({
       flush();
     }, saveDelayMs);
   }, [flush, saveDelayMs]);
+
+  // Save now instead of after the debounce, and wait until nothing is pending
+  // or in flight. A failed save leaves the text pending, so a few rounds bound
+  // the wait before reporting it.
+  const saveNow = useCallback(async () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    for (let round = 0; round < 4 && (inFlightRef.current || pendingRef.current !== null); round += 1) {
+      flush();
+      await inFlightSaveRef.current;
+    }
+    if (inFlightRef.current || pendingRef.current !== null) {
+      throw new Error('This page has edits that could not be saved.');
+    }
+  }, [flush]);
+
+  useEffect(() => {
+    const key = flusherKey(workspacePath, documentId);
+    openPageFlushers.set(key, saveNow);
+    return () => {
+      if (openPageFlushers.get(key) === saveNow) openPageFlushers.delete(key);
+    };
+  }, [workspacePath, documentId, saveNow]);
 
   // Closing the tab must not drop the last edit. A save still in flight takes
   // any pending text with it when it settles (see flush).

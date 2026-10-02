@@ -37,11 +37,13 @@ import type {
   ServerTeamState,
   SharedDocumentTypeMetadataV2,
   TypePlacementNode,
+  ItemPlacementNode,
 } from './teamSyncTypes';
 import { asTeamMemberId } from '../auth/jwtScopes';
 import type { BoundedPreview } from '@nimbalyst/collab-protocol';
 import { appendSyncClientParams } from './syncClientInfo';
 import { TeamTypePlacementCache, typePlacementQueueKey } from './teamTypePlacements';
+import { TeamItemPlacementCache, itemPlacementQueueKey } from './teamItemPlacements';
 
 // ============================================================================
 // TeamSyncProvider
@@ -84,6 +86,15 @@ export class TeamSyncProvider {
     () => this.config.teamProjectId ?? this.teamState?.metadata?.teamProjectId ?? null,
     () => this.config,
   );
+
+  /** Tracker items placed in the page tree, this project only. */
+  private readonly itemPlacementEntries = new TeamItemPlacementCache(
+    () => this.config.teamProjectId ?? this.teamState?.metadata?.teamProjectId ?? null,
+    () => this.config,
+  );
+
+  /** Set by a snapshot from a TeamRoom whose folders were converted into documents. */
+  private pageTree = false;
 
   /**
    * Resolvers waiting for a `docIndexRegistered` ack, keyed by document id.
@@ -182,6 +193,7 @@ export class TeamSyncProvider {
     this.folderResyncWaiters = [];
     for (const waiter of folderWaiters) waiter(null);
     this.typePlacementEntries.destroy();
+    this.itemPlacementEntries.destroy();
     const registerWaiters = [...this.registerAckWaiters.values()].flat();
     this.registerAckWaiters.clear();
     // Unconfirmed, not confirmed-failed: a destroyed provider says nothing
@@ -459,6 +471,39 @@ export class TeamSyncProvider {
   }
 
   // --------------------------------------------------------------------------
+  // Public API: Tracker-item placements and the one page tree
+  // --------------------------------------------------------------------------
+
+  /**
+   * True once the TeamRoom converted folders into documents: the tree is built
+   * from documents (`parentFolderId` = parent page id) and `folders` is only a
+   * projection for older clients. A document moves under a document via `docMove`.
+   */
+  isPageTree(): boolean {
+    return this.pageTree;
+  }
+
+  /** Place an item (or move its placement). `parentId` is a page id; null = root level. */
+  setItemPlacement(itemId: string, parentId: string | null, sortOrder = 0): void {
+    this.send({ type: 'itemPlacementSet', itemId, parentId, sortOrder, projectId: this.config.teamProjectId ?? null });
+  }
+
+  /** Put an item back under its type. */
+  removeItemPlacement(itemId: string): void {
+    this.send({ type: 'itemPlacementRemove', itemId, projectId: this.config.teamProjectId ?? null });
+  }
+
+  /** Null until the server has sent a placement list (older servers never do). */
+  getItemPlacements(): ItemPlacementNode[] | null {
+    return this.itemPlacementEntries.authoritativeList();
+  }
+
+  /** Resolves after the server's placement list is applied; null on timeout. */
+  refreshItemPlacements(timeoutMs = 6000): Promise<ItemPlacementNode[] | null> {
+    return this.itemPlacementEntries.waitForSnapshot(() => this.send({ type: 'itemPlacementIndexSync' }), timeoutMs);
+  }
+
+  // --------------------------------------------------------------------------
   // Message Handling
   // --------------------------------------------------------------------------
 
@@ -524,6 +569,15 @@ export class TeamSyncProvider {
         case 'typePlacementRemoveBroadcast':
           this.typePlacementEntries.applyRemove(message.projectId, message.typeIds);
           break;
+        case 'itemPlacementIndexSyncResponse':
+          this.itemPlacementEntries.applySnapshot(message.placements);
+          break;
+        case 'itemPlacementBroadcast':
+          this.itemPlacementEntries.applyUpsert(message.placement);
+          break;
+        case 'itemPlacementRemoveBroadcast':
+          this.itemPlacementEntries.applyRemove(message.projectId, message.itemIds);
+          break;
         case 'projectAccessChanged':
           this.handleProjectAccessChanged(message);
           break;
@@ -544,6 +598,7 @@ export class TeamSyncProvider {
           // A refused placement mutation would otherwise leave the author's
           // optimistic row in place; the re-read replaces it with server truth.
           if (this.typePlacementEntries.takeUnconfirmed()) this.send({ type: 'typePlacementIndexSync' });
+          if (this.itemPlacementEntries.takeUnconfirmed()) this.send({ type: 'itemPlacementIndexSync' });
           break;
       }
     } catch (err) {
@@ -553,6 +608,7 @@ export class TeamSyncProvider {
 
   private async handleTeamSyncResponse(msg: TeamSyncResponseMessage): Promise<void> {
     const server: ServerTeamState = msg.team;
+    this.pageTree = server.pageTree === true;
 
     // Decrypt document titles. NIM-910: in server-managed mode this teamSync
     // path returns titles RAW (DEK-ciphertext the client cannot read); the
@@ -600,6 +656,7 @@ export class TeamSyncProvider {
       this.config.onFoldersLoaded?.(folders);
     }
     this.typePlacementEntries.applySnapshot(server.typePlacements);
+    this.itemPlacementEntries.applySnapshot(server.itemPlacements);
 
     // Replay index mutations / comment notifications queued while disconnected
     this.replayPendingOfflineMessages();
@@ -931,6 +988,7 @@ export class TeamSyncProvider {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
       this.typePlacementEntries.noteSent(message);
+      this.itemPlacementEntries.noteSent(message);
       return;
     }
     const key = this.offlineQueueKey(message);
@@ -958,7 +1016,7 @@ export class TeamSyncProvider {
       // a queued notification for the same comment cannot lose a delivery.
       return `${msg.type}:${msg.commentId}:${msg.reason}`;
     }
-    const placementKey = typePlacementQueueKey(msg);
+    const placementKey = typePlacementQueueKey(msg) ?? itemPlacementQueueKey(msg);
     if (placementKey) return placementKey;
     if (!this.isDocIndexMessage(msg)) return undefined;
     const entityId = 'documentId' in msg ? msg.documentId

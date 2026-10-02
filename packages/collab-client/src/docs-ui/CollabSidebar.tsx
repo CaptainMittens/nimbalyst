@@ -1,7 +1,7 @@
 import { SharedDocumentLink } from './SharedDocumentLink';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { isPersonalCollabScope, type CollabDocumentTypeDescriptor } from '@nimbalyst/collab-client/core';
-import { useAtomValue } from 'jotai';
+import { atom, useAtomValue } from 'jotai';
 import { store } from '@nimbalyst/runtime/store';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import './collabSidebarTree.css';
@@ -17,6 +17,9 @@ import {
   type SharedFolder,
   buildCollabTreeAdaptive,
   collectFolderSubtree,
+  collectPageSubtree,
+  planPageRemoval,
+  getSharedDocumentDisplayPath,
   filterCollabTree,
   pruneEmptyFolders,
   getCollabDocumentPath,
@@ -25,15 +28,34 @@ import {
   joinCollabPath,
   normalizeCollabPath,
   resolveCollabCreateTargetFolderId,
+  type CollabTreeItemNode,
   type CollabTreeNode,
   type CollabTypeTreeResolver,
 } from '@nimbalyst/collab-client/docs';
 import {
   CollabPlaceTypeMenu,
+  CollabTypeItemRow,
   CollabTypeTreeBranch,
   getPlaceableTypes,
+  UNDER_TYPE,
+  type CollabPageMoveTarget,
 } from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from './primitives/useFloatingMenu';
+
+// For sessions built without the page-tree atoms (test doubles, older hosts).
+const NO_ITEM_PLACEMENTS = atom([]);
+const NOT_A_PAGE_TREE = atom(false);
+
+// Lazy: the page-tree menu and move picker stay out of the docs-ui eager
+// bundle. The menu module is preloaded once a tree turns out to be a page tree.
+const loadPageMenu = () => import('./CollabPageMenu');
+// The page tree builder too: only a page-tree scope needs it.
+const loadPageTreeBuilder = () => import('../docs/collabPageTree');
+type PageTreeBuilder = Awaited<ReturnType<typeof loadPageTreeBuilder>>;
+const CollabPageMenuHead = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageMenuHead })));
+const CollabPageDeleteEntry = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageDeleteEntry })));
+const CollabItemMenu = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabItemMenu })));
+const CollabPageMoveDialog = React.lazy(() => import('./CollabPageMoveDialog'));
 import { CollabSearchInput } from './primitives/CollabSearchInput';
 import { DocUnreadDot } from './DocUnreadDot';
 import { bucketItemCount, trackDocumentAction } from './analytics';
@@ -120,6 +142,11 @@ export interface CollabSidebarProps {
    * a compact section header replaces the scope summary header.
    */
   sectionTitle?: string;
+  /**
+   * Page tree only: turn a plain page into a typed page in place. Without it
+   * the menu's "Set type" entry is shown disabled.
+   */
+  onSetPageType?: (document: SharedDocument) => void;
 }
 
 export interface CollabSidebarCreateMenu {
@@ -131,6 +158,8 @@ export interface CollabSidebarCreateMenu {
   /** Extension the default action produces, shown beside it. */
   primaryTrailing?: string;
   onNewFolder: () => void;
+  /** True when this tree has pages instead of folders (no "New folder"). */
+  pageTree?: boolean;
 }
 
 export const CollabSidebar: React.FC<CollabSidebarProps> = ({
@@ -144,10 +173,26 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   registerCreateMenu,
   typeResolver,
   sectionTitle,
+  onSetPageType,
 }) => {
   const { scope, host, session, controller } = useCollabDocsUI();
   // Per session, not the active scope: a Personal section is never active.
   const typePlacements = useAtomValue(session.atoms.typePlacements);
+  const itemPlacements = useAtomValue(session.atoms.itemPlacements ?? NO_ITEM_PLACEMENTS);
+  // One page tree: documents nest in documents and `sharedFolders` holds the
+  // pages themselves (see `projectPagesAsFolders`), so the folder paths and
+  // pickers below resolve pages without a second code path.
+  const pageTree = useAtomValue(session.atoms.pageTree ?? NOT_A_PAGE_TREE);
+  const [pageTreeBuilder, setPageTreeBuilder] = useState<PageTreeBuilder | null>(null);
+  useEffect(() => {
+    if (!pageTree || pageTreeBuilder) return undefined;
+    let live = true;
+    void loadPageMenu();
+    loadPageTreeBuilder()
+      .then((builder) => { if (live) setPageTreeBuilder(builder); })
+      .catch((error) => host.reportError?.(error, 'Failed to load the page tree'));
+    return () => { live = false; };
+  }, [host, pageTree, pageTreeBuilder]);
   const personal = isPersonalCollabScope(scope);
   // No resolver (a host without tracker data): no type nodes.
   const typeTreeInput = useMemo(
@@ -168,6 +213,10 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     parentFolderId: string | null;
   } | null>(null);
   const [draggedType, setDraggedType] = useState<string | null>(null);
+  const [draggedItem, setDraggedItem] = useState<CollabTreeItemNode | null>(null);
+  const [moveTarget, setMoveTarget] = useState<
+    { kind: 'page'; document: SharedDocument } | { kind: 'item'; node: CollabTreeItemNode } | null
+  >(null);
   const documentTypesRevision = useSyncExternalStore(
     (listener) => host.documents?.onDocumentTypesChanged?.(listener) ?? (() => undefined),
     () => host.documents?.documentTypes() ?? [],
@@ -259,8 +308,15 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   // Full tree (all docs + first-class folders) — used for path-collision checks
   // and auto-expand, independent of the active filter.
   const tree = useMemo(
-    () => buildCollabTreeAdaptive(sharedDocuments, sharedFolders, typeTreeInput),
-    [sharedDocuments, sharedFolders, typeTreeInput]
+    () => {
+      if (!pageTree) return buildCollabTreeAdaptive(sharedDocuments, sharedFolders, typeTreeInput);
+      return pageTreeBuilder?.buildCollabPageTree(sharedDocuments, {
+        resolver: typeResolver,
+        typePlacements,
+        itemPlacements,
+      }) ?? [];
+    },
+    [itemPlacements, pageTree, pageTreeBuilder, sharedDocuments, sharedFolders, typePlacements, typeResolver, typeTreeInput]
   );
 
   // Docs visible under the active segmented filter (All / Favorites / Updated).
@@ -280,11 +336,13 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     () => {
       // Favorites and Updated are document filters; placed types only show in All.
       if (effectiveTreeFilter !== 'all') {
-        return pruneEmptyFolders(buildCollabTreeAdaptive(visibleDocuments, sharedFolders));
+        return pageTree
+          ? pageTreeBuilder?.buildCollabPageTree(visibleDocuments) ?? []
+          : pruneEmptyFolders(buildCollabTreeAdaptive(visibleDocuments, sharedFolders));
       }
-      return buildCollabTreeAdaptive(visibleDocuments, sharedFolders, typeTreeInput);
+      return pageTree ? tree : buildCollabTreeAdaptive(visibleDocuments, sharedFolders, typeTreeInput);
     },
-    [visibleDocuments, sharedFolders, effectiveTreeFilter, typeTreeInput]
+    [visibleDocuments, sharedFolders, effectiveTreeFilter, typeTreeInput, pageTree, pageTreeBuilder, tree]
   );
   const trimmedSearchQuery = searchQuery.trim();
   const hasActiveSearch = trimmedSearchQuery.length > 0;
@@ -301,8 +359,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         // Type and item nodes never collide with document or folder names.
         if (node.type === 'type' || node.type === 'item') continue;
         paths.add(node.path);
-        if (node.type === 'folder') {
-          collect(node.children);
+        if (node.type === 'folder' || node.type === 'document') {
+          collect(node.children ?? []);
         }
       }
     };
@@ -339,6 +397,15 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     for (const f of sharedFolders) resolve(f.folderId, new Set());
     return paths;
   }, [sharedFolders, folderById]);
+
+  // The breadcrumb path a document's row sits at, which is also the expansion
+  // key of each ancestor row.
+  const treePathOf = useCallback(
+    (document: SharedDocument) => (pageTree
+      ? getSharedDocumentDisplayPath(document, sharedFolders)
+      : getCollabDocumentPath(document)),
+    [pageTree, sharedFolders],
+  );
 
   const canMutateMetadata = useCallback((actionLabel: string) => {
     if (teamSyncStatus === 'connected') {
@@ -467,7 +534,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
   useEffect(() => {
     if (!activeDocument) return;
-    const path = getCollabDocumentPath(activeDocument);
+    const path = treePathOf(activeDocument);
     const parents: string[] = [];
     let current = getCollabParentPath(path);
     while (current) {
@@ -488,7 +555,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       }
       return changed ? next : currentFolders;
     });
-  }, [activeDocument]);
+  }, [activeDocument, treePathOf]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: CollabTreeNode) => {
     e.preventDefault();
@@ -530,8 +597,27 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     if (!contextMenu) return;
 
     if (contextMenu.node.type === 'document') {
-      if (!canMutateMetadata('move this document to Trash')) return;
       const { document } = contextMenu.node;
+      // Page tree: a page with children goes with its subtree, the way a
+      // folder delete works; a leaf page goes to Trash like any document.
+      const childCount = pageTree ? planPageRemoval(allSharedDocuments, typePlacements, document.documentId).childCount : 0;
+      if (childCount > 0) {
+        if (!canMutateMetadata('delete this page')) return;
+        const pages = `${childCount} child page${childCount === 1 ? '' : 's'}`;
+        // Counts the prose of types placed inside it, which goes too.
+        if (window.confirm(`Delete "${contextMenu.node.name}" and its ${pages}? Types and typed pages inside move back to their usual place. This cannot be undone.`)) {
+          session.removePage(document.documentId);
+          host.trackEvent?.('collab_folder_deleted', {
+            actorType: 'user',
+            source: 'sidebar',
+            documentCountBucket: bucketItemCount(childCount),
+            subfolderCountBucket: bucketItemCount(0),
+          });
+        }
+        setContextMenu(null);
+        return;
+      }
+      if (!canMutateMetadata('move this document to Trash')) return;
       session.trashDocument(document.documentId);
       trackDocumentAction(host, {
         action: 'trashed',
@@ -574,7 +660,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       }
     }
     setContextMenu(null);
-  }, [allSharedDocuments, canMutateMetadata, contextMenu, host, selectedFolderId, session, sharedFolders]);
+  }, [allSharedDocuments, canMutateMetadata, contextMenu, host, pageTree, selectedFolderId, session, sharedFolders, typePlacements]);
 
   const handleCopyFolderLink = useCallback(async (folderId: string) => {
     if (!teamOrgId) {
@@ -653,7 +739,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
     const docFolderPaths = new Set<string>();
     for (const document of sharedDocuments) {
-      const path = getCollabDocumentPath(document);
+      const path = treePathOf(document);
       let parent = getCollabParentPath(path);
       while (parent) {
         docFolderPaths.add(parent);
@@ -673,7 +759,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       }
       return changed ? next : currentFolders;
     });
-  }, [hasLoadedState, loadedScopeKey, scope.scopeKey, sharedDocuments, userTouchedExpansion]);
+  }, [hasLoadedState, loadedScopeKey, scope.scopeKey, sharedDocuments, treePathOf, userTouchedExpansion]);
 
   // The folderId a create action should nest under (null = root): the
   // right-clicked folder, else the currently selected folder.
@@ -712,9 +798,11 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   const getCreationBaseFolderId = useCallback((): string | null => {
     const contextFolderId = contextMenu?.node.type === 'folder'
       ? (contextMenu.node.folderId ?? null)
-      : undefined;
+      : pageTree && contextMenu?.node.type === 'document'
+        ? contextMenu.node.document.documentId
+        : undefined;
     return resolveCollabCreateTargetFolderId(contextFolderId, selectedFolderId);
-  }, [contextMenu, selectedFolderId]);
+  }, [contextMenu, pageTree, selectedFolderId]);
 
   const openCreateFolderDialog = useCallback(() => {
     setCreateTargetFolderId(getCreationBaseFolderId());
@@ -754,6 +842,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         if (markdown) setCreateDocumentDescriptor(markdown.descriptor);
       },
       onNewFolder: () => createHandlersRef.current.openCreateFolderDialog(),
+      pageTree,
       // Markdown is the primary action, so it is not repeated in the list.
       items: sharedNewDocumentMenuItems
         .filter(({ descriptor }) => descriptor.documentType !== 'markdown')
@@ -771,7 +860,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     return () => registerCreateMenu(null);
     // sharedNewDocumentMenuItems is read through its signature.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registerCreateMenu, sharedTypeSignature, selectedFolderPath]);
+  }, [registerCreateMenu, sharedTypeSignature, selectedFolderPath, pageTree]);
 
   const selectCreateDocumentType = useCallback((descriptor: CollabDocumentTypeDescriptor) => {
     if (!descriptor.capabilities.sharedCreate) return;
@@ -877,31 +966,30 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     setContextMenu(null);
   }, [canMutateMetadata, documentRenameParts.suffix, documentToRename, existingPaths, folderPathById, host, session, showWarning]);
 
-  const moveDraggedDocument = useCallback(async (targetFolderId: string | null, targetFolderPath: string | null) => {
-    if (!draggedDocument) return;
-    if (!canMutateMetadata('move this document')) {
-      setDropTargetPath(null);
-      setDraggedDocument(null);
-      return;
-    }
-
-    const nextPath = joinCollabPath(targetFolderPath, draggedDocument.name);
-    if (!nextPath || nextPath === draggedDocument.sourcePath) {
-      setDropTargetPath(null);
-      setDraggedDocument(null);
-      return;
-    }
-    if (existingPaths.has(nextPath) && nextPath !== draggedDocument.sourcePath) {
+  // Reparent a document (a page, in a page tree) and dual-write its title as
+  // the full path so clients that predate first-class folders keep the tree.
+  const relocateDocument = useCallback(async (
+    moved: { documentId: string; sourcePath: string; name: string },
+    targetFolderId: string | null,
+    targetFolderPath: string | null,
+  ) => {
+    if (!canMutateMetadata('move this document')) return;
+    const nextPath = joinCollabPath(targetFolderPath, moved.name);
+    if (!nextPath || nextPath === moved.sourcePath) return;
+    if (existingPaths.has(nextPath)) {
       showWarning('Name already in use', `A document or folder named "${nextPath}" already exists.`);
-      setDropTargetPath(null);
-      setDraggedDocument(null);
       return;
     }
-
-    // First-class reparent + dual-write title (single doc → one title write).
-    session.moveDocument(draggedDocument.documentId, targetFolderId);
-    await session.updateDocumentTitle(draggedDocument.documentId, nextPath);
-    const movedDocument = allSharedDocuments.find((document) => document.documentId === draggedDocument.documentId);
+    if (pageTree) {
+      if (!session.movePage(moved.documentId, targetFolderId)) {
+        showWarning('Cannot move page', 'A page cannot move inside one of its own child pages.');
+        return;
+      }
+    } else {
+      session.moveDocument(moved.documentId, targetFolderId);
+    }
+    await session.updateDocumentTitle(moved.documentId, nextPath);
+    const movedDocument = allSharedDocuments.find((document) => document.documentId === moved.documentId);
     trackDocumentAction(host, {
       action: 'moved',
       documentType: movedDocument?.documentType,
@@ -920,10 +1008,14 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       setSelectedFolderPath(null);
       setSelectedFolderId(null);
     }
+  }, [allSharedDocuments, canMutateMetadata, existingPaths, host, pageTree, session, showWarning]);
 
+  const moveDraggedDocument = useCallback(async (targetFolderId: string | null, targetFolderPath: string | null) => {
+    const moved = draggedDocument;
     setDropTargetPath(null);
     setDraggedDocument(null);
-  }, [allSharedDocuments, canMutateMetadata, draggedDocument, existingPaths, host, session, showWarning]);
+    if (moved) await relocateDocument(moved, targetFolderId, targetFolderPath);
+  }, [draggedDocument, relocateDocument]);
 
   const canDropDocument = useCallback((targetFolderPath: string | null) => {
     if (!draggedDocument) return false;
@@ -1008,11 +1100,73 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     });
   }, [canMutateMetadata, folderPathById, placeTypeMenu, reportTypePlacementError, session]);
 
+  // Page tree: a typed page goes under any page, at root, or back under its type.
+  const moveItemTo = useCallback((itemId: string, target: CollabPageMoveTarget) => {
+    if (!canMutateMetadata('move this page')) return;
+    const write = target === UNDER_TYPE
+      ? session.removeItemPlacement(itemId)
+      : session.setItemPlacement(itemId, target);
+    void write.then((result) => {
+      if (!result.ok) reportTypePlacementError(new Error(result.error));
+    });
+  }, [canMutateMetadata, reportTypePlacementError, session]);
+
+  const itemPlacementParent = useCallback((itemId: string): CollabPageMoveTarget => {
+    const placement = itemPlacements.find((candidate) => candidate.itemId === itemId);
+    return placement ? (placement.parentId ?? null) : UNDER_TYPE;
+  }, [itemPlacements]);
+
+  // Page tree drops onto a page row (or root, with a null page id).
+  const canDropOnPage = useCallback((pageId: string | null, pagePath: string | null): boolean => {
+    if (draggedType) return canDropType(pageId);
+    if (draggedItem) return itemPlacementParent(draggedItem.itemId) !== pageId;
+    if (!draggedDocument) return false;
+    if (pageId && collectPageSubtree(sharedDocuments, draggedDocument.documentId).includes(pageId)) return false;
+    return canDropDocument(pagePath);
+  }, [canDropDocument, canDropType, draggedDocument, draggedItem, draggedType, itemPlacementParent, sharedDocuments]);
+
+  const dropOnPage = useCallback((pageId: string | null, pagePath: string | null) => {
+    if (draggedType) {
+      moveDraggedType(pageId, pagePath);
+      return;
+    }
+    const item = draggedItem;
+    setDraggedItem(null);
+    setDropTargetPath(null);
+    if (item) {
+      moveItemTo(item.itemId, pageId);
+      if (pagePath) setExpandedFolders((currentFolders) => new Set(currentFolders).add(pagePath));
+      return;
+    }
+    void moveDraggedDocument(pageId, pagePath);
+  }, [draggedItem, draggedType, moveDraggedDocument, moveDraggedType, moveItemTo]);
+
+  const itemRowActions = useMemo(() => (pageTree ? {
+    onContextMenu: (event: React.MouseEvent, node: CollabTreeItemNode) => handleContextMenu(event, node),
+    onDragStart: setDraggedItem,
+    onDragEnd: () => {
+      setDraggedItem(null);
+      setDropTargetPath(null);
+    },
+  } : undefined), [handleContextMenu, pageTree]);
+
   const renderTree = useCallback((nodes: CollabTreeNode[], depth = 0): React.ReactNode => {
     return nodes.map((node) => {
       const indent = depth * 16 + 8;
 
-      if (node.type === 'item') return null; // rendered by its type node
+      // Under a type, the type node renders its items; a placed one is a page.
+      if (node.type === 'item') {
+        return pageTree ? (
+          <CollabTypeItemRow
+            key={node.id}
+            node={node}
+            position={0}
+            indent={indent}
+            onOpen={() => host.openArtifact({ kind: 'tracker', scope, trackerId: node.itemId }, 'sidebar')}
+            actions={itemRowActions}
+          />
+        ) : null;
+      }
 
       if (node.type === 'type') {
         return (
@@ -1031,6 +1185,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               setDropTargetPath(null);
             }}
             renderSubtypes={(subtypes) => renderTree(subtypes, depth + 1)}
+            itemActions={itemRowActions}
           />
         );
       }
@@ -1158,13 +1313,39 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
       const isFavorite = favoriteSet.has(node.document.documentId);
       const typePresentation = resolveSharedDocumentTypePresentation(node.document, documentTypeDescriptors);
+      // Page tree: a page with children expands like a folder and takes drops.
+      const pageId = node.document.documentId;
+      const hasChildren = (node.children?.length ?? 0) > 0;
+      const isPageExpanded = hasChildren && (hasActiveSearch || expandedFolders.has(node.path));
+      const pageDropProps = pageTree ? {
+        onDragOver: (event: React.DragEvent) => {
+          if (!canDropOnPage(pageId, node.path)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          event.dataTransfer.dropEffect = 'move';
+          if (dropTargetPath !== node.path) setDropTargetPath(node.path);
+        },
+        onDragLeave: (event: React.DragEvent) => {
+          event.stopPropagation();
+          const relatedTarget = event.relatedTarget as Node | null;
+          if (relatedTarget && event.currentTarget.contains(relatedTarget)) return;
+          if (dropTargetPath === node.path) setDropTargetPath(null);
+        },
+        onDrop: (event: React.DragEvent) => {
+          if (!canDropOnPage(pageId, node.path)) return;
+          event.preventDefault();
+          event.stopPropagation();
+          dropOnPage(pageId, node.path);
+        },
+      } : {};
 
-      return (
+      const row = (
         <SharedDocumentLink
           href={host.surface === 'web_console' ? host.artifactUrl?.({ kind: 'document', scope, documentId: node.document.documentId, teamProjectId: node.document.teamProjectId }) : null}
           key={node.id}
-          className={`group w-full flex items-center text-left file-tree-file${isActive ? ' active' : ''}`}
+          className={`group w-full flex items-center text-left file-tree-file${isActive ? ' active' : ''}${pageTree && dropTargetPath === node.path ? ' drag-over' : ''}`}
           style={{ paddingLeft: indent }}
+          {...pageDropProps}
           onClick={() => {
             setSelectedFolderPath(getCollabParentPath(node.path));
             host.openArtifact({
@@ -1206,7 +1387,20 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           }}
           title={node.path}
         >
-          <span className="file-tree-spacer" />
+          {hasChildren ? (
+            <span
+              className="file-tree-chevron"
+              role="button"
+              aria-label={isPageExpanded ? 'Collapse' : 'Expand'}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!hasActiveSearch) toggleFolder(node.path);
+              }}
+            >
+              <MaterialSymbol icon={isPageExpanded ? 'keyboard_arrow_down' : 'keyboard_arrow_right'} size={16} />
+            </span>
+          ) : <span className="file-tree-spacer" />}
           <span className="file-tree-icon">
             <MaterialSymbol icon={typePresentation.icon} size={16} />
           </span>
@@ -1237,8 +1431,19 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           )}
         </SharedDocumentLink>
       );
+      if (!hasChildren) return row;
+      return (
+        <div key={node.id}>
+          {row}
+          {isPageExpanded ? renderTree(node.children ?? [], depth + 1) : null}
+        </div>
+      );
     });
   }, [
+    pageTree,
+    itemRowActions,
+    canDropOnPage,
+    dropOnPage,
     activeDocumentId,
     canDropDocument,
     canDropFolder,
@@ -1399,9 +1604,11 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           setPlaceTypeMenu({ x: event.clientX, y: event.clientY, parentFolderId: null });
         }}
         onDragOver={(event) => {
-          const accepts = draggedType
-            ? canDropType(null)
-            : draggedFolder ? canDropFolder(null) : canDropDocument(null);
+          const accepts = pageTree
+            ? canDropOnPage(null, null)
+            : draggedType
+              ? canDropType(null)
+              : draggedFolder ? canDropFolder(null) : canDropDocument(null);
           if (!accepts) return;
           const target = event.target as HTMLElement;
           if (target.closest('.file-tree-directory, .file-tree-file')) return;
@@ -1425,6 +1632,12 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         onDrop={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest('.file-tree-directory, .file-tree-file')) return;
+          if (pageTree) {
+            if (!canDropOnPage(null, null)) return;
+            event.preventDefault();
+            dropOnPage(null, null);
+            return;
+          }
           if (draggedType) {
             if (!canDropType(null)) return;
             event.preventDefault();
@@ -1448,7 +1661,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           // tree so users don't think their docs disappeared.
           const isResolvingSync =
             teamSyncStatus === 'connecting' || teamSyncStatus === 'syncing';
-          if (!hasLoadedState || isResolvingSync) {
+          if (!hasLoadedState || isResolvingSync || (pageTree && !pageTreeBuilder)) {
             return (
               <div className="px-2 py-4 text-center" data-testid="collab-sidebar-loading">
                 <MaterialSymbol
@@ -1580,6 +1793,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             {...contextMenuFloating.getFloatingProps()}
             className="min-w-[160px] rounded-md z-[10000] text-[13px] p-1 bg-nim-secondary border border-nim text-nim backdrop-blur-[10px] shadow-lg"
           >
+          <React.Suspense fallback={null}>
           {contextMenu.node.type === 'folder' ? (
             <>
               <button
@@ -1672,9 +1886,47 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               <MaterialSymbol icon="playlist_remove" size={18} />
               <span>Remove from tree</span>
             </button>
+          ) : contextMenu.node.type === 'item' ? (
+            <CollabItemMenu
+              placed={contextMenu.node.placed === true}
+              onMoveTo={() => {
+                if (contextMenu.node.type === 'item') setMoveTarget({ kind: 'item', node: contextMenu.node });
+                setContextMenu(null);
+              }}
+              onBackUnderType={() => {
+                if (contextMenu.node.type === 'item') moveItemTo(contextMenu.node.itemId, UNDER_TYPE);
+                setContextMenu(null);
+              }}
+            />
           ) : (
             <>
-              <button
+              {pageTree && contextDocument ? (
+                <CollabPageMenuHead
+                  onNewPageInside={() => {
+                    const markdown = sharedNewDocumentMenuItems.find(({ descriptor }) => descriptor.documentType === 'markdown');
+                    setCreateTargetFolderId(contextDocument.documentId);
+                    if (markdown) setCreateDocumentDescriptor(markdown.descriptor);
+                    setContextMenu(null);
+                  }}
+                  onSetType={onSetPageType ? () => {
+                    setContextMenu(null);
+                    onSetPageType(contextDocument);
+                  } : undefined}
+                  onRename={() => {
+                    setDocumentToRename(contextDocument);
+                    setContextMenu(null);
+                  }}
+                  onMoveTo={() => {
+                    setMoveTarget({ kind: 'page', document: contextDocument });
+                    setContextMenu(null);
+                  }}
+                  onCopyLink={() => {
+                    setContextMenu(null);
+                    void handleCopyLink(contextDocument);
+                  }}
+                  copyLinkDisabled={!teamOrgId}
+                />
+              ) : <button
                 type="button"
                 className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
                 onClick={() => {
@@ -1690,7 +1942,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               >
                 <MaterialSymbol icon="open_in_new" size={18} />
                 <span>Open</span>
-              </button>
+              </button>}
               {personalStateAvailable && <button
                 type="button"
                 className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
@@ -1728,7 +1980,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 <MaterialSymbol icon="mark_email_read" size={18} />
                 <span>Mark as read</span>
               </button>}
-              <button
+              {!pageTree && <button
                 type="button"
                 className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 disabled={!teamOrgId}
@@ -1741,7 +1993,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               >
                 <MaterialSymbol icon="link" size={18} />
                 <span>Copy Link</span>
-              </button>
+              </button>}
               <button
                 type="button"
                 className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1768,7 +2020,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                   action. It lived inside the local-origin block because desktop
                   renames the mirrored file too, which silently removed Rename
                   from any host that omits the desktop-only controller. */}
-              <button
+              {!pageTree && <button
                 type="button"
                 className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
                 onClick={() => {
@@ -1779,7 +2031,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               >
                 <MaterialSymbol icon="edit" size={18} />
                 <span>Rename</span>
-              </button>
+              </button>}
               {contextLocalOrigin.available ? <>
               <button
                 type="button"
@@ -1832,18 +2084,64 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 </button>
               )}
               </> : null}
-              <button
+              {pageTree && contextDocument ? (
+                <CollabPageDeleteEntry
+                  childCount={planPageRemoval(allSharedDocuments, typePlacements, contextDocument.documentId).childCount}
+                  onDelete={handleDelete}
+                />
+              ) : <button
                 type="button"
                 className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim-error hover:bg-nim-hover"
                 onClick={handleDelete}
               >
                 <MaterialSymbol icon="delete" size={18} />
                 <span>Move to Trash</span>
-              </button>
+              </button>}
             </>
           )}
+          </React.Suspense>
           </div>
         </FloatingPortal>
+      )}
+
+      {moveTarget && (
+        <React.Suspense fallback={null}>
+          <CollabPageMoveDialog
+            name={moveTarget.kind === 'page'
+              ? getCollabNodeName(moveTarget.document.title) || moveTarget.document.title
+              : moveTarget.node.name}
+            pages={sharedFolders}
+            excludedIds={new Set(moveTarget.kind === 'page'
+              ? collectPageSubtree(sharedDocuments, moveTarget.document.documentId)
+              : [])}
+            current={moveTarget.kind === 'page'
+              ? (moveTarget.document.parentFolderId ?? null)
+              : itemPlacementParent(moveTarget.node.itemId)}
+            rootLabel={personal ? 'Personal' : 'Team'}
+            underTypeLabel={moveTarget.kind === 'item'
+              ? `Under ${typeResolver?.typeName(moveTarget.node.typeId) ?? 'its type'}`
+              : undefined}
+            onConfirm={(target) => {
+              const current = moveTarget;
+              setMoveTarget(null);
+              if (current.kind === 'item') {
+                moveItemTo(current.node.itemId, target);
+                return;
+              }
+              const { document } = current;
+              void relocateDocument(
+                {
+                  documentId: document.documentId,
+                  sourcePath: treePathOf(document),
+                  name: getCollabNodeName(document.title) || document.title,
+                },
+                target,
+                target ? (folderPathById.get(target) ?? null) : null,
+              );
+            }}
+            onCancel={() => setMoveTarget(null)}
+          />
+        </React.Suspense>
       )}
 
       {placeTypeMenu && (

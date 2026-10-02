@@ -21,19 +21,24 @@ import { DecoratorNode } from 'lexical';
 export declare const TRACKER_REFERENCE_URN_SCHEME = "nimbalyst://";
 export type TrackerReferenceView = 'chip' | 'card' | 'statements';
 export declare function normalizeTrackerReferenceView(view: unknown): TrackerReferenceView;
+/** A relation is a predicate id; anything else (empty, non-string) is a plain link. */
+export declare function normalizeTrackerReferenceRelation(relation: unknown): string | null;
 export type SerializedTrackerReferenceNode = Spread<{
     /** Reference key: an issue key (NIM-123) or local short id (tk_abc123). */
     referenceKey: string;
     view?: TrackerReferenceView;
+    /** Predicate id of the named relation this link states; absent = plain link. */
+    relation?: string | null;
 }, SerializedLexicalNode>;
 export declare const TrackerReferenceNodeDecorator: import("../../editor/nodes/nodeDecoratorSlot").NodeDecoratorSlot<TrackerReferenceNode>;
 export declare class TrackerReferenceNode extends DecoratorNode<JSX.Element | null> {
     __referenceKey: string;
     __view: TrackerReferenceView;
+    __relation: string | null;
     static getType(): string;
     static clone(node: TrackerReferenceNode): TrackerReferenceNode;
     static importJSON(serializedNode: SerializedTrackerReferenceNode): TrackerReferenceNode;
-    constructor(referenceKey: string, key?: NodeKey, view?: TrackerReferenceView);
+    constructor(referenceKey: string, key?: NodeKey, view?: TrackerReferenceView, relation?: string | null);
     exportJSON(): SerializedTrackerReferenceNode;
     createDOM(config: EditorConfig): HTMLElement;
     updateDOM(prev: TrackerReferenceNode): boolean;
@@ -46,6 +51,8 @@ export declare class TrackerReferenceNode extends DecoratorNode<JSX.Element | nu
     getReferenceKey(): string;
     getView(): TrackerReferenceView;
     setView(view: TrackerReferenceView): this;
+    getRelation(): string | null;
+    setRelation(relation: string | null): this;
 }
-export declare function $createTrackerReferenceNode(referenceKey: string, view?: TrackerReferenceView): TrackerReferenceNode;
+export declare function $createTrackerReferenceNode(referenceKey: string, view?: TrackerReferenceView, relation?: string | null): TrackerReferenceNode;
 export declare function $isTrackerReferenceNode(node: LexicalNode | null | undefined): node is TrackerReferenceNode;

@@ -45,7 +45,10 @@ export type TeamClientMessage =
   | TeamFolderRemoveMessage
   | TeamTypePlacementIndexSyncRequestMessage
   | TeamTypePlacementSetMessage
-  | TeamTypePlacementRemoveMessage;
+  | TeamTypePlacementRemoveMessage
+  | TeamItemPlacementIndexSyncRequestMessage
+  | TeamItemPlacementSetMessage
+  | TeamItemPlacementRemoveMessage;
 
 /** Request full team state snapshot */
 export interface TeamSyncRequestMessage {
@@ -186,8 +189,9 @@ export interface TeamTypePlacementIndexSyncRequestMessage {
 /**
  * Place a tracker type as a node in the page tree, or move it. One placement
  * per type per project, so a second set for the same type replaces the first.
- * `parentFolderId` null = root level; a missing folder is refused with
- * `folder_not_found`. `projectId` omitted = the org's primary project.
+ * `parentFolderId` null = root level; a missing folder (a missing or trashed
+ * page once `pageTree` is set) is refused with `folder_not_found`. `projectId`
+ * omitted = the org's primary project.
  */
 export interface TeamTypePlacementSetMessage {
   type: 'typePlacementSet';
@@ -201,6 +205,33 @@ export interface TeamTypePlacementSetMessage {
 export interface TeamTypePlacementRemoveMessage {
   type: 'typePlacementRemove';
   typeId: string;
+  projectId?: string | null;
+}
+
+/** Request every tracker-item placement in the page tree. */
+export interface TeamItemPlacementIndexSyncRequestMessage {
+  type: 'itemPlacementIndexSync';
+}
+
+/**
+ * Place a tracker item in the page tree, or move it. One placement per item per
+ * project, so a second set for the same item replaces the first. `parentId` is
+ * a page (document) id, or null for root; a missing or trashed page is refused
+ * with `folder_not_found`. `projectId` omitted = the org's primary project. An
+ * item with no placement sits under its type.
+ */
+export interface TeamItemPlacementSetMessage {
+  type: 'itemPlacementSet';
+  itemId: string;
+  projectId?: string | null;
+  parentId: string | null;
+  sortOrder: number;
+}
+
+/** Take a tracker item out of the page tree, back under its type. Idempotent. */
+export interface TeamItemPlacementRemoveMessage {
+  type: 'itemPlacementRemove';
+  itemId: string;
   projectId?: string | null;
 }
 
@@ -255,6 +286,9 @@ export type TeamServerMessage =
   | TeamTypePlacementIndexSyncResponseMessage
   | TeamTypePlacementBroadcastMessage
   | TeamTypePlacementRemoveBroadcastMessage
+  | TeamItemPlacementIndexSyncResponseMessage
+  | TeamItemPlacementBroadcastMessage
+  | TeamItemPlacementRemoveBroadcastMessage
   | TeamProjectAccessChangedMessage
   | TeamDocumentCommentNotifyAckMessage
   | TeamErrorMessage;
@@ -400,6 +434,28 @@ export interface TeamTypePlacementRemoveBroadcastMessage {
   typeIds: string[];
 }
 
+/** Full tracker-item placement list. */
+export interface TeamItemPlacementIndexSyncResponseMessage {
+  type: 'itemPlacementIndexSyncResponse';
+  placements: ItemPlacementNode[];
+}
+
+/** Broadcast: an item was placed or moved (single upserted placement). */
+export interface TeamItemPlacementBroadcastMessage {
+  type: 'itemPlacementBroadcast';
+  placement: ItemPlacementNode;
+}
+
+/**
+ * Broadcast: item placements were removed, either directly or because the page
+ * holding them was removed. The items themselves are untouched.
+ */
+export interface TeamItemPlacementRemoveBroadcastMessage {
+  type: 'itemPlacementRemoveBroadcast';
+  projectId: string;
+  itemIds: string[];
+}
+
 /**
  * Answers `documentCommentNotify`. Sent only to the requesting connection.
  *
@@ -500,6 +556,22 @@ export interface TypePlacementNode {
   updatedAt: number;
 }
 
+/**
+ * A tracker item placed in the page tree, keyed by `(projectId, itemId)`. No
+ * placement means the item sits under its type. Ids only, so nothing here is
+ * encrypted.
+ */
+export interface ItemPlacementNode {
+  itemId: string;
+  projectId: string | null;
+  /** Page (document) id; null = root level. */
+  parentId: string | null;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** Full team state snapshot sent on teamSync */
 export interface TeamState {
   metadata: {
@@ -519,10 +591,22 @@ export interface TeamState {
   } | null;
   members: MemberInfo[];
   documents: EncryptedDocIndexEntry[];
-  /** First-class folder nodes (omitted by pre-folders servers). */
+  /**
+   * First-class folder nodes (omitted by pre-folders servers). Once `pageTree`
+   * is set this is a compatibility projection for older clients: every
+   * non-trashed document that has a child document or placement.
+   */
   folders?: EncryptedFolderNode[];
+  /**
+   * Set once the room's folders were converted into documents. A client that
+   * sees it builds the tree from documents (`parentFolderId` on a document is
+   * the parent page id) and ignores `folders`.
+   */
+  pageTree?: true;
   /** Tracker-type placements in the page tree (omitted by older servers). */
   typePlacements?: TypePlacementNode[];
+  /** Tracker-item placements in the page tree (omitted by older servers). */
+  itemPlacements?: ItemPlacementNode[];
   /** Organization configuration (omitted by pre-settings servers). */
   settings?: OrgSettings;
 }

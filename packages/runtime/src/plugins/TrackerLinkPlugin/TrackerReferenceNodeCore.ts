@@ -41,11 +41,18 @@ export function normalizeTrackerReferenceView(view: unknown): TrackerReferenceVi
   return view === 'card' || view === 'statements' ? view : 'chip';
 }
 
+/** A relation is a predicate id; anything else (empty, non-string) is a plain link. */
+export function normalizeTrackerReferenceRelation(relation: unknown): string | null {
+  return typeof relation === 'string' && relation.trim() ? relation.trim() : null;
+}
+
 export type SerializedTrackerReferenceNode = Spread<
   {
     /** Reference key: an issue key (NIM-123) or local short id (tk_abc123). */
     referenceKey: string;
     view?: TrackerReferenceView;
+    /** Predicate id of the named relation this link states; absent = plain link. */
+    relation?: string | null;
   },
   SerializedLexicalNode
 >;
@@ -55,7 +62,13 @@ function convertTrackerReferenceElement(
 ): DOMConversionOutput | null {
   const referenceKey = domNode.getAttribute('data-issue-key');
   if (referenceKey) {
-    return { node: $createTrackerReferenceNode(referenceKey, normalizeTrackerReferenceView(domNode.getAttribute('data-view'))) };
+    return {
+      node: $createTrackerReferenceNode(
+        referenceKey,
+        normalizeTrackerReferenceView(domNode.getAttribute('data-view')),
+        normalizeTrackerReferenceRelation(domNode.getAttribute('data-relation')),
+      ),
+    };
   }
   return null;
 }
@@ -65,25 +78,36 @@ export const TrackerReferenceNodeDecorator = createNodeDecoratorSlot<TrackerRefe
 export class TrackerReferenceNode extends DecoratorNode<JSX.Element | null> {
   __referenceKey: string;
   __view: TrackerReferenceView;
+  __relation: string | null;
 
   static getType(): string {
     return 'tracker-reference';
   }
 
   static clone(node: TrackerReferenceNode): TrackerReferenceNode {
-    return new TrackerReferenceNode(node.__referenceKey, node.__key, node.__view);
+    return new TrackerReferenceNode(node.__referenceKey, node.__key, node.__view, node.__relation);
   }
 
   static importJSON(
     serializedNode: SerializedTrackerReferenceNode,
   ): TrackerReferenceNode {
-    return $createTrackerReferenceNode(serializedNode.referenceKey, normalizeTrackerReferenceView(serializedNode.view));
+    return $createTrackerReferenceNode(
+      serializedNode.referenceKey,
+      normalizeTrackerReferenceView(serializedNode.view),
+      normalizeTrackerReferenceRelation(serializedNode.relation),
+    );
   }
 
-  constructor(referenceKey: string, key?: NodeKey, view: TrackerReferenceView = 'chip') {
+  constructor(
+    referenceKey: string,
+    key?: NodeKey,
+    view: TrackerReferenceView = 'chip',
+    relation: string | null = null,
+  ) {
     super(key);
     this.__referenceKey = referenceKey;
     this.__view = view;
+    this.__relation = normalizeTrackerReferenceRelation(relation);
   }
 
   exportJSON(): SerializedTrackerReferenceNode {
@@ -93,6 +117,7 @@ export class TrackerReferenceNode extends DecoratorNode<JSX.Element | null> {
       version: 1,
       referenceKey: this.__referenceKey,
       ...(this.getView() === 'chip' ? {} : { view: this.getView() }),
+      ...(this.getRelation() ? { relation: this.getRelation() } : {}),
     };
   }
 
@@ -121,6 +146,10 @@ export class TrackerReferenceNode extends DecoratorNode<JSX.Element | null> {
     element.setAttribute('data-issue-key', this.__referenceKey);
     if (this.getView() !== 'chip') {
       element.setAttribute('data-view', this.getView());
+    }
+    const relation = this.getRelation();
+    if (relation) {
+      element.setAttribute('data-relation', relation);
     }
     element.textContent = this.__referenceKey;
     return { element };
@@ -163,13 +192,24 @@ export class TrackerReferenceNode extends DecoratorNode<JSX.Element | null> {
     writable.__view = view;
     return writable;
   }
+
+  getRelation(): string | null {
+    return this.getLatest().__relation;
+  }
+
+  setRelation(relation: string | null): this {
+    const writable = this.getWritable();
+    writable.__relation = normalizeTrackerReferenceRelation(relation);
+    return writable;
+  }
 }
 
 export function $createTrackerReferenceNode(
   referenceKey: string,
   view: TrackerReferenceView = 'chip',
+  relation: string | null = null,
 ): TrackerReferenceNode {
-  return $applyNodeReplacement(new TrackerReferenceNode(referenceKey, undefined, view));
+  return $applyNodeReplacement(new TrackerReferenceNode(referenceKey, undefined, view, relation));
 }
 
 export function $isTrackerReferenceNode(

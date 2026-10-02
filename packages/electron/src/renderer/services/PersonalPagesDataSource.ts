@@ -3,7 +3,9 @@
  * local database by main and reached over generic IPC. It works with no
  * account, no team and no network, so its status is always `connected`.
  *
- * - `personal-pages:snapshot(workspacePath)` returns `{ items, containers, typePlacements }`.
+ * - `personal-pages:snapshot(workspacePath)` returns `{ items, containers, typePlacements,
+ *   itemPlacements, pageTree }`. Since schema 0050 personal pages are one page
+ *   tree, so `pageTree` is true and `containers` is empty.
  * - `personal-pages:command(workspacePath, cmd)` takes a `CollabDocsCommand` verbatim.
  * - `personal-pages:changed { workspacePath }` arrives through the central
  *   listener and is answered with a fresh `snapshot` change.
@@ -50,6 +52,8 @@ export class PersonalPagesDataSource implements CollabDocsDataSource {
       items: snapshot?.items ?? [],
       containers: snapshot?.containers ?? [],
       typePlacements: snapshot?.typePlacements ?? [],
+      itemPlacements: snapshot?.itemPlacements ?? [],
+      ...(snapshot?.pageTree ? { pageTree: true } : {}),
     };
     this.lastItemIds = new Set(result.items.map((item) => item.documentId));
     this.lastContainerIds = new Set(result.containers.map((container) => container.folderId));

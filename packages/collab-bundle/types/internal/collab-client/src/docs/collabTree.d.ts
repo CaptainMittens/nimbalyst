@@ -1,4 +1,5 @@
-import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
+import { type SharedDocument, type SharedFolder, type SharedTypePlacement } from './types';
+export { TYPE_PAGE_DOCUMENT_PREFIX } from './types';
 export interface CollabTreeFolderNode {
     id: string;
     type: 'folder';
@@ -21,6 +22,8 @@ export interface CollabTreeDocumentNode {
     path: string;
     name: string;
     document: SharedDocument;
+    /** Child pages, types and placed items; only in a page tree. */
+    children?: CollabTreeNode[];
 }
 /**
  * A tracker type placed in the tree. Its children are the type's items, after
@@ -44,6 +47,10 @@ export interface CollabTreeItemNode {
     typeId: string;
     path: string;
     name: string;
+    /** Singular type name shown faintly beside the row (page tree only). */
+    typeLabel?: string;
+    /** True when the item has a tree placement of its own. */
+    placed?: boolean;
 }
 export type CollabTreeNode = CollabTreeFolderNode | CollabTreeDocumentNode | CollabTreeTypeNode | CollabTreeItemNode;
 /**
@@ -53,6 +60,8 @@ export type CollabTreeNode = CollabTreeFolderNode | CollabTreeDocumentNode | Col
 export interface CollabTypeTreeResolver {
     /** Display name of a type, or null when the type is unknown here. */
     typeName(typeId: string): string | null;
+    /** Singular display name ("Module" for "Modules"); falls back to `typeName`. */
+    typeLabel?(typeId: string): string | null;
     /** The type this one `extends`, if any. */
     typeExtends?(typeId: string): string | null;
     /** Items of a type, in display order. */
@@ -61,6 +70,12 @@ export interface CollabTypeTreeResolver {
         title: string;
         sortKey?: string | number;
     }>;
+    /** One item by id, for an item placed outside its type; null when unknown here. */
+    item?(itemId: string): {
+        itemId: string;
+        title: string;
+        typeId: string;
+    } | null;
     /** Types a user may place, for the "Place type..." menu. */
     listedTypes?(): Array<{
         typeId: string;
@@ -114,6 +129,21 @@ export declare function reconcileSharedDocumentDisplayName(currentDisplayName: s
  * sync replace a useful path restored with the tab's collaboration config.
  */
 export declare function getSharedDocumentDisplayPathWithFallback(document: Pick<SharedDocument, 'documentId' | 'title' | 'parentFolderId'>, folders: SharedFolder[], fallbackPath: string | null | undefined): string;
+/** @internal Shared with `collabPageTree.ts`. */
+export declare function sortTreeNodes(nodes: CollabTreeNode[]): CollabTreeNode[];
+/**
+ * Build type nodes from placements and attach them under their folder (or
+ * root). A type whose `extends` chain reaches another placed type nests inside
+ * that type's node instead. Placements the resolver cannot name are skipped.
+ */
+export type CollabTreeContainer = {
+    path: string;
+    children: CollabTreeNode[];
+};
+/** @internal Shared with `collabPageTree.ts`. */
+export declare function attachTypeNodes(roots: CollabTreeNode[], folderNodeById: (folderId: string) => CollabTreeContainer | undefined, input: CollabTypePlacementInput | undefined, 
+/** Items placed elsewhere in the tree; still counted, not listed. */
+placedItemIds?: ReadonlySet<string>): void;
 export declare function buildCollabTree(documents: SharedDocument[], customFolders: string[], typePlacements?: CollabTypePlacementInput): CollabTreeNode[];
 /**
  * Build the collab tree from FIRST-CLASS folder nodes + each document's
@@ -170,3 +200,33 @@ export declare function buildCollabTreeAdaptive(documents: SharedDocument[], fol
  */
 export declare function pruneEmptyFolders(nodes: CollabTreeNode[]): CollabTreeNode[];
 export declare function filterCollabTree(nodes: CollabTreeNode[], query: string): CollabTreeNode[];
+export declare const isTypePageDocumentId: (documentId: string) => boolean;
+/**
+ * Every page as a folder-shaped row, for a page tree. Paths, crumbs, pickers
+ * and the create flow resolve a parent through the folder list; in a page tree
+ * any page can be a parent, so each one stands in as a folder with its own id.
+ * Type-page documents are excluded: the type node stands for them.
+ */
+export declare function projectPagesAsFolders(documents: SharedDocument[]): SharedFolder[];
+/** A page and every page below it, root first. Tolerates parent cycles. */
+export declare function collectPageSubtree(documents: SharedDocument[], pageId: string): string[];
+export interface CollabPageRemovalPlan {
+    /** The page, its descendant pages and the prose of types placed among them. */
+    removedIds: string[];
+    /** Everything removed except the page itself, for the confirmation. */
+    childCount: number;
+    /**
+     * Type-page prose sitting in the subtree whose type is placed outside it:
+     * moved to the type's parent (or root) before the removal, never deleted.
+     */
+    relocate: Array<{
+        documentId: string;
+        parentId: string | null;
+    }>;
+}
+/**
+ * What removing a page takes with it. A `type-page:<typeId>` document belongs
+ * to its type, not to the page it happens to sit under: it goes with the
+ * subtree only when the type itself is placed inside it.
+ */
+export declare function planPageRemoval(documents: SharedDocument[], typePlacements: SharedTypePlacement[], pageId: string): CollabPageRemovalPlan;

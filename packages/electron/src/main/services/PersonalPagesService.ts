@@ -1,13 +1,16 @@
 /**
- * Personal pages: folders, documents and tracker-type placements that live in
- * the app database for one workspace, with no account. The command surface is
+ * Personal pages: one page tree of documents, tracker-type placements and
+ * typed-page placements that live in the app database for one workspace, with
+ * no account. Since schema 0050 any page can hold child pages (a document's
+ * `parentFolderId` names its parent page) and the snapshot says `pageTree`;
+ * folder commands from an older renderer are mapped onto pages. The command surface is
  * the shared-docs `CollabDocsCommand` union, so the page tree can drive this
  * store and a team room the same way. Documents keep the shared-docs model and
  * stable ids so a later promotion to the team can follow
  * `publishTrackerCreation.ts`; `publication_status` stays 'local' until then.
  *
- * Rows are only deleted by `remove-document` and `remove-folder`; trash is the
- * default path for a document.
+ * Rows are only deleted by `remove-document` and `remove-folder` (a page and
+ * its subtree); trash is the default path for a document.
  */
 import { BrowserWindow } from 'electron';
 import type {
@@ -15,6 +18,7 @@ import type {
   CollabDocsCommandResult,
   SharedDocument,
   SharedFolder,
+  SharedItemPlacement,
   SharedTypePlacement,
 } from '@nimbalyst/collab-client/docs';
 import { getDatabase } from '../database/initialize';
@@ -25,8 +29,11 @@ import * as store from './personalPages/personalPagesStore';
 
 export interface PersonalPagesSnapshot {
   items: SharedDocument[];
+  /** Always empty: personal folders became pages in schema 0050. */
   containers: SharedFolder[];
   typePlacements: SharedTypePlacement[];
+  itemPlacements: SharedItemPlacement[];
+  pageTree: true;
 }
 
 export type PersonalBodyWriteResult =
@@ -87,12 +94,12 @@ export class PersonalPagesService {
   async snapshot(workspacePath: string): Promise<PersonalPagesSnapshot> {
     const ws = requireWorkspace(workspacePath);
     const db = this.db();
-    const [items, containers, typePlacements] = await Promise.all([
+    const [items, typePlacements, itemPlacements] = await Promise.all([
       store.listDocuments(db, ws),
-      store.listFolders(db, ws),
       store.listTypePlacements(db, ws),
+      store.listItemPlacements(db, ws),
     ]);
-    return { items, containers, typePlacements };
+    return { items, containers: [], typePlacements, itemPlacements, pageTree: true };
   }
 
   async command(workspacePath: string, command: CollabDocsCommand): Promise<CollabDocsCommandResult> {
@@ -102,10 +109,11 @@ export class PersonalPagesService {
     switch (command.type) {
       case 'refresh-folders':
       case 'refresh-type-placements':
+      case 'refresh-item-placements':
       case 'reconnect':
         return OK;
       case 'register-document':
-        await this.assertFolder(db, ws, command.parentFolderId ?? null);
+        await this.assertPage(db, ws, command.parentFolderId ?? null);
         await store.upsertDocument(db, ws, {
           documentId: requireId(command.documentId, 'documentId'),
           title: command.title ?? '',
@@ -127,35 +135,37 @@ export class PersonalPagesService {
         await this.mustUpdateDocument(db, ws, command.documentId, { trashed_at: null });
         break;
       case 'move-document':
-        await this.assertFolder(db, ws, command.parentFolderId ?? null);
-        await this.mustUpdateDocument(db, ws, command.documentId, { parent_folder_id: command.parentFolderId ?? null });
+        await this.movePage(db, ws, requireId(command.documentId, 'documentId'), command.parentFolderId ?? null);
         break;
       case 'remove-document':
         await store.deleteDocument(db, ws, requireId(command.documentId, 'documentId'));
         break;
+      // Folder commands from a renderer that predates the page tree: a folder
+      // is a page with an empty body.
       case 'register-folder': {
-        const folderId = requireId(command.folderId, 'folderId');
-        await this.assertFolderParent(db, ws, folderId, command.parentFolderId ?? null);
-        await store.upsertFolder(db, ws, {
-          folderId,
-          name: (command.name ?? '').trim().slice(0, 120),
+        const pageId = requireId(command.folderId, 'folderId');
+        await this.assertPage(db, ws, command.parentFolderId ?? null);
+        await store.upsertDocument(db, ws, {
+          documentId: pageId,
+          title: (command.name ?? '').trim().slice(0, 120),
+          documentType: 'markdown',
           parentFolderId: command.parentFolderId ?? null,
-          sortOrder: Number.isFinite(command.sortOrder) ? command.sortOrder : 0,
+          editorId: null,
+          fileExtension: null,
         });
         break;
       }
       case 'rename-folder':
-        await this.mustUpdateFolder(db, ws, command.folderId, { name: (command.name ?? '').trim().slice(0, 120) });
+        await this.mustUpdateDocument(db, ws, command.folderId, { title: (command.name ?? '').trim().slice(0, 120) });
         break;
       case 'move-folder':
-        await this.assertFolderParent(db, ws, requireId(command.folderId, 'folderId'), command.parentFolderId ?? null);
-        await this.mustUpdateFolder(db, ws, command.folderId, { parent_folder_id: command.parentFolderId ?? null });
+        await this.movePage(db, ws, requireId(command.folderId, 'folderId'), command.parentFolderId ?? null);
         break;
       case 'remove-folder':
-        await store.deleteFolderSubtree(db, ws, requireId(command.folderId, 'folderId'));
+        await store.deletePageSubtree(db, ws, requireId(command.folderId, 'folderId'));
         break;
       case 'set-type-placement':
-        await this.assertFolder(db, ws, command.parentFolderId ?? null);
+        await this.assertPage(db, ws, command.parentFolderId ?? null);
         await store.upsertTypePlacement(db, ws, {
           typeId: requireId(command.typeId, 'typeId'),
           parentFolderId: command.parentFolderId ?? null,
@@ -164,6 +174,17 @@ export class PersonalPagesService {
         break;
       case 'remove-type-placement':
         await store.deleteTypePlacement(db, ws, requireId(command.typeId, 'typeId'));
+        break;
+      case 'set-item-placement':
+        await this.assertPage(db, ws, command.parentId ?? null);
+        await store.upsertItemPlacement(db, ws, {
+          itemId: requireId(command.itemId, 'itemId'),
+          parentId: command.parentId ?? null,
+          sortOrder: Number.isFinite(command.sortOrder) ? command.sortOrder : 0,
+        });
+        break;
+      case 'remove-item-placement':
+        await store.deleteItemPlacement(db, ws, requireId(command.itemId, 'itemId'));
         break;
       default:
         throw new Error(`Unsupported personal pages command: ${(command as { type?: string }).type}`);
@@ -209,25 +230,26 @@ export class PersonalPagesService {
     }
   }
 
-  private async assertFolder(db: store.PersonalPagesDb, ws: string, folderId: string | null): Promise<SharedFolder[]> {
-    const folders = await store.listFolders(db, ws);
-    if (folderId !== null && !folders.some((folder) => folder.folderId === folderId)) {
-      throw new Error(`Unknown personal folder '${folderId}'`);
+  /** A parent must be a page (a non-trashed document) in this workspace, or null for root. */
+  private async assertPage(db: store.PersonalPagesDb, ws: string, pageId: string | null): Promise<SharedDocument[]> {
+    const documents = await store.listDocuments(db, ws);
+    if (pageId !== null && !documents.some((document) => document.documentId === pageId && document.trashedAt == null)) {
+      throw new Error(`Unknown personal page '${pageId}'`);
     }
-    return folders;
+    return documents;
   }
 
-  /** A folder's new parent must exist and must not be the folder or one of its descendants. */
-  private async assertFolderParent(
-    db: store.PersonalPagesDb,
-    ws: string,
-    folderId: string,
-    parentFolderId: string | null,
-  ): Promise<void> {
-    const folders = await this.assertFolder(db, ws, parentFolderId);
-    if (parentFolderId !== null && subtreeFolderIds(folders, folderId).includes(parentFolderId)) {
-      throw new Error(`Refusing to move folder '${folderId}' into its own descendant (cycle)`);
+  /** Reparent a page; the new parent must not be the page or one of its descendants. */
+  private async movePage(db: store.PersonalPagesDb, ws: string, pageId: string, parentId: string | null): Promise<void> {
+    const documents = await this.assertPage(db, ws, parentId);
+    const pages = documents.map((document) => ({
+      folderId: document.documentId,
+      parentFolderId: document.parentFolderId ?? null,
+    })) as SharedFolder[];
+    if (parentId !== null && subtreeFolderIds(pages, pageId).includes(parentId)) {
+      throw new Error(`Refusing to move page '${pageId}' into its own descendant (cycle)`);
     }
+    await this.mustUpdateDocument(db, ws, pageId, { parent_folder_id: parentId });
   }
 
   private async mustUpdateDocument(db: store.PersonalPagesDb, ws: string, documentId: string, values: Record<string, unknown>) {
@@ -235,15 +257,9 @@ export class PersonalPagesService {
       throw new Error(`Unknown personal document '${documentId}'`);
     }
   }
-
-  private async mustUpdateFolder(db: store.PersonalPagesDb, ws: string, folderId: string, values: Record<string, unknown>) {
-    if (!(await store.updateFolder(db, ws, requireId(folderId, 'folderId'), values))) {
-      throw new Error(`Unknown personal folder '${folderId}'`);
-    }
-  }
 }
 
-/** The folder and all its descendants, root first. */
+/** The folder (or page) and all its descendants, root first. */
 export function subtreeFolderIds(folders: SharedFolder[], rootId: string): string[] {
   const children = new Map<string, string[]>();
   for (const folder of folders) {

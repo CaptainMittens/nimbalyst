@@ -333,8 +333,9 @@ export function validateTrackerYAML(yamlString: string): { valid: boolean; error
  * that has no room yet.
  *
  * Returns issues rather than throwing, and returns every issue: a registry is
- * authored by hand and a reader who is told about one bad qualifier at a time
- * edits the file once per mistake.
+ * authored by hand and a reader who is told about one bad field at a time
+ * edits the file once per mistake. A `qualifiers` key left from an earlier
+ * registry is an unknown-field warning, not a failure.
  */
 export function parsePredicateRegistryYAML(yamlString: string): PredicateRegistryValidation {
   let data: unknown;
@@ -360,9 +361,18 @@ export function parsePredicateRegistryYAML(yamlString: string): PredicateRegistr
   return validatePredicateRegistry(predicates === undefined ? data : predicates);
 }
 
-/** Serialize a registry to the `.nimbalyst/predicates.yaml` shape. */
+/**
+ * Serialize a registry to the `.nimbalyst/predicates.yaml` shape. Relations
+ * carry no qualifiers, so a retired `qualifiers` block an older registry still
+ * holds is dropped here rather than written back.
+ */
 export function serializePredicateRegistryYAML(predicates: readonly PredicateDefinition[]): string {
-  return yaml.dump({ predicates }, { indent: 2, lineWidth: 120, noRefs: true });
+  const cleaned = predicates.map(predicate => {
+    if (!('qualifiers' in predicate)) return predicate;
+    const { qualifiers: _retired, ...rest } = predicate as PredicateDefinition & { qualifiers?: unknown };
+    return rest;
+  });
+  return yaml.dump({ predicates: cleaned }, { indent: 2, lineWidth: 120, noRefs: true });
 }
 
 // ---------------------------------------------------------------------------

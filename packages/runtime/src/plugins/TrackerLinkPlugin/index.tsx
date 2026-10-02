@@ -30,6 +30,12 @@ export {
 } from './TrackerReferencePickerComponent';
 
 export {
+  TrackerReferenceSourceProvider,
+  useTrackerReferenceSource,
+  type TrackerReferenceSource,
+} from './trackerReferenceSource';
+
+export {
   useResolvedTrackerReference,
   navigateToTrackerReference,
   type ResolvedTrackerReference,

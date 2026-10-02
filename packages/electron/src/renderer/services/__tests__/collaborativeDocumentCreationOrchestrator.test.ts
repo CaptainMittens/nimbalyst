@@ -326,6 +326,45 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
     expect(harness.events).toEqual(['resolve-config', 'register', 'cleanup', 'publish']);
   });
 
+  it("creates a type's prose page once, under the type's parent, as `type-page:<typeId>` without opening it", async () => {
+    const harness = makeHarness({
+      folders: [{ folderId: 'arch', parentFolderId: null, name: 'Architecture', sortOrder: 0, createdBy: '', createdAt: 1, updatedAt: 1 }],
+    });
+    const input = { scope: TEST_SCOPE, typeId: 'module', typeName: 'Modules', parentFolderId: 'arch' };
+
+    const [first, concurrent] = await Promise.all([harness.orchestrator.ensureTypePage(input), harness.orchestrator.ensureTypePage(input)]);
+    const again = await harness.orchestrator.ensureTypePage(input);
+
+    expect(first).toMatchObject({ documentId: 'type-page:module', title: 'Architecture/Modules.md', parentFolderId: 'arch', documentType: 'markdown' });
+    expect(concurrent.documentId).toBe('type-page:module');
+    expect(again.documentId).toBe('type-page:module');
+    expect(harness.events).toEqual(['resolve-config', 'register', 'cleanup']);
+
+    // A page of the same name beside it does not block the type page, and a
+    // placement parent that is gone puts it at the root instead.
+    const crowded = makeHarness({
+      documents: [{ documentId: 'p', teamProjectId: null, title: 'Modules.md', documentType: 'markdown', createdBy: '', createdAt: 1, updatedAt: 1 }],
+    });
+    expect(await crowded.orchestrator.ensureTypePage({ ...input, parentFolderId: null })).toMatchObject({ documentId: 'type-page:module', title: 'Modules (type).md' });
+    const orphaned = makeHarness();
+    expect(await orphaned.orchestrator.ensureTypePage(input)).toMatchObject({ documentId: 'type-page:module', parentFolderId: null });
+
+    const personal = makeHarness();
+    await personal.orchestrator.ensureTypePage({ ...input, scope: createPersonalCollabScope('/workspace'), parentFolderId: null });
+    expect(personal.events).toEqual(['register']);
+  });
+
+  it('creates the prose of the same type id in two workspaces from one renderer', async () => {
+    const harness = makeHarness();
+    // Each workspace has its own index; neither sees the other's row.
+    harness.deps.getDocuments = () => [];
+    const input = { typeId: 'module', typeName: 'Modules', parentFolderId: null };
+    await harness.orchestrator.ensureTypePage({ ...input, scope: createPersonalCollabScope('/workspace-a') });
+    await expect(harness.orchestrator.ensureTypePage({ ...input, scope: createPersonalCollabScope('/workspace-b') }))
+      .resolves.toMatchObject({ documentId: 'type-page:module' });
+    expect(harness.events).toEqual(['register', 'register']);
+  });
+
   it('trashes the announced row when the seed that follows it fails', async () => {
     // Registration now precedes the seed, so a seed failure leaves a real row
     // behind. It has to be rolled back, and still reported as unannounced so

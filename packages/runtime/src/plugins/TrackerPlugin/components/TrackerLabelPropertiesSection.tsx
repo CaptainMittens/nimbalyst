@@ -22,7 +22,7 @@ import {
   type EffectiveProperty,
   type FieldDefinition,
   type FieldType,
-  type PredicateQualifierDefinition,
+  type LabelPropertyQualifierDefinition,
 } from '@nimbalyst/tracker-schema';
 import { MaterialSymbol } from '../../../ui/icons/MaterialSymbol';
 import { TrackerFieldEditor } from './TrackerFieldEditor';
@@ -40,7 +40,7 @@ import { isTrackerFieldEmpty } from './trackerFieldLayout';
 const sectionLabelClasses = 'text-[11px] font-medium text-nim-muted uppercase tracking-[0.5px]';
 
 /** A qualifier declaration as a field the ordinary editor can render. */
-export function qualifierFieldDefinition(name: string, qualifier: PredicateQualifierDefinition): FieldDefinition {
+export function qualifierFieldDefinition(name: string, qualifier: LabelPropertyQualifierDefinition): FieldDefinition {
   return {
     name,
     type: qualifier.type as FieldType,

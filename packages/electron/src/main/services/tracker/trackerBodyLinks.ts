@@ -1,0 +1,176 @@
+/**
+ * Body links as relationship edges.
+ *
+ * A typed page's body carries links of the form
+ * `[label](nimbalyst://KEY "view=card rel=built-on")`. Each distinct
+ * (target, relation) becomes one row in the local relationship index with
+ * `source_field_id = 'body:<rel>'` (or `'body:link'` for a link with no `rel=`),
+ * so the Links section can list a page's relations and the linked page can list
+ * them under the inverse name. Pure: the index store resolves keys and persists.
+ */
+import type { RelationshipEdge } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
+
+/** Prefix that marks a body-derived row; field-derived rows never start with it. */
+export const BODY_LINK_FIELD_PREFIX = 'body:';
+
+/**
+ * Re-declared from `TrackerLinkPlugin/trackerReferenceHref.ts`
+ * (`TRACKER_REFERENCE_KEY_PATTERN`), which the runtime package does not export
+ * to main. Keep the two in sync: any run of characters that is not a slash,
+ * closing paren, whitespace or quote, excluding a bare reserved host.
+ */
+const RESERVED_LINK_HOSTS = ['action', 'auth', 'doc', 'folder', 'install', 'tracker'];
+const KEY_PATTERN = `(?!(?:${RESERVED_LINK_HOSTS.join('|')})(?=[)\\s]|$))[^)\\s/"]+`;
+
+/**
+ * `[label](nimbalyst://KEY)` or `[label](nimbalyst://KEY "k=v k=v")`. The
+ * lookbehind skips a backslash-escaped `\[`, which markdown renders as text.
+ */
+const LINK_RE = new RegExp(`(?<!\\\\)\\[([^\\]]*)\\]\\(nimbalyst://(${KEY_PATTERN})(?:\\s+"([^"]*)")?\\)`, 'g');
+/** Inline code spans: a run of backticks closed by a run of the same length. */
+const INLINE_CODE_RE = /(`+)[\s\S]*?\1/g;
+/** Fence opener/closer: up to 3 spaces of indent, then 3+ backticks or tildes. */
+const FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+/** Any other markdown link, rendered as its label inside a sentence. */
+const OTHER_LINK_RE = /\[([^\]]*)\]\([^)]*\)/g;
+const PREDICATE_ID_RE = /^[a-z0-9-]+$/;
+const SENTENCE_MAX = 300;
+
+export interface ParsedBodyLink {
+  key: string;
+  /** Predicate id from `rel=`, or null for a plain link. */
+  rel: string | null;
+  sentence: string;
+}
+
+/** Tracker bodies are stored as a markdown string or `{ markdown }`. */
+export function bodyMarkdownOf(content: unknown): string {
+  if (typeof content === 'string') {
+    // SQLite hands back the JSON text of the column; PGLite the decoded value.
+    const trimmed = content.trim();
+    if (trimmed.startsWith('"') || trimmed.startsWith('{')) {
+      try { return bodyMarkdownOf(JSON.parse(trimmed)); } catch { /* plain markdown */ }
+    }
+    return content;
+  }
+  const markdown = (content as { markdown?: unknown } | null)?.markdown;
+  return typeof markdown === 'string' ? markdown : '';
+}
+
+function relOf(title: string | undefined): string | null {
+  if (!title) return null;
+  for (const token of title.trim().split(/\s+/)) {
+    if (!token.startsWith('rel=')) continue;
+    const value = token.slice(4);
+    return PREDICATE_ID_RE.test(value) ? value : null;
+  }
+  return null;
+}
+
+function stripLineMarker(line: string): string {
+  return line.replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)*/, '');
+}
+
+function clip(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  return collapsed.length > SENTENCE_MAX ? `${collapsed.slice(0, SENTENCE_MAX - 1).trimEnd()}…` : collapsed;
+}
+
+/**
+ * Every tracker link in the body, in order, with the sentence it sits in. The
+ * sentence renders tracker links as their KEY and other links as their label.
+ */
+export function parseBodyLinks(markdown: string): ParsedBodyLink[] {
+  const links: ParsedBodyLink[] = [];
+  if (!markdown || !markdown.includes('nimbalyst://')) return links;
+  // A link written as an example (fenced block, inline code) is not a relation.
+  let fence: string | null = null;
+  for (const rawLine of markdown.split(/\r?\n/)) {
+    const fenceMatch = rawLine.match(FENCE_RE);
+    if (fence) {
+      if (fenceMatch && fenceMatch[1][0] === fence[0] && fenceMatch[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (fenceMatch) {
+      fence = fenceMatch[1];
+      continue;
+    }
+    if (!rawLine.includes('nimbalyst://')) continue;
+    // Match against a copy with code spans blanked (same length, so offsets
+    // hold); render the sentence from the original text.
+    const line = stripLineMarker(rawLine);
+    const matchable = line.replace(INLINE_CODE_RE, (span) => ' '.repeat(span.length));
+    // Render the line, recording where each tracker link lands so the sentence
+    // split runs on rendered text (a title attribute cannot fake a boundary).
+    let rendered = '';
+    let cursor = 0;
+    const found: Array<{ key: string; rel: string | null; at: number }> = [];
+    LINK_RE.lastIndex = 0;
+    for (let m = LINK_RE.exec(matchable); m; m = LINK_RE.exec(matchable)) {
+      rendered += line.slice(cursor, m.index).replace(OTHER_LINK_RE, '$1');
+      found.push({ key: m[2], rel: relOf(m[3]), at: rendered.length });
+      rendered += m[2];
+      cursor = m.index + m[0].length;
+    }
+    rendered += line.slice(cursor).replace(OTHER_LINK_RE, '$1');
+    for (const link of found) {
+      links.push({ key: link.key, rel: link.rel, sentence: sentenceAt(rendered, link.at) });
+    }
+  }
+  return links;
+}
+
+function sentenceAt(text: string, at: number): string {
+  let start = 0;
+  const boundary = /[.!?](?=\s)/g;
+  for (let m = boundary.exec(text); m && m.index < at; m = boundary.exec(text)) {
+    start = m.index + 1;
+  }
+  boundary.lastIndex = at;
+  const end = boundary.exec(text);
+  return clip(text.slice(start, end ? end.index + 1 : text.length));
+}
+
+export interface ResolvedLinkTarget {
+  itemId: string;
+  type: string;
+}
+
+/**
+ * One edge per (target, relation). `resolve` maps a KEY (issue key or raw item
+ * id) to an item in the same workspace; unresolvable keys and self links
+ * produce nothing. The sentence is the first occurrence's.
+ */
+export function deriveBodyLinkEdges(
+  sourceItemId: string,
+  markdown: string,
+  resolve: (key: string) => ResolvedLinkTarget | null | undefined,
+): RelationshipEdge[] {
+  const byEdge = new Map<string, RelationshipEdge & { metadata: { sentence: string; count: number } }>();
+  for (const link of parseBodyLinks(markdown)) {
+    const target = resolve(link.key);
+    if (!target || target.itemId === sourceItemId) continue;
+    const sourceFieldId = `${BODY_LINK_FIELD_PREFIX}${link.rel ?? 'link'}`;
+    const id = `${sourceFieldId}|${target.itemId}`;
+    const existing = byEdge.get(id);
+    if (existing) {
+      existing.metadata.count += 1;
+      continue;
+    }
+    byEdge.set(id, {
+      sourceItemId,
+      sourceFieldId,
+      relationshipTypeKey: link.rel ?? 'link',
+      predicate: link.rel,
+      targetItemId: target.itemId,
+      targetTrackerType: target.type,
+      metadata: { sentence: link.sentence, count: 1 },
+    });
+  }
+  return [...byEdge.values()];
+}
+
+/** Distinct keys a body references, for a single resolution query. */
+export function bodyLinkKeys(markdown: string): string[] {
+  return [...new Set(parseBodyLinks(markdown).map((link) => link.key))];
+}

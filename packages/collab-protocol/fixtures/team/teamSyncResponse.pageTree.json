@@ -1,0 +1,55 @@
+{
+  "type": "teamSyncResponse",
+  "team": {
+    "metadata": {
+      "orgId": "org-1",
+      "name": "Team",
+      "gitRemoteHash": null,
+      "teamProjectId": "project-1",
+      "createdBy": "member-1",
+      "createdAt": 1790000000000
+    },
+    "members": [],
+    "documents": [
+      {
+        "documentId": "page-1",
+        "encryptedTitle": "Specs",
+        "titleIv": "",
+        "documentType": "markdown",
+        "createdBy": "member-1",
+        "createdAt": 1790000000000,
+        "updatedAt": 1790000000000,
+        "projectId": "project-1",
+        "lastWriterUserId": null,
+        "parentFolderId": null,
+        "trashedAt": null
+      }
+    ],
+    "folders": [
+      {
+        "folderId": "page-1",
+        "parentFolderId": null,
+        "encryptedName": "Specs",
+        "nameIv": "",
+        "sortOrder": 0,
+        "projectId": "project-1",
+        "createdBy": "member-1",
+        "createdAt": 1790000000000,
+        "updatedAt": 1790000000000
+      }
+    ],
+    "pageTree": true,
+    "typePlacements": [],
+    "itemPlacements": [
+      {
+        "itemId": "NIM-42",
+        "projectId": "project-1",
+        "parentId": "page-1",
+        "sortOrder": 2,
+        "createdBy": "member-1",
+        "createdAt": 1790000000000,
+        "updatedAt": 1790000001000
+      }
+    ]
+  }
+}

@@ -891,7 +891,7 @@ export const trackerToolSchemas = [
           type: "array",
           items: { type: "object" },
           description:
-            "Merge entries into the project's PREDICATE REGISTRY (claim-stored vocabulary: the verbs a claim or a `predicate: <id>` field uses). Each entry is {id, label, inverseLabel?, subjectKinds: [type|'*'], valueShape: entity|text|boolean-assessment|quantity|select, direction: directed|symmetric, transitive?, qualifiers?}. A qualifier is {type: string|number|boolean|date|select|relationship|array, required?, itemType?, options?, targetTrackerTypes?} and its values ride on each relationship value under `qualifiers`. MERGES BY ID: an entry replaces the predicate with the same id or is added; predicates you omit are kept. To delete, list ids in `removePredicates`. Removals, narrowing `subjectKinds`, and making a qualifier required are destructive and need `confirmDestructive`. May be sent alone or alongside `labels`/`schema`/`patch`; predicates are applied first. Persisted to .nimbalyst/predicates.yaml.",
+            "Merge entries into the project's PREDICATE REGISTRY (claim-stored vocabulary: the verbs a claim or a `predicate: <id>` field uses). Each entry is {id, label, inverseLabel?, subjectKinds: [type|'*'], objectKinds?: [type|'*'], valueShape: entity|text|boolean-assessment|quantity|select, direction: directed|symmetric, transitive?}. An `entity` predicate whose subject and object kinds admit two pages' types is offered as a named relation when one page links the other. MERGES BY ID: an entry replaces the predicate with the same id or is added; predicates you omit are kept. To delete, list ids in `removePredicates`. Removals and narrowing `subjectKinds` are destructive and need `confirmDestructive`. May be sent alone or alongside `labels`/`schema`/`patch`; predicates are applied first. Persisted to .nimbalyst/predicates.yaml.",
         },
         removePredicates: {
           type: "array",
@@ -2171,6 +2171,8 @@ export async function handleTrackerCreate(
       data,
       globalRegistry.get(args.type)?.fields ?? [],
       new Date().toISOString(),
+      undefined,
+      descriptionText ?? undefined,
     );
 
     const createdRef = createdItem || { id };
@@ -2909,6 +2911,8 @@ export async function handleTrackerUpdate(
         data,
         globalRegistry.get(row.type)?.fields ?? [],
         new Date().toISOString(),
+        undefined,
+        args.description !== undefined ? args.description.replace(/\\n/g, '\n') : undefined,
       );
 
       const updateSummaryParts: string[] = [];

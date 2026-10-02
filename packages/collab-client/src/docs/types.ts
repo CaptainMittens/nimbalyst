@@ -51,3 +51,21 @@ export interface SharedTypePlacement {
   createdAt: number;
   updatedAt: number;
 }
+
+/**
+ * Where a typed page (a tracker item) sits in the page tree, separate from its
+ * type. No placement means it sits under its type's node.
+ */
+export interface SharedItemPlacement {
+  itemId: string;
+  projectId: string | null;
+  /** Parent page (document) id; null/undefined means root level. */
+  parentId?: string | null;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Document id prefix for a type page's prose; never a tree row of its own. */
+export const TYPE_PAGE_DOCUMENT_PREFIX = 'type-page:';

@@ -23,11 +23,16 @@ import {
   getCollabParentPath,
   isDescendantFolder,
   normalizeCollabPath,
+  planPageRemoval,
+  projectPagesAsFolders,
+  TYPE_PAGE_DOCUMENT_PREFIX,
 } from './collabTree';
-import type { CollabDocsDataChange, CollabDocsDataSource } from './dataSource';
-import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
+import type { CollabDocsCommand, CollabDocsDataChange, CollabDocsDataSource } from './dataSource';
+import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedTypePlacement } from './types';
 
 export type CollabTreeFilter = 'all' | 'favorites' | 'updated';
+/** Outcome of a placement write, once the store has confirmed or refused it. */
+export type CollabPlacementWriteResult = { ok: true } | { ok: false; error: string };
 export type CollabDocsUIStatus = 'disconnected' | 'connecting' | 'syncing' | 'connected' | 'error';
 
 export interface CollabDiscoveryState {
@@ -59,6 +64,39 @@ type ListAtom<T> = WritableAtom<T[], [ListUpdate<T>], void>;
 const documentsByScope = atomFamily((_scopeKey: string) => atom<SharedDocument[]>([]));
 const foldersByScope = atomFamily((_scopeKey: string) => atom<SharedFolder[]>([]));
 const typePlacementsByScope = atomFamily((_scopeKey: string) => atom<SharedTypePlacement[]>([]));
+const itemPlacementsByScope = atomFamily((_scopeKey: string) => atom<SharedItemPlacement[]>([]));
+/** Set from the snapshot: the store has turned folders into pages. */
+const pageTreeByScope = atomFamily((_scopeKey: string) => atom(false));
+/**
+ * The folder list a scope's readers see. In a page tree every page can be a
+ * parent, so the pages themselves stand in as folders (paths, crumbs, pickers
+ * and the create flow all resolve parents through this list). Writes go to the
+ * stored containers.
+ */
+const visibleFoldersByScope = atomFamily((scopeKey: string) => {
+  // Keep the previous projection while no page changed id, name or parent, so
+  // a body edit bumping `updatedAt` does not re-render every folder reader.
+  let previousPages: SharedFolder[] = [];
+  return atom<SharedFolder[], [ListUpdate<SharedFolder>], void>(
+    (get) => {
+      if (!get(pageTreeByScope(scopeKey))) return get(foldersByScope(scopeKey));
+      const pages = projectPagesAsFolders(get(documentsByScope(scopeKey)));
+      const unchanged = pages.length === previousPages.length && pages.every((page, index) => {
+        const previous = previousPages[index];
+        return previous.folderId === page.folderId
+          && previous.name === page.name
+          && (previous.parentFolderId ?? null) === (page.parentFolderId ?? null)
+          && previous.decryptFailed === page.decryptFailed;
+      });
+      if (!unchanged) previousPages = pages;
+      return previousPages;
+    },
+    (get, set, update) => {
+      const target = foldersByScope(scopeKey);
+      set(target, typeof update === 'function' ? update(get(target)) : update);
+    },
+  );
+});
 const statusByScope = atomFamily((_scopeKey: string) => atom<CollabDocsUIStatus>('disconnected'));
 const hasTeamByScope = atomFamily((_scopeKey: string) => atom(false));
 const orgIdByScope = atomFamily((_scopeKey: string) => atom<string | null>(null));
@@ -155,7 +193,7 @@ export const trashedSharedDocumentsAtom = atom((get) =>
 export const sharedDocumentsForScopeAtom = atomFamily((scopeKey: string) =>
   atom((get) => get(documentsByScope(scopeKey)).filter((document) => document.trashedAt == null)),
 );
-export const sharedFoldersAtom = activeListAtom(foldersByScope);
+export const sharedFoldersAtom = activeListAtom(visibleFoldersByScope);
 /** Tracker types placed in the active scope's page tree, one per type. */
 export const sharedTypePlacementsAtom = activeListAtom(typePlacementsByScope);
 export const teamSyncStatusAtom = atom<CollabDocsUIStatus, [CollabDocsUIStatus], void>(
@@ -395,6 +433,9 @@ export interface CollabDocsSessionAtoms {
   trashedSharedDocuments: Atom<SharedDocument[]>;
   sharedFolders: ListAtom<SharedFolder>;
   typePlacements: ListAtom<SharedTypePlacement>;
+  itemPlacements: ListAtom<SharedItemPlacement>;
+  /** True when the tree is the one page tree (documents nest in documents). */
+  pageTree: Atom<boolean>;
   syncStatus: WritableAtom<CollabDocsUIStatus, [CollabDocsUIStatus], void>;
   hasTeam: WritableAtom<boolean, [boolean], void>;
   activeTeamUserId: Atom<string | null>;
@@ -431,7 +472,7 @@ function createSessionAtoms(
   const trashedDocuments = atom((get) => get(allDocuments)
     .filter((document) => document.trashedAt != null)
     .sort((left, right) => (right.trashedAt ?? 0) - (left.trashedAt ?? 0)));
-  const folders = foldersByScope(scopeKey);
+  const folders = visibleFoldersByScope(scopeKey);
   const syncStatus = statusByScope(scopeKey);
   const hasTeam = hasTeamByScope(scopeKey);
   const activeTeamUserId = userIdByScope(scopeKey);
@@ -489,6 +530,8 @@ function createSessionAtoms(
     trashedSharedDocuments: trashedDocuments,
     sharedFolders: folders,
     typePlacements: typePlacementsByScope(scopeKey),
+    itemPlacements: itemPlacementsByScope(scopeKey),
+    pageTree: pageTreeByScope(scopeKey),
     syncStatus,
     hasTeam,
     activeTeamUserId,
@@ -638,6 +681,28 @@ export interface CollabDocsSession {
   placeType(typeId: string, parentFolderId: string | null): Promise<void>;
   moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number): Promise<void>;
   removeTypePlacement(typeId: string): Promise<void>;
+  /** True once the snapshot said the tree is the one page tree. */
+  isPageTree(): boolean;
+  /** Page tree: move a page under another page (null = root). Refuses a cycle. */
+  movePage(documentId: string, parentId: string | null): boolean;
+  /**
+   * Page tree: remove a page and every page below it, the way a folder delete
+   * worked (types and items placed under them fall back, nothing else goes).
+   * The prose of a type placed outside the subtree is moved out first.
+   */
+  removePage(documentId: string): void;
+  /** How many documents besides the page itself `removePage` would remove. */
+  pageRemovalCount(documentId: string): number;
+  /**
+   * Place a typed page (tracker item) under a page, or at root with null.
+   * Resolves `{ ok: true }` only once the store confirmed the placement (the
+   * server's broadcast for this item, or the local write for Personal), and
+   * `{ ok: false, error }` on a refusal or timeout, after rolling back.
+   */
+  setItemPlacement(itemId: string, parentId: string | null, sortOrder?: number): Promise<CollabPlacementWriteResult>;
+  /** Send a typed page back under its type. Same outcome contract as `setItemPlacement`. */
+  removeItemPlacement(itemId: string): Promise<CollabPlacementWriteResult>;
+  getItemPlacements(): SharedItemPlacement[];
   toggleFavorite(documentId: string): void;
   recordOpened(documentId: string): void;
   markDocumentViewed(documentId: string, updatedAt: number | null): Promise<void>;
@@ -815,6 +880,12 @@ class CollabDocsSessionImpl implements CollabDocsSession {
 
   async createFolder(name: string, parentFolderId: string | null): Promise<string> {
     const folderId = crypto.randomUUID();
+    if (this.isPageTree()) {
+      // A folder is a page with an empty body; it gets a room on first open.
+      await this.registerDocument({ documentId: folderId, title: name, documentType: 'markdown', parentFolderId })
+        .catch((error) => this.reportCommandError(error, 'Failed to create page'));
+      return folderId;
+    }
     const now = Date.now();
     store.set(foldersByScope(this.scope.scopeKey), (current) => [...current, {
       folderId,
@@ -836,6 +907,7 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   async renameFolder(folderId: string, name: string): Promise<void> {
+    if (this.isPageTree()) return this.updateDocumentTitle(folderId, name);
     store.set(foldersByScope(this.scope.scopeKey), (current) => current.map((folder) =>
       folder.folderId === folderId ? { ...folder, name, updatedAt: Date.now() } : folder));
     await this.dataSource.command({ type: 'rename-folder', folderId, name })
@@ -849,6 +921,10 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   moveFolder(folderId: string, parentFolderId: string | null): void {
+    if (this.isPageTree()) {
+      this.movePage(folderId, parentFolderId);
+      return;
+    }
     const folders = this.getFolders();
     if (parentFolderId && isDescendantFolder(folders, parentFolderId, folderId)) return;
     store.set(foldersByScope(this.scope.scopeKey), (current) => current.map((folder) =>
@@ -857,6 +933,10 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   removeFolder(folderId: string): void {
+    if (this.isPageTree()) {
+      this.removePage(folderId);
+      return;
+    }
     const removed = new Set(collectFolderSubtree(this.getFolders(), folderId));
     store.set(foldersByScope(this.scope.scopeKey), (current) =>
       current.filter((folder) => !removed.has(folder.folderId)));
@@ -892,9 +972,98 @@ class CollabDocsSessionImpl implements CollabDocsSession {
       .catch((error) => this.reportCommandError(error, 'Failed to remove tracker type from the tree'));
   }
 
+  isPageTree(): boolean {
+    return store.get(pageTreeByScope(this.scope.scopeKey));
+  }
+
+  movePage(documentId: string, parentId: string | null): boolean {
+    if (parentId && isDescendantFolder(projectPagesAsFolders(this.getAllDocuments()), parentId, documentId)) {
+      return false;
+    }
+    this.moveDocument(documentId, parentId);
+    return true;
+  }
+
+  pageRemovalCount(documentId: string): number {
+    return planPageRemoval(this.getAllDocuments(), store.get(typePlacementsByScope(this.scope.scopeKey)), documentId)
+      .childCount;
+  }
+
+  removePage(documentId: string): void {
+    const scopeKey = this.scope.scopeKey;
+    const plan = planPageRemoval(this.getAllDocuments(), store.get(typePlacementsByScope(scopeKey)), documentId);
+    // Sent before the removal on the same ordered channel, so the store has
+    // moved the prose out of the subtree by the time it removes it.
+    for (const { documentId: proseId, parentId } of plan.relocate) this.moveDocument(proseId, parentId);
+    const removed = new Set(plan.removedIds);
+    store.set(documentsByScope(scopeKey), (current) =>
+      current.filter((document) => !removed.has(document.documentId)));
+    store.set(typePlacementsByScope(scopeKey), (current) => current.filter((placement) =>
+      !(placement.parentFolderId && removed.has(placement.parentFolderId))));
+    store.set(itemPlacementsByScope(scopeKey), (current) => current.filter((placement) =>
+      !(placement.parentId && removed.has(placement.parentId))));
+    // The store maps a folder removal onto the page and its subtree.
+    this.send({ type: 'remove-folder', folderId: documentId });
+  }
+
+  setItemPlacement(itemId: string, parentId: string | null, sortOrder?: number): Promise<CollabPlacementWriteResult> {
+    const now = Date.now();
+    const existing = this.getItemPlacements().find((placement) => placement.itemId === itemId);
+    const order = sortOrder ?? existing?.sortOrder ?? now;
+    const optimistic: SharedItemPlacement = {
+      itemId,
+      projectId: existing?.projectId ?? this.scope.indexConfig.teamProjectId ?? null,
+      parentId,
+      sortOrder: order,
+      createdBy: existing?.createdBy ?? '',
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    return this.writeItemPlacement(itemId, optimistic, { type: 'set-item-placement', itemId, parentId, sortOrder: order });
+  }
+
+  removeItemPlacement(itemId: string): Promise<CollabPlacementWriteResult> {
+    return this.writeItemPlacement(itemId, null, { type: 'remove-item-placement', itemId });
+  }
+
+  /**
+   * Optimistic write, settled by the data source: it resolves once the store
+   * confirmed the change and rejects on a refusal or timeout. On a rejection
+   * the previous row comes back, unless a later write already replaced ours.
+   */
+  private async writeItemPlacement(
+    itemId: string,
+    optimistic: SharedItemPlacement | null,
+    command: Extract<CollabDocsCommand, { type: 'set-item-placement' | 'remove-item-placement' }>,
+  ): Promise<CollabPlacementWriteResult> {
+    const target = itemPlacementsByScope(this.scope.scopeKey);
+    const previous = store.get(target).find((placement) => placement.itemId === itemId) ?? null;
+    const withRow = (row: SharedItemPlacement | null) => (current: SharedItemPlacement[]) => [
+      ...current.filter((placement) => placement.itemId !== itemId),
+      ...(row ? [row] : []),
+    ];
+    store.set(target, withRow(optimistic));
+    try {
+      await this.dataSource.command(command);
+      return { ok: true };
+    } catch (error) {
+      const current = store.get(target).find((placement) => placement.itemId === itemId) ?? null;
+      if (current === optimistic) store.set(target, withRow(previous));
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  getItemPlacements(): SharedItemPlacement[] {
+    return store.get(itemPlacementsByScope(this.scope.scopeKey));
+  }
+
   /** Optimistic upsert; the server echoes the stored row back to its author. */
   private async writeTypePlacement(typeId: string, parentFolderId: string | null, sortOrder: number): Promise<void> {
     const now = Date.now();
+    // The type page's prose belongs to the type: it moves with the placement,
+    // so removing the page the type used to sit under cannot take it along.
+    const prose = this.getAllDocuments().find((document) => document.documentId === `${TYPE_PAGE_DOCUMENT_PREFIX}${typeId}`);
+    if (prose && (prose.parentFolderId ?? null) !== parentFolderId) this.moveDocument(prose.documentId, parentFolderId);
     store.set(typePlacementsByScope(this.scope.scopeKey), (current) => {
       const existing = current.find((placement) => placement.typeId === typeId);
       return [...current.filter((placement) => placement.typeId !== typeId), {
@@ -1010,7 +1179,7 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   getFolders(): SharedFolder[] {
-    return store.get(foldersByScope(this.scope.scopeKey));
+    return store.get(visibleFoldersByScope(this.scope.scopeKey));
   }
 
   private getAllDocuments(): SharedDocument[] {
@@ -1057,7 +1226,14 @@ class CollabDocsSessionImpl implements CollabDocsSession {
         if (change.snapshot.typePlacements) {
           store.set(typePlacementsByScope(scopeKey), change.snapshot.typePlacements);
         }
-        void this.migrateVirtualFolders();
+        if (change.snapshot.itemPlacements) {
+          store.set(itemPlacementsByScope(scopeKey), change.snapshot.itemPlacements);
+        }
+        // Only ever turns on: a snapshot from a host that omits the flag must
+        // not drop a converted tree back to folders.
+        if (change.snapshot.pageTree) store.set(pageTreeByScope(scopeKey), true);
+        // Path-in-title folders become folder rows; a page tree has none.
+        if (!this.isPageTree()) void this.migrateVirtualFolders();
         break;
       case 'items-upserted':
         store.set(documentsByScope(scopeKey), (current) => {
@@ -1325,7 +1501,7 @@ export function getSharedDocumentsForScopeKey(scopeKey: string): SharedDocument[
 }
 
 export function getSharedFoldersForScopeKey(scopeKey: string): SharedFolder[] {
-  return store.get(foldersByScope(scopeKey));
+  return store.get(visibleFoldersByScope(scopeKey));
 }
 
 export function getFavoriteDocumentIdsForScopeKey(scopeKey: string): string[] {
@@ -1352,6 +1528,10 @@ export function pruneCollabDocsSession(scopeKey: string): void {
   }
   documentsByScope.remove(scopeKey);
   foldersByScope.remove(scopeKey);
+  visibleFoldersByScope.remove(scopeKey);
+  typePlacementsByScope.remove(scopeKey);
+  itemPlacementsByScope.remove(scopeKey);
+  pageTreeByScope.remove(scopeKey);
   statusByScope.remove(scopeKey);
   hasTeamByScope.remove(scopeKey);
   orgIdByScope.remove(scopeKey);

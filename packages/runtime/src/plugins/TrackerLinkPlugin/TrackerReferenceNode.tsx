@@ -28,6 +28,7 @@ TrackerReferenceNodeDecorator.set((node) => {
       referenceKey={node.__referenceKey}
       nodeKey={node.getKey()}
       view={node.getView()}
+      relation={node.getRelation()}
     />
   );
 });

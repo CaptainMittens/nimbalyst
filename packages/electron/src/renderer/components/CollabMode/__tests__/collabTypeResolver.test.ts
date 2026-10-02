@@ -35,5 +35,9 @@ describe('buildCollabTypeResolver', () => {
     expect(resolver.typeName('module')).toBeNull();
     expect(resolver.itemsOfType('scratch').map((item) => item.itemId)).toEqual(['r1']);
     expect(resolver.itemsOfType('module')).toEqual([]);
+    // A placed typed page resolves only in its own lane, with the singular type name.
+    expect(resolver.item?.('r1')).toEqual({ itemId: 'r1', title: 'Idea', typeId: 'scratch' });
+    expect(resolver.item?.('r2')).toBeNull();
+    expect(resolver.typeLabel?.('scratch')).toBe('scratch');
   });
 });

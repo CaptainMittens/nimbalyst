@@ -51,9 +51,15 @@ describe('PersonalPagesDataSource', () => {
     const source = new PersonalPagesDataSource(WORKSPACE);
 
     await expect(source.snapshot()).resolves.toEqual({
-      items: [page], containers: [folder], typePlacements: [],
+      items: [page], containers: [folder], typePlacements: [], itemPlacements: [],
     });
     expect(invoke).toHaveBeenCalledWith('personal-pages:snapshot', WORKSPACE);
+    // Since schema 0050 main answers with one page tree and typed-page placements.
+    const placement = { itemId: 'i1', projectId: null, parentId: 'p1', sortOrder: 0, createdBy: 'local', createdAt: 1, updatedAt: 1 };
+    invoke.mockResolvedValueOnce({ items: [page], containers: [], itemPlacements: [placement], pageTree: true });
+    await expect(source.snapshot()).resolves.toEqual({
+      items: [page], containers: [], typePlacements: [], itemPlacements: [placement], pageTree: true,
+    });
 
     const register = {
       type: 'register-document' as const,
@@ -81,7 +87,7 @@ describe('PersonalPagesDataSource', () => {
     await vi.waitFor(() => expect(changes).toHaveLength(1));
     expect(changes[0]).toEqual({
       type: 'snapshot',
-      snapshot: { items: [page], containers: [folder], typePlacements: [] },
+      snapshot: { items: [page], containers: [folder], typePlacements: [], itemPlacements: [] },
     });
 
     unsubscribe();

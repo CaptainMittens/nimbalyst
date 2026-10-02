@@ -1,6 +1,6 @@
 import React from 'react';
 import './collabSidebarTree.css';
-import { type CollabTypeTreeResolver } from '../docs/index';
+import { type SharedDocument, type CollabTypeTreeResolver } from '../docs/index';
 export interface CollabSidebarProps {
     activeDocumentId?: string | null;
     /** Open the discovery hub (center pane). Shown as a Home action. */
@@ -34,6 +34,11 @@ export interface CollabSidebarProps {
      * a compact section header replaces the scope summary header.
      */
     sectionTitle?: string;
+    /**
+     * Page tree only: turn a plain page into a typed page in place. Without it
+     * the menu's "Set type" entry is shown disabled.
+     */
+    onSetPageType?: (document: SharedDocument) => void;
 }
 export interface CollabSidebarCreateMenu {
     items: Array<{
@@ -49,5 +54,7 @@ export interface CollabSidebarCreateMenu {
     /** Extension the default action produces, shown beside it. */
     primaryTrailing?: string;
     onNewFolder: () => void;
+    /** True when this tree has pages instead of folders (no "New folder"). */
+    pageTree?: boolean;
 }
 export declare const CollabSidebar: React.FC<CollabSidebarProps>;

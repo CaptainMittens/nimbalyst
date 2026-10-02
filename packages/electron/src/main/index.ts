@@ -78,6 +78,8 @@ import { registerPullRequestHandlers, stopPullRequestPollScheduler } from './ipc
 import { registerGithubIssueHandlers } from './ipc/GithubIssueHandlers';
 import { registerReadReceiptHandlers } from './ipc/ReadReceiptHandlers';
 import { registerTrackerPersonalStateHandlers } from './ipc/TrackerPersonalStateHandlers';
+import { registerTrackerPageLinkHandlers } from './ipc/TrackerPageLinkHandlers';
+import { registerTrackerPageTypeHandlers } from './ipc/TrackerPageTypeHandlers';
 import {
     registerTeamInboxHandlers,
     shutdownTeamInboxHandlers,
@@ -1993,6 +1995,8 @@ app.whenReady().then(async () => {
     registerGithubIssueHandlers();
     registerReadReceiptHandlers();
     registerTrackerPersonalStateHandlers();
+    registerTrackerPageLinkHandlers();
+    registerTrackerPageTypeHandlers();
     registerWakeupHandlers();
     registerBlitzHandlers();
     registerProjectMigrationHandlers();

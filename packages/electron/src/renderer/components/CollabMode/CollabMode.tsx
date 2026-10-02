@@ -811,6 +811,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
         <>
           <div style={{ width: sidebarWidth, minWidth: COLLAB_SIDEBAR_MIN, maxWidth: COLLAB_SIDEBAR_MAX }} className="shrink-0">
             <PagesSidebarSections
+              workspacePath={workspacePath}
               teamScope={teamScope}
               personalScope={personalScope}
               activeTeamDocumentId={activeCollabDocumentId}

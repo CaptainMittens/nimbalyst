@@ -48,6 +48,12 @@ export interface BuildGridColumnsOptions {
 }
 /** Always-present trailing action column, separate from editable tracker fields. */
 export declare function buildGridActionsColumn(): ColumnRegular;
+/** A read-only text column whose value the host computed into the row under `id`. */
+export declare function buildDerivedGridColumn(column: {
+    id: string;
+    label: string;
+    width?: number;
+}): ColumnRegular;
 /**
  * Map visible tracker columns to RevoGrid columns, attaching the per-field
  * editor and a per-cell readonly gate.

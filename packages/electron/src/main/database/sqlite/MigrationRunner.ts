@@ -250,6 +250,7 @@ export function getMigrations(schemaDir: string): Migration[] {
     { version: 47, name: 'tracker_item_revision_scope', sqlFile: path.join(schemaDir, '0047_tracker_item_revision_scope.sql') },
     { version: 48, name: 'tracker_relationship_index_qualifiers', sqlFile: path.join(schemaDir, '0048_tracker_relationship_index_qualifiers.sql') },
     { version: 49, name: 'personal_pages', sqlFile: path.join(schemaDir, '0049_personal_pages.sql') },
+    { version: 50, name: 'personal_pages_one_tree', sqlFile: path.join(schemaDir, '0050_personal_pages_one_tree.sql') },
   ];
 }
 

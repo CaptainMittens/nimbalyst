@@ -58,7 +58,7 @@ import {
   type SortDirection,
 } from '@nimbalyst/collab-client/trackers';
 import { TrackerSurfaceMessage } from '../primitives/TrackerSurfaceMessage';
-import { buildGridActionsColumn, buildGridColumns } from './trackerGridColumns';
+import { buildDerivedGridColumn, buildGridActionsColumn, buildGridColumns } from './trackerGridColumns';
 import { LazyTrackerColumnFilterPopover } from './LazyTrackerColumnFilterPopover';
 import { useGridKeyOriginGuard } from './gridKeyOrigin';
 import './trackerGrid.css';
@@ -104,6 +104,16 @@ export interface TrackerGridSurfaceProps {
   }) => void;
   /** False until the first snapshot resolves. */
   loaded: boolean;
+  /** Read-only columns the host computes per row (a type page's Where), after the field columns. */
+  derivedColumns?: readonly TrackerGridDerivedColumn[];
+}
+
+export interface TrackerGridDerivedColumn {
+  /** Row key; must not collide with a field column id. */
+  id: string;
+  label: string;
+  width?: number;
+  value: (row: TrackerRecord) => string;
 }
 
 export interface TrackerGridUpdateEntry {
@@ -139,6 +149,7 @@ export function TrackerGridSurface({
   onOpenItem,
   onRowContextMenu,
   loaded,
+  derivedColumns,
 }: TrackerGridSurfaceProps) {
   const [filterTarget, setFilterTarget] = useState<{
     columnId: string;
@@ -207,6 +218,7 @@ export function TrackerGridSurface({
         keyLink: onOpenItem ? { onOpenDetail: onOpenItem } : undefined,
         resolveRelationshipLabel,
       }),
+      ...(derivedColumns ?? []).map((column) => buildDerivedGridColumn(column)),
       ...(onRowContextMenu ? [buildGridActionsColumn()] : []),
     ],
     [
@@ -218,14 +230,21 @@ export function TrackerGridSurface({
       onColumnFiltersChange,
       onOpenItem,
       resolveRelationshipLabel,
+      derivedColumns,
       onRowContextMenu,
     ]
   );
 
-  const gridSource = useMemo(
-    () => buildGridSource(rows, visibleColumnDefs),
-    [rows, visibleColumnDefs]
-  );
+  const gridSource = useMemo(() => {
+    const source = buildGridSource(rows, visibleColumnDefs);
+    if (!derivedColumns?.length) return source;
+    // `buildGridSource` keeps one entry per row, in order.
+    return source.map((entry, index) => {
+      const next = { ...entry };
+      for (const column of derivedColumns) next[column.id] = column.value(rows[index]!);
+      return next;
+    });
+  }, [rows, visibleColumnDefs, derivedColumns]);
 
   const markedGridSource = useMemo(
     () =>

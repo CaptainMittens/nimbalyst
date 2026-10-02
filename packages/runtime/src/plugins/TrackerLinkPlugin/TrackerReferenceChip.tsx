@@ -3,7 +3,9 @@
  *
  * Shows the item's type, reference key, LIVE title, workflow state, and owner,
  * resolved from the canonical runtime tracker store. Clicking opens a hover-card
- * preview popover (floating-ui) with a "Go to item" action.
+ * preview popover (floating-ui) with a "Go to item" action. Inside a typed
+ * page's body (see `trackerReferenceSource.ts`) hovering opens it too, and the
+ * card offers the named relations allowed between the two types.
  *
  * When the key can't be resolved, it degrades to a muted chip showing just the
  * key — it never throws and never blocks rendering.
@@ -19,15 +21,28 @@ import {
   autoUpdate,
   FloatingPortal,
   useClick,
+  useHover,
+  safePolygon,
   useDismiss,
   useRole,
   useInteractions,
 } from '@floating-ui/react';
 import { windowControlsClearance } from '../../ui/floating/windowControlsClearance';
 import {
+  globalRegistry,
   resolveKnownStatusCategory,
   type StatusCategory,
 } from '@nimbalyst/tracker-schema';
+import { LexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+import { $getNodeByKey } from 'lexical';
+
+import { $isTrackerReferenceNode } from './TrackerReferenceNodeCore';
+import {
+  TrackerReferenceRelationMenu,
+  trackerReferenceRelationLabel,
+  trackerReferenceRelationOptions,
+} from './TrackerReferenceRelationMenu';
+import { useTrackerReferenceSource } from './trackerReferenceSource';
 
 import {
   useResolvedTrackerReference,
@@ -229,6 +244,8 @@ function MetadataBadge({
 export interface TrackerReferenceChipProps {
   referenceKey: string;
   nodeKey?: string;
+  /** Predicate id of the relation the link states; null for a plain link. */
+  relation?: string | null;
   /** Stable per-renderer identity used to preserve an open transcript card. */
   previewStateKey?: string;
   /** Compact chips omit the live title while retaining preview and navigation. */
@@ -248,12 +265,15 @@ export interface TrackerReferenceChipProps {
 export function TrackerReferenceChip({
   referenceKey,
   nodeKey,
+  relation = null,
   previewStateKey,
   variant = 'default',
   unresolvedLabel,
   onNavigate,
 }: TrackerReferenceChipProps): JSX.Element {
   const resolved = useResolvedTrackerReference(referenceKey);
+  const source = useTrackerReferenceSource();
+  const editor = React.useContext(LexicalComposerContext)?.[0] ?? null;
   const [open, setOpen] = React.useState(false);
   const referenceHostRef = React.useRef<HTMLElement | null>(null);
   const openStateKey = previewStateKey ?? nodeKey ?? referenceKey;
@@ -283,10 +303,18 @@ export function TrackerReferenceChip({
   });
 
   const click = useClick(context);
+  // Hover only inside a typed page, where the card is where a link's relation
+  // is chosen; elsewhere the preview stays click-to-open.
+  const hover = useHover(context, {
+    enabled: source !== null,
+    delay: { open: 350, close: 150 },
+    handleClose: safePolygon(),
+  });
   const dismiss = useDismiss(context);
   const role = useRole(context, { role: 'dialog' });
   const { getReferenceProps, getFloatingProps } = useInteractions([
     click,
+    hover,
     dismiss,
     role,
   ]);
@@ -326,6 +354,31 @@ export function TrackerReferenceChip({
         resolved.title ? ` — ${resolved.title}` : ''
       }`
     : `${label} (not resolved locally)`;
+  const relationLabel = relation
+    ? trackerReferenceRelationLabel(globalRegistry, relation)
+    : undefined;
+
+  let relationMenu: JSX.Element | null = null;
+  if (open && source && resolved?.type && resolved.id !== source.itemId) {
+    const canChoose = Boolean(editor && nodeKey && editor.isEditable());
+    relationMenu = (
+      <TrackerReferenceRelationMenu
+        options={trackerReferenceRelationOptions(globalRegistry, source.type, resolved.type)}
+        relation={relation}
+        relationLabel={relationLabel}
+        onChoose={
+          canChoose && editor && nodeKey
+            ? next => {
+                editor.update(() => {
+                  const node = $getNodeByKey(nodeKey);
+                  if ($isTrackerReferenceNode(node)) node.setRelation(next);
+                });
+              }
+            : undefined
+        }
+      />
+    );
+  }
 
   return (
     <>
@@ -340,7 +393,8 @@ export function TrackerReferenceChip({
         data-completed={isCompleted ? 'true' : 'false'}
         data-type={resolved?.type}
         data-owner={resolved?.owner}
-        title={tooltip}
+        data-relation={relation ?? undefined}
+        title={relationLabel ? `${relationLabel}: ${tooltip}` : tooltip}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -468,6 +522,7 @@ export function TrackerReferenceChip({
               referenceKey={referenceKey}
               resolved={resolved}
               displayLabel={label}
+              relationMenu={relationMenu}
               onGoTo={
                 resolved || onNavigate
                   ? () => {
@@ -489,6 +544,7 @@ interface TrackerReferencePreviewProps {
   referenceKey: string;
   resolved: ResolvedTrackerReference | null;
   displayLabel: string;
+  relationMenu?: JSX.Element | null;
   onGoTo?: () => void;
 }
 
@@ -496,6 +552,7 @@ function TrackerReferencePreview({
   referenceKey,
   resolved,
   displayLabel: unresolvedDisplayLabel,
+  relationMenu,
   onGoTo,
 }: TrackerReferencePreviewProps): JSX.Element {
   const typeColor = resolved?.type
@@ -636,6 +693,7 @@ function TrackerReferencePreview({
             </div>
             {onGoTo ? <GoToItemButton onClick={onGoTo} /> : null}
           </div>
+          {relationMenu}
         </>
       ) : (
         <div style={{ color: 'var(--nim-text-muted)' }}>

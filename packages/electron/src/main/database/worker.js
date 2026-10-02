@@ -3244,6 +3244,49 @@ class PGLiteWorker {
       throw error;
     }
 
+    // Migration: personal pages become one page tree (schema version 50).
+    // Mirror of SQLite migration 0050_personal_pages_one_tree.sql -- keep in sync.
+    // Runs every launch: only folders without `converted_at` are converted, so
+    // a folder becomes a page once and a deleted page is never resurrected.
+    // The folder rows stay as the record of the old tree. One exec is one
+    // implicit transaction, so the pages and the marks land together.
+    try {
+      await this.db.exec(`
+        CREATE TABLE IF NOT EXISTS personal_page_item_placements (
+          workspace_path TEXT NOT NULL,
+          item_id        TEXT NOT NULL,
+          parent_id      TEXT,
+          sort_order     DOUBLE PRECISION NOT NULL DEFAULT 0,
+          created_at     TIMESTAMPTZ NOT NULL,
+          updated_at     TIMESTAMPTZ NOT NULL,
+          PRIMARY KEY (workspace_path, item_id)
+        );
+        ALTER TABLE personal_page_folders ADD COLUMN IF NOT EXISTS converted_at TIMESTAMPTZ;
+        INSERT INTO personal_page_documents
+          (workspace_path, document_id, title, document_type, editor_id, file_extension,
+           metadata_version, parent_folder_id, body, body_version, publication_status,
+           created_at, updated_at)
+        SELECT workspace_path, folder_id, name, 'markdown', NULL, NULL,
+               NULL, parent_folder_id, '', 0, 'local',
+               created_at, updated_at
+        FROM personal_page_folders
+        WHERE converted_at IS NULL
+        ON CONFLICT (workspace_path, document_id) DO NOTHING;
+        UPDATE personal_page_folders
+        SET converted_at = NOW()
+        WHERE converted_at IS NULL
+          AND EXISTS (
+            SELECT 1 FROM personal_page_documents d
+            WHERE d.workspace_path = personal_page_folders.workspace_path
+              AND d.document_id = personal_page_folders.folder_id
+          );
+      `);
+      console.log('[PGLite Worker] personal pages one-tree migration applied');
+    } catch (error) {
+      console.error('[PGLite Worker] Failed to apply the personal pages one-tree migration:', error);
+      throw error;
+    }
+
     // Migration: team-shared tracker saved views (schema version 28).
     // Mirror of SQLite migration 0028_tracker_shared_saved_views.sql.
     // Payload is stored as TEXT (not JSONB) so the row round-trips byte-for-byte

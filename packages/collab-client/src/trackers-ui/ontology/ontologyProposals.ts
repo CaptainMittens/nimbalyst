@@ -364,7 +364,6 @@ export function planOntologyChange<T extends OntologyRecordLike>(change: Ontolog
           before: [{ label: predicate.id, value: used ? 'in use' : 'not declared' }],
           after: [
             { label: predicate.id, value: `${predicate.direction}, ${predicate.valueShape}${predicate.inverseLabel ? `, inverse "${predicate.inverseLabel}"` : ''}` },
-            ...Object.keys(predicate.qualifiers ?? {}).length ? [{ label: 'Qualifiers', value: Object.keys(predicate.qualifiers ?? {}).join(', ') }] : [],
           ],
         },
         satisfied: Boolean(change.appliedAt),

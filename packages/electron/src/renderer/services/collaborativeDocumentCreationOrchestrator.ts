@@ -4,6 +4,7 @@ import {
   workspacePathFromPersonalScopeKey,
   type CollabScope,
 } from '@nimbalyst/collab-client/core';
+import { TYPE_PAGE_DOCUMENT_PREFIX } from '@nimbalyst/collab-client/docs';
 import type { CollabDocumentConfig } from '../utils/collabDocumentOpener';
 import {
   removeCollabConfigsForDocument,
@@ -688,6 +689,49 @@ export class CollaborativeDocumentCreationOrchestrator {
   }
 
   /**
+   * The prose page of a tracker type, `type-page:<typeId>`, created on first
+   * need under the type's placement parent. It starts empty, so registering
+   * the row is the whole creation, and nothing opens: the type's tab shows it.
+   * A row that already exists (another client got there first) is returned.
+   * A same-named page beside it, or a parent that is gone, does not stop it:
+   * the tree never shows this row, so its name and place only matter to
+   * clients that predate type pages.
+   */
+  async ensureTypePage(input: {
+    scope: CollabScope;
+    typeId: string;
+    typeName: string;
+    parentFolderId: string | null;
+  }): Promise<SharedDocument> {
+    const documentId = `${TYPE_PAGE_DOCUMENT_PREFIX}${input.typeId}`;
+    const existing = this.dependencies.getDocuments(input.scope).find((document) => document.documentId === documentId);
+    if (existing) return existing;
+    const resolution = this.dependencies.getCatalog().resolveMetadata('markdown', '.md');
+    if (resolution.state !== 'ready') {
+      throw new CollaborativeDocumentCreationError('invalid-descriptor', resolution.reason, documentId, documentId, false);
+    }
+    const attempt = (requestedName: string, parentFolderId: string | null, operationSuffix: string) => this.create({
+      scope: input.scope,
+      descriptor: resolution.descriptor,
+      requestedName,
+      parentFolderId,
+      documentId,
+      // The same type id exists in every workspace, so the operation is per scope.
+      operationId: `${input.scope.scopeKey}\u0000${documentId}${operationSuffix}`,
+      sourceContent: '',
+      openAfterCreate: false,
+    });
+    try {
+      return await attempt(input.typeName, input.parentFolderId, '');
+    } catch (error) {
+      if (!(error instanceof CollaborativeDocumentCreationError)) throw error;
+      if (error.code === 'name-collision') return attempt(`${input.typeName} (type)`, input.parentFolderId, ':renamed');
+      if (error.code === 'invalid-parent-folder') return attempt(input.typeName, null, ':root');
+      throw error;
+    }
+  }
+
+  /**
    * A Personal page is a row in the local database: register it and open its
    * tab. There is no room to seed, no credentials to resolve and no team to
    * announce it to.
@@ -748,4 +792,10 @@ export function createCollaborativeDocument(
   input: CreateCollaborativeDocumentInput,
 ): Promise<SharedDocument> {
   return sharedCreationOrchestrator.create(input);
+}
+
+export function ensureTypePageDocument(
+  input: Parameters<CollaborativeDocumentCreationOrchestrator['ensureTypePage']>[0],
+): Promise<SharedDocument> {
+  return sharedCreationOrchestrator.ensureTypePage(input);
 }

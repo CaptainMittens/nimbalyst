@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { atom, createStore, Provider } from 'jotai';
 import type { CollabHost } from '@nimbalyst/collab-client/core';
-import type { CollabDocsSession, SharedDocument, SharedFolder, SharedTypePlacement } from '@nimbalyst/collab-client/docs';
+import {
+  projectPagesAsFolders,
+  type CollabDocsSession,
+  type SharedDocument,
+  type SharedFolder,
+  type SharedItemPlacement,
+  type SharedTypePlacement,
+} from '@nimbalyst/collab-client/docs';
 import { CollabDocsUIProvider } from '../CollabDocsUIProvider';
 import { CollabSidebar } from '../CollabSidebar';
 import { SharedDocsListView } from '../SharedDocsListView';
@@ -52,7 +59,12 @@ function renderDocsUI(children: React.ReactNode) {
   return renderDocsUIWithHost(children);
 }
 
-function renderDocsUIWithHost(children: React.ReactNode, typePlacements: SharedTypePlacement[] = []) {
+function renderDocsUIWithHost(
+  children: React.ReactNode,
+  typePlacements: SharedTypePlacement[] = [],
+  pageTree?: { documents: SharedDocument[]; itemPlacements: SharedItemPlacement[] },
+) {
+  const docs = pageTree?.documents ?? documents;
   const host = {
     surface: 'web_console',
     documents: {
@@ -71,11 +83,13 @@ function renderDocsUIWithHost(children: React.ReactNode, typePlacements: SharedT
     host,
     uiCapabilities: { personalState: false, readReceipts: false },
     atoms: {
-      sharedDocuments: atom(documents),
-      allSharedDocuments: atom(documents),
+      sharedDocuments: atom(docs),
+      allSharedDocuments: atom(docs),
       trashedSharedDocuments: atom([]),
-      sharedFolders: atom(folders),
+      sharedFolders: atom(pageTree ? projectPagesAsFolders(docs) : folders),
       typePlacements: atom(typePlacements),
+      itemPlacements: atom(pageTree?.itemPlacements ?? []),
+      pageTree: atom(!!pageTree),
       syncStatus: atom('connected'),
       hasTeam: atom(true),
       activeTeamUserId: atom('member-self'),
@@ -215,5 +229,47 @@ describe('placed tracker types', () => {
       expect.objectContaining({ kind: 'tracker', trackerId: 'mod-2' }),
       'sidebar',
     );
+  });
+});
+
+describe('one page tree', () => {
+  const page = (documentId: string, title: string, parentFolderId: string | null) => ({
+    ...documents[0], documentId, title, parentFolderId,
+  });
+
+  it('nests pages and placed typed pages, with the page menu from the mockup', async () => {
+    const typeResolver = {
+      typeName: (typeId: string) => (typeId === 'module' ? 'Modules' : null),
+      typeLabel: (typeId: string) => (typeId === 'module' ? 'Module' : null),
+      itemsOfType: () => [{ itemId: 'mod-1', title: 'Sync engine' }, { itemId: 'mod-2', title: 'Tracker engine' }],
+      item: (itemId: string) => (itemId === 'mod-1' ? { itemId, title: 'Sync engine', typeId: 'module' } : null),
+    };
+    const { container } = renderDocsUIWithHost(
+      <CollabSidebar typeResolver={typeResolver} />,
+      [{ typeId: 'module', projectId: null, parentFolderId: 'arch', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+      {
+        documents: [page('arch', 'Architecture', null), page('overview', 'Overview', 'arch')],
+        itemPlacements: [{ itemId: 'mod-1', projectId: null, parentId: 'overview', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+      },
+    );
+
+    // No folder rows: Architecture is a page, expanded because it has a child page.
+    expect(container.querySelectorAll('.file-tree-directory:not(.collab-tree-type-row)')).toHaveLength(0);
+    const rowText = () => [...container.querySelectorAll('.file-tree-file, .collab-tree-type-row')].map((row) => row.textContent);
+    // The page tree builder loads lazily.
+    await waitFor(() => expect(rowText()).toEqual(['Architecture', 'Modules2', 'Overview']));
+
+    const overview = [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Overview')!;
+    fireEvent.click(overview.querySelector('.file-tree-chevron')!);
+    // The placed Module sits under Overview with its type shown faintly; it is
+    // no longer listed under its type (the count still includes it).
+    expect(rowText()).toEqual(['Architecture', 'Modules2', 'Overview', 'Sync engineModule']);
+
+    const architecture = [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture')!;
+    fireEvent.contextMenu(architecture);
+    await waitFor(() => expect(document.querySelector('.collab-page-set-type')).not.toBeNull());
+    const entries = [...document.querySelectorAll('button')].map((button) => button.textContent);
+    expect(entries).toEqual(expect.arrayContaining(['New pageinside', 'Set type', 'Rename', 'Move to...', 'Copy link', 'Delete1 child page']));
+    expect(document.querySelector<HTMLButtonElement>('.collab-page-set-type')!.disabled).toBe(true);
   });
 });

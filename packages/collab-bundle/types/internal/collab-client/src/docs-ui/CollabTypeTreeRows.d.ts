@@ -24,11 +24,26 @@ export declare const CollabTypeNodeRow: React.FC<{
     onDragStart: (event: React.DragEvent) => void;
     onDragEnd: () => void;
 }>;
+/** Move destination that sends a typed page back under its type node. */
+export declare const UNDER_TYPE = "__under_type__";
+/** A page id, null for root, or `UNDER_TYPE`. */
+export type CollabPageMoveTarget = string | null;
+/** Page-tree hooks for a typed page's row: its menu and dragging it to a page. */
+export interface CollabItemRowActions {
+    onContextMenu: (event: React.MouseEvent, node: CollabTreeItemNode) => void;
+    onDragStart: (node: CollabTreeItemNode) => void;
+    onDragEnd: () => void;
+}
+/**
+ * A type's item. In the page tree (`typeLabel` set) it is a page: page icon,
+ * its type shown faintly. In the folder tree it is a numbered entry.
+ */
 export declare const CollabTypeItemRow: React.FC<{
     node: CollabTreeItemNode;
     position: number;
     indent: number;
     onOpen: () => void;
+    actions?: CollabItemRowActions;
 }>;
 /** A type row plus, when expanded, its placed subtypes and numbered items. */
 export declare const CollabTypeTreeBranch: React.FC<{
@@ -42,6 +57,7 @@ export declare const CollabTypeTreeBranch: React.FC<{
     onDragStart: (typeId: string) => void;
     onDragEnd: () => void;
     renderSubtypes: (nodes: CollabTreeTypeNode[]) => React.ReactNode;
+    itemActions?: CollabItemRowActions;
 }>;
 /** Popover listing the types that can still be placed at a folder or root. */
 export declare const CollabPlaceTypeMenu: React.FC<{

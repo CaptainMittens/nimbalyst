@@ -32,8 +32,6 @@ interface TrackerResourceEditorProps {
   onClose: () => void;
   /** Open another tracker item (relationship/backlink) as a workstream tab. */
   onOpenTracker?: (trackerItemId: string) => void;
-  /** Pages mode: render the item as a page (single-valued header fields only). */
-  pageHeader?: boolean;
   /** Switch the workstream to Agent Mode for a spawned session. */
   onSwitchToAgentMode?: (sessionId: string) => void;
   onLaunchSession?: (trackerItemId: string) => void;
@@ -46,7 +44,6 @@ export const TrackerResourceEditor: React.FC<TrackerResourceEditorProps> = ({
   workstreamId,
   onClose,
   onOpenTracker,
-  pageHeader,
   onSwitchToAgentMode,
   onLaunchSession,
   onLaunchWorktree,
@@ -70,7 +67,6 @@ export const TrackerResourceEditor: React.FC<TrackerResourceEditorProps> = ({
         workspacePath={workspacePath}
         onClose={onClose}
         onOpenItem={onOpenTracker}
-        pageHeader={pageHeader}
         onSwitchToAgentMode={onSwitchToAgentMode}
         onLaunchSession={onLaunchSession}
         onLaunchWorktree={onLaunchWorktree}

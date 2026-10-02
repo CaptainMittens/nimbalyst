@@ -78,8 +78,8 @@ export interface BrowserTrackerSchemaState {
   /** The team's synced sidebar tree, sorted the way every host sorts it. */
   navigationEntries: TrackerNavigationEntry[];
   /**
-   * The room's predicate registry: labels, inverse labels and qualifier
-   * definitions for knowledge-graph statements. Empty until the room publishes
+   * The room's predicate registry: the labels and inverse labels of the
+   * relations knowledge-graph statements use. Empty until the room publishes
    * one; an unreadable publish leaves the previous registry in place.
    */
   predicates: PredicateDefinition[];

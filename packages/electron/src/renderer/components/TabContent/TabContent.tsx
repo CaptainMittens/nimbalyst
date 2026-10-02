@@ -26,6 +26,7 @@ import { logger } from '../../utils/logger';
 import { useTabsActions, type TabData, notifyDirtyStateChange, isTrackerTabPath, isTypeTabPath, TYPE_TAB_PREFIX, isPersonalPageTabPath, PERSONAL_PAGE_TAB_PREFIX } from '../../contexts/TabsContext';
 import { PersonalPageTab } from '../CollabMode/PersonalPageTab';
 import { TrackerResourceEditor } from '../AgentMode/TrackerResourceEditor';
+import { TrackerPageView } from '../TrackerMode/TrackerPageView';
 import { TypePageTab } from '../CollabMode/TypePageTab';
 import { SharedDocsListView } from '@nimbalyst/collab-client/docs-ui';
 import { ElectronCollabDocsUIRoot } from '../CollabMode/ElectronCollabDocsUIProvider';
@@ -66,7 +67,8 @@ interface TabContentProps {
   // Workstream-scoped; passed by the workstream host so TabContent stays
   // workstream-agnostic.
   onOpenTracker?: (trackerItemId: string) => void;
-  // Pages mode: tracker tabs render as pages (single-valued header fields only).
+  // Pages mode: tracker tabs render as typed pages (TrackerPageView), not the
+  // tracker detail pane.
   trackerPageHeader?: boolean;
   // Owning workstream id (when this TabContent hosts a workstream strip) — used
   // to persist per-tracker-tab content-focus state.
@@ -397,11 +399,13 @@ const TabContentComponent: React.FC<TabContentProps> = ({
       return;
     }
 
-    // Tracker resource tabs render the tracker detail host, not a file editor.
-    // No save/dirty/getContent wiring — the tracker owns its own persistence
-    // (PGLite / collaborative Y.Doc via TrackerItemDetail).
+    // Tracker resource tabs render the tracker detail host (or, in Pages mode,
+    // the typed page), not a file editor. No save/dirty/getContent wiring — the
+    // tracker owns its own persistence (PGLite / collaborative Y.Doc via
+    // useTrackerItemBody).
     if (tab.kind === 'tracker' || isTrackerTabPath(tab.filePath)) {
       const trackerItemId = tab.trackerItemId ?? tab.filePath.replace(/^tracker:\/\//, '');
+      const pageWorkspacePath = propsRef.current.trackerPageHeader ? propsRef.current.workspaceId : undefined;
       root.render(
         <JotaiProvider store={store}>
           <TabEditorErrorBoundary
@@ -415,19 +419,27 @@ const TabContentComponent: React.FC<TabContentProps> = ({
               propsRef.current.onTabClose?.(tab.id);
             }}
           >
-            <TrackerResourceEditor
-              trackerItemId={trackerItemId}
-              workspacePath={propsRef.current.workspaceId}
-              workstreamId={propsRef.current.workstreamId}
-              onClose={() => propsRef.current.onTabClose?.(tab.id)}
-              onOpenTracker={propsRef.current.onOpenTracker}
-              pageHeader={propsRef.current.trackerPageHeader}
-              onSwitchToAgentMode={
-                propsRef.current.onSwitchToAgentMode
-                  ? (sessionId: string) => propsRef.current.onSwitchToAgentMode?.(undefined, sessionId)
-                  : undefined
-              }
-            />
+            {pageWorkspacePath ? (
+              <TrackerPageView
+                itemId={trackerItemId}
+                workspacePath={pageWorkspacePath}
+                collabScope={propsRef.current.collabScope}
+                onOpenItem={(itemId) => propsRef.current.onOpenTracker?.(itemId)}
+              />
+            ) : (
+              <TrackerResourceEditor
+                trackerItemId={trackerItemId}
+                workspacePath={propsRef.current.workspaceId}
+                workstreamId={propsRef.current.workstreamId}
+                onClose={() => propsRef.current.onTabClose?.(tab.id)}
+                onOpenTracker={propsRef.current.onOpenTracker}
+                onSwitchToAgentMode={
+                  propsRef.current.onSwitchToAgentMode
+                    ? (sessionId: string) => propsRef.current.onSwitchToAgentMode?.(undefined, sessionId)
+                    : undefined
+                }
+              />
+            )}
           </TabEditorErrorBoundary>
         </JotaiProvider>
       );

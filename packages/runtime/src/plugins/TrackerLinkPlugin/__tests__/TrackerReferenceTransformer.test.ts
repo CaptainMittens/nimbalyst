@@ -99,6 +99,34 @@ describe('TrackerReferenceTransformer', () => {
     }, { discrete: true });
   });
 
+  it.each([
+    ['"rel=built-on"', 'chip', 'built-on', '"rel=built-on"'],
+    ['"view=card rel=built-on"', 'card', 'built-on', '"view=card rel=built-on"'],
+    ['"rel=built-on view=card"', 'card', 'built-on', '"view=card rel=built-on"'],
+    ['"height=3 rel=owned-by future=x"', 'chip', 'owned-by', '"rel=owned-by"'],
+    ['"view=card rel="', 'card', null, '"view=card"'],
+  ])('imports relation title %s and re-exports it canonically', (title, view, relation, expectedTitle) => {
+    editor.update(() => {
+      $convertFromEnhancedMarkdownString(`[label](nimbalyst://NIM-123 ${title})`, getTestTransformers());
+      const node = $getRoot().getFirstDescendant() as TrackerReferenceNode;
+      expect(node.getView()).toBe(view);
+      expect(node.getRelation()).toBe(relation);
+      expect($convertToMarkdownString(getTestTransformers())).toBe(`[NIM-123](nimbalyst://NIM-123 ${expectedTitle})`);
+    }, { discrete: true });
+  });
+
+  it('carries the relation through JSON, clone and setRelation, omitting it for a plain link', () => {
+    editor.update(() => {
+      const node = $createTrackerReferenceNode('NIM-123', 'chip', 'built-on');
+      const json = node.exportJSON();
+      expect(json).toEqual({ type: 'tracker-reference', version: 1, referenceKey: 'NIM-123', relation: 'built-on' });
+      expect(TrackerReferenceNode.importJSON(json).getRelation()).toBe('built-on');
+      expect(TrackerReferenceNode.clone(node).getRelation()).toBe('built-on');
+      expect(TrackerReferenceNode.importJSON({ ...json, relation: null }).getRelation()).toBeNull();
+      expect(node.setRelation(null).exportJSON()).not.toHaveProperty('relation');
+    }, { discrete: true });
+  });
+
   it('does not claim images with tracker view titles', () => {
     const markdown = '![image](nimbalyst://NIM-123 "view=card")';
     expect(TrackerReferenceTransformer.importRegExp!.exec(markdown)).toBeNull();

@@ -33,12 +33,14 @@ export function buildCollabTypeResolver(
   };
 
   const itemsByType = new Map<string, ResolvedItem[]>();
+  const itemById = new Map<string, { itemId: string; title: string; typeId: string }>();
   for (const record of records.values()) {
     if (record.archived) continue;
     const list = itemsByType.get(record.primaryType) ?? [];
     const title = getRecordTitle(record).trim();
     list.push({ itemId: record.id, title, sortKey: record.issueNumber ?? title });
     itemsByType.set(record.primaryType, list);
+    itemById.set(record.id, { itemId: record.id, title, typeId: record.primaryType });
   }
   for (const list of itemsByType.values()) {
     list.sort((left, right) =>
@@ -52,7 +54,16 @@ export function buildCollabTypeResolver(
       const model = laneModel(typeId);
       return model ? (model.displayNamePlural || model.displayName || typeId) : null;
     },
+    typeLabel: (typeId) => {
+      const model = laneModel(typeId);
+      return model ? (model.displayName || typeId) : null;
+    },
     typeExtends: (typeId) => registry.get(typeId)?.extends ?? null,
+    // A placed typed page from the other lane is unknown here, like its type.
+    item: (itemId) => {
+      const item = itemById.get(itemId);
+      return item && laneModel(item.typeId) ? item : null;
+    },
     itemsOfType: (typeId) => (laneModel(typeId) ? itemsByType.get(typeId) ?? [] : []),
     listedTypes: () => registry.getListed()
       .filter(inLane)
