@@ -109,6 +109,26 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
+      # versionName comes from packages/electron/package.json (build.gradle.kts).
+      # A tag `android/vX.Y.Z` must name that version; `android/vX.Y.Z.N` sets
+      # the Android rebuild slot N so the same train can be re-uploaded to Play.
+      - name: Check tag matches the desktop version
+        if: startsWith(github.ref, 'refs/tags/android/v')
+        shell: bash
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#android/v}"
+          DESKTOP_VERSION=$(node -p "require('./packages/electron/package.json').version")
+          BASE="${TAG_VERSION%.*}"
+          if [ "$TAG_VERSION" = "$DESKTOP_VERSION" ]; then
+            BUILD_NUMBER=0
+          elif [ "$BASE" = "$DESKTOP_VERSION" ]; then
+            BUILD_NUMBER="${TAG_VERSION##*.}"
+          else
+            echo "Error: tag $GITHUB_REF_NAME does not match desktop version $DESKTOP_VERSION"
+            exit 1
+          fi
+          echo "NIMBALYST_ANDROID_BUILD_NUMBER=$BUILD_NUMBER" >> "$GITHUB_ENV"
+
       - name: Build Android artifacts (signed)
         uses: ./.github/actions/android-build
         with:

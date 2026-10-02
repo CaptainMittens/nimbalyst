@@ -119,7 +119,7 @@ class SessionIndexUpdatesTest {
                 session = session,
                 draft = "text",
                 draftUpdatedAt = 20L,
-                remoteClientMetadata = null,
+                remoteClientMetadata = JsonObject(),
                 crypto = crypto
             ).json
         )

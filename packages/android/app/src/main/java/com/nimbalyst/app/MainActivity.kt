@@ -2,6 +2,7 @@ package com.nimbalyst.app
 
 import android.content.Intent
 import android.os.Bundle
+import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -14,6 +15,7 @@ import com.nimbalyst.app.auth.AuthCallbackParser
 import com.nimbalyst.app.notifications.VisibleSession
 import com.nimbalyst.app.screenshots.ScreenshotHost
 import com.nimbalyst.app.screenshots.ScreenshotMode
+import com.nimbalyst.app.transcript.TranscriptWebViewPool
 import com.nimbalyst.app.ui.NimbalystAndroidApp
 import com.nimbalyst.app.ui.navigation.WorkspaceNavigation
 import com.nimbalyst.app.ui.theme.NimbalystAndroidTheme
@@ -64,6 +66,15 @@ class MainActivity : ComponentActivity() {
                     NimbalystAndroidApp(navigation)
                 }
             }
+        }
+
+        // Pre-warm transcript WebViews once the main thread is idle, so the
+        // first session opens instantly without delaying the first frame.
+        // warmup never throws; a missing WebView provider surfaces as an
+        // error card when a transcript is opened.
+        Looper.myQueue().addIdleHandler {
+            TranscriptWebViewPool.warmup(applicationContext)
+            false
         }
     }
 
