@@ -25,6 +25,7 @@ import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { resolveColumnsForType } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerColumns';
 import { trackerItemCountByTypeAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
+import { resolveRoleFieldName } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
 import { ElectronTrackerDataSource } from '../../services/ElectronTrackerDataSource';
 import {
   getElectronCollabDocsSession,
@@ -125,8 +126,11 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
       typeLabel: typeName,
       rootLabel: lane === 'personal' ? 'Personal' : 'Team',
     });
-    return [{ id: '__where', label: 'Where', width: 220, value: (row) => where(row.id) }];
-  }, [itemPlacements, pages, typeName, lane]);
+    // Right after the title column (the type's title-role field): past the
+    // field columns it falls off-screen at a normal width.
+    const after = resolveRoleFieldName(typeId, 'title');
+    return [{ id: '__where', label: 'Where', width: 220, after, value: (row) => where(row.id) }];
+  }, [itemPlacements, pages, typeName, lane, typeId, model]);
 
   return (
     <div className="type-page-tab tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="type-page-tab" data-type-id={typeId}>

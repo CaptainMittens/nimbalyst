@@ -29,7 +29,7 @@ import {
   type CollabTreeTypeNode,
   type CollabTypeTreeResolver,
 } from '../collabTree';
-import { buildCollabPageTree, buildCollabTreeForScope } from '../collabPageTree';
+import { buildCollabPageTree, buildCollabTreeForScope, pageTreeDropZone, planPageTreeDrop } from '../collabPageTree';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedTypePlacement } from '../types';
 
 function makeDocument(
@@ -601,6 +601,117 @@ describe('collabTree', () => {
       const walk = (nodes: CollabTreeNode[]) => nodes.forEach((node) => { all.push(node.id); walk(childrenOf(node)); });
       walk(tree);
       expect(all.sort()).toEqual(['document:a', 'document:b']);
+    });
+
+    describe('ordering, subtypes and drops', () => {
+      const ordered = <T extends { sortOrder: number }>(row: T, sortOrder: number): T => ({ ...row, sortOrder });
+      const withExtends: CollabTypeTreeResolver = {
+        ...resolver,
+        typeExtends: (typeId) => (typeId === 'library' ? 'module' : null),
+      };
+      const build = () => buildCollabPageTree(
+        [makeDocument('arch', 'Architecture'), makeDocument('overview', 'Overview', 1, 'arch'), makeDocument('zeta', 'Zeta', 1, 'arch')],
+        {
+          resolver: withExtends,
+          typePlacements: [ordered(typePlacement('module', 'arch'), 10), ordered(typePlacement('library', null), 20)],
+          itemPlacements: [ordered(itemPlacement('mod-tracker', 'arch'), 5), ordered(itemPlacement('lib-yjs', 'arch'), 1)],
+        },
+      );
+
+      it('nests a subtype placed elsewhere inside its base and orders typed pages after pages by sortOrder', () => {
+        const arch = build()[0];
+        expect(ids(childrenOf(arch))).toEqual(['type:module', 'document:overview', 'document:zeta', 'item:lib-yjs', 'item:mod-tracker']);
+        expect(ids((childrenOf(arch)[0] as CollabTreeTypeNode).children)).toEqual(['type:library', 'item:mod-sync']);
+      });
+
+      it('plans edge drops as reorders and middle drops as moves inside', () => {
+        const tree = build();
+        const item = (itemId: string) => ({ kind: 'item' as const, itemId, typeId: items[itemId].typeId });
+        // Between two placed typed pages: the midpoint of their sort orders.
+        expect(planPageTreeDrop(tree, item('mod-sync'), 'item:mod-tracker', 'before'))
+          .toEqual({ kind: 'item', itemId: 'mod-sync', parentId: 'arch', sortOrder: 3 });
+        expect(planPageTreeDrop(tree, item('mod-tracker'), 'item:lib-yjs', 'before'))
+          .toEqual({ kind: 'item', itemId: 'mod-tracker', parentId: 'arch', sortOrder: 0 });
+        // Into a page: after its last typed page.
+        expect(planPageTreeDrop(tree, item('mod-sync'), 'document:overview', 'inside'))
+          .toEqual({ kind: 'item', itemId: 'mod-sync', parentId: 'overview', sortOrder: expect.any(Number) });
+        // A placed typed page dropped on its own type goes back under it.
+        expect(planPageTreeDrop(tree, item('mod-tracker'), 'type:module', 'inside'))
+          .toEqual({ kind: 'unplace-item', itemId: 'mod-tracker' });
+        // Pages have no server order: an edge drop moves to the row's parent, and is a no-op there.
+        expect(planPageTreeDrop(tree, { kind: 'page', documentId: 'arch' }, 'document:zeta', 'after')).toBeNull();
+        expect(planPageTreeDrop(tree, { kind: 'page', documentId: 'zeta' }, 'document:arch', 'before'))
+          .toEqual({ kind: 'page', documentId: 'zeta', parentId: null });
+        expect(planPageTreeDrop(tree, { kind: 'page', documentId: 'overview' }, 'document:zeta', 'before')).toBeNull();
+      });
+
+      it('reorders types among siblings and lets a subtype drop onto its base only', () => {
+        const tree = buildCollabPageTree([makeDocument('arch', 'Architecture')], {
+          resolver: withExtends,
+          typePlacements: [
+            ordered(typePlacement('module', null), 10),
+            ordered(typePlacement('library', 'arch'), 20),
+            ordered(typePlacement('competitor', null), 30),
+          ],
+        });
+        // `competitor` is unknown to the resolver and skipped; add a named root type.
+        const twoTypes = buildCollabPageTree([], {
+          resolver: { ...withExtends, typeName: (typeId) => ({ module: 'Modules', library: 'Libraries', person: 'People' } as Record<string, string>)[typeId] ?? null },
+          typePlacements: [ordered(typePlacement('module', null), 10), ordered(typePlacement('person', null), 30)],
+        });
+        expect(planPageTreeDrop(twoTypes, { kind: 'type', typeId: 'person' }, 'type:module', 'before'))
+          .toEqual({ kind: 'type', typeId: 'person', parentFolderId: null, sortOrder: 9 });
+        expect(planPageTreeDrop(tree, { kind: 'type', typeId: 'library' }, 'type:module', 'inside'))
+          .toEqual({ kind: 'type', typeId: 'library', parentFolderId: null, sortOrder: 20 });
+        expect(planPageTreeDrop(twoTypes, { kind: 'type', typeId: 'person' }, 'type:module', 'inside')).toBeNull();
+        // A nested subtype moved to a page would still render inside its base.
+        expect(planPageTreeDrop(tree, { kind: 'type', typeId: 'library' }, 'document:arch', 'inside')).toBeNull();
+      });
+
+      it('renumbers tied siblings instead of writing a colliding key', () => {
+        const names: Record<string, string> = { alpha: 'Alpha', beta: 'Beta', zed: 'Zed' };
+        const tree = buildCollabPageTree([], {
+          resolver: { ...withExtends, typeName: (typeId) => names[typeId] ?? null },
+          typePlacements: [ordered(typePlacement('alpha', null), 10), ordered(typePlacement('beta', null), 10), ordered(typePlacement('zed', null), 30)],
+        });
+        const plan = planPageTreeDrop(tree, { kind: 'type', typeId: 'zed' }, 'type:beta', 'before');
+        expect(plan).toMatchObject({ kind: 'type', typeId: 'zed', parentFolderId: null });
+        const orders = new Map([['alpha', 10], ['beta', 10], ['zed', 30]]);
+        if (plan?.kind !== 'type') throw new Error('expected a type plan');
+        orders.set('zed', plan.sortOrder);
+        for (const write of plan.renumber ?? []) orders.set(write.typeId, write.sortOrder);
+        expect(orders.get('alpha')!).toBeLessThan(orders.get('zed')!);
+        expect(orders.get('zed')!).toBeLessThan(orders.get('beta')!);
+      });
+
+      it('keeps inserting between timestamp-scale neighbours past float precision', () => {
+        const base = 1_700_000_000_000;
+        const placements = new Map<string, number>([['lib-yjs', base], ['mod-tracker', base + 1]]);
+        const inserted = Array.from({ length: 40 }, (_, index) => `n${index}`);
+        const itemResolver: CollabTypeTreeResolver = {
+          ...resolver,
+          item: (itemId) => (items[itemId] ? { itemId, ...items[itemId] } : { itemId, title: itemId, typeId: 'module' }),
+        };
+        for (const itemId of inserted) {
+          const tree = buildCollabPageTree([makeDocument('arch', 'Architecture')], {
+            resolver: itemResolver,
+            itemPlacements: [...placements].map(([id, sortOrder]) => ordered(itemPlacement(id, 'arch'), sortOrder)),
+          });
+          const plan = planPageTreeDrop(tree, { kind: 'item', itemId, typeId: 'module' }, 'item:mod-tracker', 'before');
+          if (plan?.kind !== 'item') throw new Error('expected an item plan');
+          placements.set(itemId, plan.sortOrder);
+          for (const write of plan.renumber ?? []) placements.set(write.itemId, write.sortOrder);
+        }
+        const order = [...placements].sort((left, right) => left[1] - right[1]).map(([id]) => id);
+        expect(order).toEqual(['lib-yjs', ...inserted, 'mod-tracker']);
+        expect(new Set(placements.values()).size).toBe(placements.size);
+      });
+
+      it('splits a row into before / inside / after bands', () => {
+        expect(pageTreeDropZone(2, 24)).toBe('before');
+        expect(pageTreeDropZone(12, 24)).toBe('inside');
+        expect(pageTreeDropZone(22, 24)).toBe('after');
+      });
     });
 
     it('keeps the folder tree unchanged when the snapshot is not a page tree', () => {

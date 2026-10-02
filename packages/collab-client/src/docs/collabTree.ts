@@ -62,6 +62,8 @@ export interface CollabTreeItemNode {
   typeLabel?: string;
   /** True when the item has a tree placement of its own. */
   placed?: boolean;
+  /** A placed item's placement order among its placed siblings. */
+  sortOrder?: number;
 }
 
 export type CollabTreeNode =
@@ -345,20 +347,26 @@ const TREE_NODE_RANK: Record<CollabTreeNode['type'], number> = {
   item: 3,
 };
 
-/** A typed page placed in the tree is a page: it sorts among pages by name. */
-const treeNodeRank = (node: CollabTreeNode): number =>
-  node.type === 'item' && node.placed ? TREE_NODE_RANK.document : TREE_NODE_RANK[node.type];
+const treeNodeRank = (node: CollabTreeNode): number => TREE_NODE_RANK[node.type];
 
 const compareTypeNodes = (left: CollabTreeTypeNode, right: CollabTreeTypeNode): number =>
   (left.placement.sortOrder - right.placement.sortOrder)
   || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
   || left.typeId.localeCompare(right.typeId);
 
-/** Folders, then placed types (by sortOrder), then documents (by name). */
+/**
+ * Folders, then placed types (by sortOrder), then documents (by name), then
+ * placed typed pages (by sortOrder). Documents carry no server order, so typed
+ * pages keep their own block where a drag can reorder them.
+ */
 function compareTreeNodes(left: CollabTreeNode, right: CollabTreeNode): number {
   const rank = treeNodeRank(left) - treeNodeRank(right);
   if (rank !== 0) return rank;
   if (left.type === 'type' && right.type === 'type') return compareTypeNodes(left, right);
+  if (left.type === 'item' && right.type === 'item') {
+    const order = (left.sortOrder ?? 0) - (right.sortOrder ?? 0);
+    if (order !== 0) return order;
+  }
   return left.name.localeCompare(right.name, undefined, {
     numeric: true,
     sensitivity: 'base',
@@ -773,6 +781,15 @@ export function filterCollabTree(nodes: CollabTreeNode[], query: string): Collab
   return nodes
     .map(filterNode)
     .filter((node): node is CollabTreeNode => node !== null);
+}
+
+/**
+ * Page tree: a markdown page reads as its name, so "Architecture.md" shows as
+ * "Architecture". Display only; the stored title keeps its extension, and
+ * other document types keep theirs.
+ */
+export function pageDisplayName(name: string, documentType: string | undefined): string {
+  return documentType === 'markdown' && /.\.md$/i.test(name) ? name.slice(0, -3) : name;
 }
 
 export const isTypePageDocumentId = (documentId: string): boolean =>

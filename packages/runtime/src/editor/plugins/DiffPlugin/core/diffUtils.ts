@@ -126,6 +126,7 @@ import type {LexicalEditor, SerializedLexicalNode, TextNode} from 'lexical';
 import {
   type ElementNode,
   type LexicalNode,
+  $createParagraphNode,
   $createTextNode,
   $getNodeByKey,
   $getRoot,
@@ -964,12 +965,14 @@ export function applyMarkdownDiffToDocument(
   }
 
   try {
-    // Validate editor state before starting
+    // A brand-new collaborative document has a root with zero children until
+    // someone types. Give it the empty paragraph a fresh local editor starts
+    // with so the tree matcher has a node to diff against.
     editor.update(
       () => {
         const liveRoot = $getRoot();
-        if (liveRoot.getChildren().length === 0) {
-          throw new Error('Live editor root has no children');
+        if (liveRoot.getChildrenSize() === 0) {
+          liveRoot.append($createParagraphNode());
         }
       },
       {discrete: true},

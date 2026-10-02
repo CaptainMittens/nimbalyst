@@ -1,5 +1,8 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 const {
   mockQuery,
@@ -135,6 +138,8 @@ vi.mock('../../../services/TrackerSchemaService', () => {
     writeThroughTeamTrackerSchemaEdit: mockWriteThroughTeamTrackerSchemaEdit,
     getAllTrackerSchemas: mockGetAllTrackerSchemas,
     isBuiltinTrackerSchema: mockIsBuiltinTrackerSchema,
+    applyWorkspacePredicateRegistryInProcess: vi.fn(),
+    applyWorkspaceLabelRegistryInProcess: vi.fn(),
     TrackerTypeExistsError: MockTrackerTypeExistsError,
   };
 });
@@ -1506,6 +1511,23 @@ describe('tracker schema tools', () => {
       activity: [expect.objectContaining({ action: 'schema_updated' })],
       warning: expect.stringContaining("team's copy will overwrite it"),
     });
+  });
+
+  it('reports vocabulary it already wrote when the type half of the call then fails', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nim-define-type-'));
+    try {
+      mockUpsertWorkspaceTrackerSchema.mockRejectedValue(new Error('Type \'library\' extends unknown type \'technology\''));
+      const result = await handleTrackerDefineType({
+        predicates: [{ id: 'built-on', label: 'built on', subjectKinds: ['*'], valueShape: 'entity', direction: 'directed' }],
+        schema: { type: 'library', extends: 'technology' },
+      }, workspace);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('extends unknown type');
+      expect(result.content[0].text).toContain('Merged into .nimbalyst/predicates.yaml');
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   it('defines a custom tracker type through the schema service', async () => {

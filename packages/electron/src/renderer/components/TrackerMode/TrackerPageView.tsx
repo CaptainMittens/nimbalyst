@@ -24,7 +24,7 @@ import { getTrackerTagsField, useTrackerChipFieldSections } from '@nimbalyst/run
 import { isTrackerFieldEmpty } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerFieldLayout';
 import { labelFieldHints, unwrapLabelFieldValues, useTrackerLabelFields, wrapLabelFieldValue } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerLabelFields';
 import { trackerItemByIdAtom, trackerDataLoadedAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
-import { getElectronCollabDocsSession, getPersonalCollabDocsSession } from '../../store/atoms/collabDocuments';
+import { getElectronCollabDocsSession, getPersonalCollabDocsSession, resolveDesktopCollabScope } from '../../store/atoms/collabDocuments';
 import { getSharedDocumentDisplayName } from '../CollabMode/collabTree';
 import { useMarkTrackerViewed } from '../../hooks/useTrackerUnread';
 import { useRecordTrackerOpened } from '../../hooks/useRecordTrackerOpened';
@@ -119,14 +119,48 @@ export function trackerPageCrumbFolders(
   return ancestorNames(placement?.parentFolderId, [], folders);
 }
 
+/**
+ * Whether a page should offer its legacy `description` back: only when it
+ * holds text the body does not already contain (whitespace aside). Items
+ * created with the same text in both fields have nothing to recover. Until
+ * the body has loaded there is nothing to compare against, so nothing shows.
+ */
+export function legacyDescriptionToRecover(description: unknown, body: string | null): string | null {
+  if (typeof description !== 'string' || body === null) return null;
+  const squash = (text: string) => text.replace(/\s+/g, ' ').trim();
+  const saved = squash(description);
+  return saved && !squash(body).includes(saved) ? description : null;
+}
+
 const NO_PLACEMENTS: Atom<readonly CrumbPlacement[]> = atom([]);
 const NO_ITEM_PLACEMENTS: Atom<readonly CrumbItemPlacement[]> = atom([]);
 const NO_FOLDERS: Atom<readonly CrumbFolder[]> = atom([]);
 const NO_DOCUMENTS: Atom<readonly CrumbDocument[]> = atom([]);
 
 /**
+ * The team scope the crumb reads. The tab mounts once with whatever scope
+ * Pages had at that moment, which can be none yet; resolve it here so the
+ * crumb still reaches the team tree's live placements.
+ */
+function useTeamCrumbScope(workspacePath: string, collabScope: CollabScope | undefined, enabled: boolean): CollabScope | null {
+  const [resolved, setResolved] = useState<CollabScope | null>(null);
+  useEffect(() => {
+    if (!enabled || collabScope) return;
+    let cancelled = false;
+    void resolveDesktopCollabScope(workspacePath).then(({ scope }) => {
+      if (!cancelled) setResolved(scope);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [enabled, collabScope, workspacePath]);
+  return collabScope ?? resolved;
+}
+
+/**
  * The page's crumb: Personal types read the workspace's Personal session,
- * team types the team session of `collabScope`.
+ * team types the team session. The session's atoms carry every placement and
+ * page change, so the crumb follows a move while the tab is open.
  */
 function useTrackerPageCrumb(
   itemId: string,
@@ -136,9 +170,10 @@ function useTrackerPageCrumb(
   collabScope: CollabScope | undefined,
 ): TrackerPageCrumb & { section: string | null } {
   const personal = sharing === 'personal';
+  const teamScope = useTeamCrumbScope(workspacePath, collabScope, !personal);
   const session = useMemo(
-    () => (personal ? getPersonalCollabDocsSession(workspacePath) : collabScope ? getElectronCollabDocsSession(collabScope) : null),
-    [personal, workspacePath, collabScope],
+    () => (personal ? getPersonalCollabDocsSession(workspacePath) : teamScope ? getElectronCollabDocsSession(teamScope) : null),
+    [personal, workspacePath, teamScope],
   );
   const itemPlacements = useAtomValue<readonly CrumbItemPlacement[]>(session?.atoms.itemPlacements ?? NO_ITEM_PLACEMENTS);
   const typePlacements = useAtomValue<readonly CrumbPlacement[]>(session?.atoms.typePlacements ?? NO_PLACEMENTS);
@@ -175,6 +210,13 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
   );
   const [linksRevision, setLinksRevision] = useState(0);
   const bumpLinks = useCallback(() => setLinksRevision((r) => r + 1), []);
+  // The body as last saved from this tab. The hook's `contentMarkdown` only
+  // moves on load and on remote updates, so own edits are tracked here.
+  const [savedBody, setSavedBody] = useState<string | null>(null);
+  const handleContentSaved = useCallback((markdown: string) => {
+    setSavedBody(markdown);
+    bumpLinks();
+  }, [bumpLinks]);
 
   useMarkTrackerViewed(item, workspacePath);
   useRecordTrackerOpened(item?.id, workspacePath);
@@ -192,8 +234,10 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
     // A page is a full document surface: same block handles and selection
     // toolbar as every other editor tab.
     forceFloatingToolbar: true,
-    onContentSaved: bumpLinks,
+    onContentSaved: handleContentSaved,
   });
+  // A load, a remote update, or switching pages supersedes the last own save.
+  useEffect(() => setSavedBody(null), [body.contentMarkdown, itemId]);
   const { localTitle, storedValues, handleTextFieldChange, handleFieldChange } = useTrackerItemFields({
     itemId,
     item,
@@ -275,6 +319,8 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
   const typeName = model?.displayName || item.primaryType;
   const typeColor = model?.color || TYPE_COLORS[item.primaryType] || NEUTRAL_SWATCH;
   const { contentMode, localEditorConfig, collabEditorConfig } = body;
+  const currentBody = body.contentMarkdown === null ? null : savedBody ?? body.contentMarkdown;
+  const savedDescription = body.hasRichContent ? legacyDescriptionToRecover(item.fields.description, currentBody) : null;
 
   return (
     <div className="tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="tracker-page-view" data-item-id={item.id}>
@@ -335,10 +381,10 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
           </div>
         </div>
 
-        {body.hasRichContent && typeof item.fields.description === 'string' && (
+        {savedDescription !== null && (
           <div className="tracker-page-view-gutter">
             <TrackerSavedDescription
-              key={item.id} description={item.fields.description} currentBody={body.contentMarkdown} editor={body.recoveryEditor}
+              key={item.id} description={savedDescription} currentBody={currentBody} editor={body.recoveryEditor}
               canInsert={editable && body.contentLoaded && (contentMode === 'local-pglite' || (contentMode === 'collaborative' && body.hasSyncedOnce && body.collabStatus === 'connected'))}
             />
           </div>

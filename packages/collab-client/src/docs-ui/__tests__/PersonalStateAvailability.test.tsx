@@ -49,7 +49,12 @@ const documents: SharedDocument[] = [
   },
 ];
 
-async function createSurface(personalState: boolean, readReceipts: boolean, hostOverrides: Partial<CollabHost> = {}) {
+async function createSurface(
+  personalState: boolean,
+  readReceipts: boolean,
+  hostOverrides: Partial<CollabHost> = {},
+  sidebarProps: React.ComponentProps<typeof CollabSidebar> = {},
+) {
   const documentTypes = [] as const;
   const host = {
     surface: personalState ? 'desktop' : 'web_console',
@@ -104,7 +109,7 @@ async function createSurface(personalState: boolean, readReceipts: boolean, host
     view = render(
       <Provider store={createStore()}>
         <CollabDocsUIProvider session={session}>
-          <CollabSidebar />
+          <CollabSidebar {...sidebarProps} />
           <SharedDocsListView />
         </CollabDocsUIProvider>
       </Provider>,
@@ -162,6 +167,28 @@ describe('personal UI capability availability', () => {
     expect(browser.queryByText('Re-upload From Local')).toBeNull();
     expect(browser.queryByText(/Link Local Source/)).toBeNull();
   });
+});
+
+it('collapses a section to its header row and reports the toggle', async () => {
+  const onToggleCollapsed = vi.fn();
+  const view = await createSurface(true, true, {}, { sectionTitle: 'Team', collapsed: true, onToggleCollapsed });
+  const sidebar = view.getByTestId('collab-sidebar');
+  const toggle = sidebar.querySelector<HTMLButtonElement>('.collab-sidebar-section-toggle')!;
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  expect(sidebar.querySelector('.collab-tree-filter, .session-history-search, .file-tree-file')).toBeNull();
+  fireEvent.click(toggle);
+  expect(onToggleCollapsed).toHaveBeenCalledOnce();
+
+  view.rerender(
+    <Provider store={createStore()}>
+      <CollabDocsUIProvider session={view.session}>
+        <CollabSidebar sectionTitle="Team" collapsed={false} onToggleCollapsed={onToggleCollapsed} />
+      </CollabDocsUIProvider>
+    </Provider>,
+  );
+  expect(view.container.querySelector('.collab-sidebar-section-toggle')!.getAttribute('aria-expanded')).toBe('true');
+  expect(view.container.querySelector('.session-history-search')).not.toBeNull();
+  expect(view.container.querySelector('.file-tree-file')).not.toBeNull();
 });
 
 // Propagation alone does not cancel an anchor's native navigation.

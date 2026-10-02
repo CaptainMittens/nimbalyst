@@ -6,13 +6,22 @@
  * field hooks but none of that chrome.
  */
 import { Provider } from 'jotai';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { store } from '@nimbalyst/runtime/store';
 
 // The file-backed body editor is only reachable in content focus, and it drags
 // in the whole editor stack.
 vi.mock('../../TabEditor/TabEditor', () => ({ TabEditor: () => null }));
+// The page body editor: a stub that hands its config to the test, so a test
+// can type into the body by driving the config's save callbacks.
+const bodyEditor = vi.hoisted(() => ({ config: null as any }));
+vi.mock('@nimbalyst/runtime/editor', () => ({
+  NimbalystEditor: ({ config }: { config: unknown }) => {
+    bodyEditor.config = config;
+    return <div className="nimbalyst-editor" />;
+  },
+}));
 
 // The collab body stack blocks on import outside Electron, and this pane's
 // metadata region doesn't depend on it: a dormant collab result is enough.
@@ -52,6 +61,7 @@ vi.mock('../../../store/atoms/collabDocuments', async (importOriginal) => {
     ...(await importOriginal<object>()),
     getElectronCollabDocsSession: () => pagesTree,
     getPersonalCollabDocsSession: () => pagesTree,
+    resolveDesktopCollabScope: async () => ({ scope: { scopeKey: '/ws' }, retryable: false }),
   };
 });
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
@@ -101,6 +111,7 @@ beforeEach(() => {
       getTrackerCreationStatus: vi.fn().mockResolvedValue(null),
       updateTrackerItemInFile: vi.fn().mockResolvedValue({ success: true }),
       getTrackerItemContent: vi.fn().mockResolvedValue({ success: true, content: '' }),
+      updateTrackerItemContent: vi.fn().mockResolvedValue({ success: true }),
       saveTrackerItemContent: vi.fn().mockResolvedValue({ success: true }),
     },
   };
@@ -115,10 +126,10 @@ function renderDetail(props: Record<string, unknown> = {}) {
   );
 }
 
-function renderPage() {
+function renderPage({ collabScope = { scopeKey: '/ws' } as unknown } = {}) {
   render(
     <Provider store={store}>
-      <TrackerPageView itemId={ITEM.id} workspacePath="/ws" collabScope={{ scopeKey: '/ws' } as any} />
+      <TrackerPageView itemId={ITEM.id} workspacePath="/ws" collabScope={collabScope as any} />
     </Provider>,
   );
 }
@@ -246,6 +257,46 @@ describe('TrackerItemDetail metadata region', () => {
     } finally {
       store.set(pageTree.itemPlacements, []);
     }
+  });
+
+  it('as a team page opened before Pages had a scope, the crumb still follows a move', async () => {
+    // Tab content mounts once with whatever scope Pages had at that moment.
+    const realGet = globalRegistry.get.bind(globalRegistry);
+    const teamPlan = { ...realGet('plan')!, sharing: 'team' as const };
+    const spy = vi.spyOn(globalRegistry, 'get').mockImplementation((type) => (type === 'plan' ? teamPlan : realGet(type)));
+    store.set(pageTree.itemPlacements, [{ itemId: ITEM.id, parentId: 'd-modules' }]);
+    try {
+      renderPage({ collabScope: null });
+      await waitFor(() => expect(screen.getByTestId('tracker-page-crumb').textContent).toBe('Spec / Modules / Chip row item'));
+      act(() => store.set(pageTree.itemPlacements, [{ itemId: ITEM.id, parentId: 'd-research' }]));
+      expect(screen.getByTestId('tracker-page-crumb').textContent).toBe('Spec / Research / Chip row item');
+    } finally {
+      spy.mockRestore();
+      store.set(pageTree.itemPlacements, []);
+    }
+  });
+
+  it('as a page offers the legacy description only when the body does not already hold it', async () => {
+    const getContent = (window as any).electronAPI.documentService.getTrackerItemContent;
+    // Created with the same text in both fields; the body re-flowed its whitespace.
+    getContent.mockResolvedValue({ success: true, content: { markdown: 'Built on Yjs.\nIt syncs   pages.\n\nMore later.\n' } });
+    store.set(replaceAllTrackerItemsAtom, [{ ...ITEM, fields: { ...ITEM.fields, description: 'Built on Yjs. It syncs pages.' } } as TrackerRecord]);
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId('tracker-page-body').querySelector('.nimbalyst-editor')).not.toBeNull());
+    expect(screen.queryByText('Saved description')).toBeNull();
+
+    // Editing that text out of the body leaves the description holding unique text.
+    act(() => {
+      bodyEditor.config.onGetContent(() => 'More later.\n');
+      bodyEditor.config.onDirtyChange(true);
+    });
+    await screen.findByText('Saved description', undefined, { timeout: 3000 });
+    cleanup();
+
+    // Text that never reached the body is kept and offered.
+    store.set(replaceAllTrackerItemsAtom, [{ ...ITEM, fields: { ...ITEM.fields, description: 'Only in the old field.' } } as TrackerRecord]);
+    renderPage();
+    await screen.findByText('Saved description');
   });
 
   it('as a page leaves relationship fields to Links, even single-valued ones', () => {

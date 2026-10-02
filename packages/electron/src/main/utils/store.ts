@@ -591,6 +591,8 @@ export interface WorkspaceState {
     // Stable first-class folder id most recently used. Null means Team root.
     lastSharedFolderId?: string | null;
   };
+  /** Pages-mode sidebar sections the user collapsed or expanded; unset = default. */
+  pagesSidebarCollapsed?: { team?: boolean; personal?: boolean };
   collabPendingUpdates?: Record<string, {
     mergedUpdateBase64: string;
     updatedAt: number;
@@ -979,6 +981,7 @@ function createDefaultWorkspaceState(workspacePath: string): WorkspaceState {
       expandedFolders: [],
       customFolders: [],
     },
+    pagesSidebarCollapsed: undefined,
     collabPendingUpdates: {},
     trackerSharingMigration: undefined,
     trackerSharingMigrationSeenAt: undefined,

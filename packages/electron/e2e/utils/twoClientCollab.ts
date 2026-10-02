@@ -43,6 +43,11 @@ export interface TwoClientCollabHarnessOptions {
    * nothing.
    */
   clients?: readonly CollabClientLabel[];
+  /**
+   * Runs after the org is seeded and before any client launches, for a spec
+   * that has to shape server state the clients' first sync must see.
+   */
+  beforeClientsLaunch?: (harness: TwoClientCollabHarness) => Promise<void>;
 }
 
 const DEFAULT_PORT = 8797;
@@ -117,6 +122,7 @@ export class TwoClientCollabHarness {
     await this.writeWorkspaceFixtures();
     await this.startServer();
     await this.makeOrgServerManaged();
+    await this.options.beforeClientsLaunch?.(this);
     for (const label of this.launchedClients) {
       await this.launchClient(label, false);
     }
@@ -413,6 +419,9 @@ export class TwoClientCollabHarness {
     }
 
     const app = await launchElectronApp({
+      // An independently built main, so a main-process change can be exercised
+      // without rebuilding the `out/` the running dev app owns.
+      mainPath: process.env.NIMBALYST_E2E_MAIN_PATH,
       workspace,
       permissionMode: "allow-all",
       preserveTestDatabase: true,

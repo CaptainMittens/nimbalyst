@@ -31,6 +31,18 @@ export function getPlaceableTypes(
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
+/** A page-tree row as a drop target: handlers plus the class showing where it lands. */
+export interface CollabRowDrop {
+  onDragOver: (event: React.DragEvent) => void;
+  onDragLeave: (event: React.DragEvent) => void;
+  onDrop: (event: React.DragEvent) => void;
+  /** '', ' drag-over', ' collab-tree-drop-before' or ' collab-tree-drop-after'. */
+  className: string;
+}
+
+const dropHandlers = (drop: CollabRowDrop | undefined) =>
+  drop ? { onDragOver: drop.onDragOver, onDragLeave: drop.onDragLeave, onDrop: drop.onDrop } : {};
+
 export const CollabTypeNodeRow: React.FC<{
   node: CollabTreeTypeNode;
   indent: number;
@@ -40,14 +52,16 @@ export const CollabTypeNodeRow: React.FC<{
   onContextMenu: (event: React.MouseEvent) => void;
   onDragStart: (event: React.DragEvent) => void;
   onDragEnd: () => void;
-}> = ({ node, indent, expanded, onToggle, onOpen, onContextMenu, onDragStart, onDragEnd }) => (
+  drop?: CollabRowDrop;
+}> = ({ node, indent, expanded, onToggle, onOpen, onContextMenu, onDragStart, onDragEnd, drop }) => (
   <button
     type="button"
-    className="collab-tree-type-row w-full flex items-center text-left file-tree-directory"
+    className={`collab-tree-type-row w-full flex items-center text-left file-tree-directory${drop?.className ?? ''}`}
     style={{ paddingLeft: indent }}
     data-testid="collab-tree-type-row"
     data-type-id={node.typeId}
     draggable
+    {...dropHandlers(drop)}
     onDragStart={onDragStart}
     onDragEnd={onDragEnd}
     onClick={onOpen}
@@ -87,6 +101,8 @@ export interface CollabItemRowActions {
   onContextMenu: (event: React.MouseEvent, node: CollabTreeItemNode) => void;
   onDragStart: (node: CollabTreeItemNode) => void;
   onDragEnd: () => void;
+  /** Rows under a type (the type and its items) as drop targets. */
+  rowDrop?: (node: CollabTreeTypeNode | CollabTreeItemNode) => CollabRowDrop;
 }
 
 /**
@@ -99,13 +115,16 @@ export const CollabTypeItemRow: React.FC<{
   indent: number;
   onOpen: () => void;
   actions?: CollabItemRowActions;
-}> = ({ node, position, indent, onOpen, actions }) => (
+}> = ({ node, position, indent, onOpen, actions }) => {
+  const drop = actions?.rowDrop?.(node);
+  return (
   <button
     type="button"
-    className="collab-tree-item-row w-full flex items-center text-left file-tree-file"
+    className={`collab-tree-item-row w-full flex items-center text-left file-tree-file${drop?.className ?? ''}`}
     style={{ paddingLeft: indent }}
     data-testid="collab-tree-item-row"
     data-item-id={node.itemId}
+    {...dropHandlers(drop)}
     onClick={onOpen}
     onContextMenu={actions ? (event) => actions.onContextMenu(event, node) : undefined}
     draggable={!!actions}
@@ -136,7 +155,8 @@ export const CollabTypeItemRow: React.FC<{
       </>
     )}
   </button>
-);
+  );
+};
 
 /** A type row plus, when expanded, its placed subtypes and numbered items. */
 export const CollabTypeTreeBranch: React.FC<{
@@ -173,6 +193,7 @@ export const CollabTypeTreeBranch: React.FC<{
           onDragStart(node.typeId);
         }}
         onDragEnd={onDragEnd}
+        drop={itemActions?.rowDrop?.(node)}
       />
       {expanded ? (
         <>

@@ -38,13 +38,18 @@ export const CollabPageMenuHead: React.FC<{
   onNewPageInside: () => void;
   /** Absent until the host can turn a page into a typed page in place. */
   onSetType?: () => void;
+  /** Absent without tracker data (no types to place). */
+  onPlaceType?: () => void;
   onRename: () => void;
   onMoveTo: () => void;
   onCopyLink: () => void;
   copyLinkDisabled?: boolean;
-}> = ({ onNewPageInside, onSetType, onRename, onMoveTo, onCopyLink, copyLinkDisabled }) => (
+}> = ({ onNewPageInside, onSetType, onPlaceType, onRename, onMoveTo, onCopyLink, copyLinkDisabled }) => (
   <>
     <CollabMenuButton className="collab-page-new-inside" icon="note_add" label="New page" trailing="inside" onClick={onNewPageInside} />
+    {onPlaceType && (
+      <CollabMenuButton className="collab-place-type-action" icon="table" label="Place type..." trailing="inside" onClick={onPlaceType} />
+    )}
     <CollabMenuButton
       className="collab-page-set-type"
       icon="category"

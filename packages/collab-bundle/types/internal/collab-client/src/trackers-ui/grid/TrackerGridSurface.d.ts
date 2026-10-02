@@ -65,7 +65,7 @@ export interface TrackerGridSurfaceProps {
     }) => void;
     /** False until the first snapshot resolves. */
     loaded: boolean;
-    /** Read-only columns the host computes per row (a type page's Where), after the field columns. */
+    /** Read-only columns the host computes per row (a type page's Where), after the field columns unless placed with `after`. */
     derivedColumns?: readonly TrackerGridDerivedColumn[];
 }
 export interface TrackerGridDerivedColumn {
@@ -73,6 +73,8 @@ export interface TrackerGridDerivedColumn {
     id: string;
     label: string;
     width?: number;
+    /** Field column id to sit right after; appended when that column is not shown. */
+    after?: string;
     value: (row: TrackerRecord) => string;
 }
 export interface TrackerGridUpdateEntry {

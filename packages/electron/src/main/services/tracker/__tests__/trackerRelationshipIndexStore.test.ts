@@ -219,9 +219,9 @@ describe('trackerRelationshipIndexStore (SQLite, migration 0014)', () => {
       ]);
       const builtOn = out.find((r) => r.sourceFieldId === 'body:built-on')!;
       expect(builtOn.targetTrackerType).toBe('concept');
-      expect(builtOn.metadata).toEqual({ sentence: 'Sync is built on NIM-2 for merging.', count: 2 });
+      expect(builtOn.metadata).toEqual({ sentence: 'Sync is built on Yjs for merging.', count: 2 });
       expect(out.find((r) => r.sourceFieldId === 'body:runs-on')!.metadata).toEqual({
-        sentence: 'Rooms live in page_raw3.',
+        sentence: 'Rooms live in DOs.',
         count: 1,
       });
       // The incoming side reads the same rows.
@@ -241,7 +241,7 @@ describe('trackerRelationshipIndexStore (SQLite, migration 0014)', () => {
       );
       const out = await getOutgoingRelationships(WS, 'page-1', db);
       expect(out.map((r) => r.sourceFieldId)).toEqual(['body:built-on', 'dependsOn']);
-      expect(out[0].metadata).toEqual({ sentence: 'Only NIM-2 now', count: 1 });
+      expect(out[0].metadata).toEqual({ sentence: 'Only Yjs now', count: 1 });
     });
 
     it('accepts the { markdown } content shape and the workspace rebuild indexes bodies', async () => {
@@ -263,9 +263,9 @@ describe('trackerRelationshipIndexStore (SQLite, migration 0014)', () => {
       const links = await getTrackerItemLinks(WS, 'page-2', defs, db);
       expect(links).toEqual([
         { direction: 'in', predicateId: 'built-on', relationshipTypeKey: 'built-on', otherItemId: 'page-1', otherTitle: 'Sync',
-          otherIssueKey: 'NIM-1', otherTypeId: 'concept', sentence: 'Sync is built on NIM-2 for merging.', sourceFieldId: 'body:built-on' },
+          otherIssueKey: 'NIM-1', otherTypeId: 'concept', sentence: 'Sync is built on Yjs for merging.', sourceFieldId: 'body:built-on' },
         { direction: 'in', predicateId: null, relationshipTypeKey: 'link', otherItemId: 'page-1', otherTitle: 'Sync',
-          otherIssueKey: 'NIM-1', otherTypeId: 'concept', sentence: 'See NIM-2 and again NIM-2.', sourceFieldId: 'body:link' },
+          otherIssueKey: 'NIM-1', otherTypeId: 'concept', sentence: 'See the Yjs page and again Yjs.', sourceFieldId: 'body:link' },
         { direction: 'in', predicateId: 'uses', relationshipTypeKey: null, otherItemId: 'page_raw3', otherTitle: 'Durable Objects',
           otherIssueKey: null, otherTypeId: 'concept', sentence: null, sourceFieldId: 'uses' },
       ]);

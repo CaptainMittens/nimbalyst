@@ -35,6 +35,12 @@ export interface CollabSidebarProps {
      */
     sectionTitle?: string;
     /**
+     * Section only: with `onToggleCollapsed` the title row becomes a toggle, and
+     * a collapsed section renders that row alone (no filters, search or tree).
+     */
+    collapsed?: boolean;
+    onToggleCollapsed?: () => void;
+    /**
      * Page tree only: turn a plain page into a typed page in place. Without it
      * the menu's "Set type" entry is shown disabled.
      */

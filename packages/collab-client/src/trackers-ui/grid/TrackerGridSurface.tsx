@@ -31,6 +31,7 @@ import { RevoGrid, type RevoGridCustomEvent } from '@revolist/react-datagrid';
 import type {
   AfterEditEvent,
   BeforeSaveDataDetails,
+  ColumnRegular,
   FocusAfterRenderEvent,
   SortingConfig,
 } from '@revolist/revogrid';
@@ -104,7 +105,7 @@ export interface TrackerGridSurfaceProps {
   }) => void;
   /** False until the first snapshot resolves. */
   loaded: boolean;
-  /** Read-only columns the host computes per row (a type page's Where), after the field columns. */
+  /** Read-only columns the host computes per row (a type page's Where), after the field columns unless placed with `after`. */
   derivedColumns?: readonly TrackerGridDerivedColumn[];
 }
 
@@ -113,7 +114,23 @@ export interface TrackerGridDerivedColumn {
   id: string;
   label: string;
   width?: number;
+  /** Field column id to sit right after; appended when that column is not shown. */
+  after?: string;
   value: (row: TrackerRecord) => string;
+}
+
+function placeDerivedColumns(
+  fieldColumns: ColumnRegular[],
+  derived: readonly TrackerGridDerivedColumn[],
+): ColumnRegular[] {
+  const placed = [...fieldColumns];
+  const trailing: ColumnRegular[] = [];
+  for (const column of derived) {
+    const anchor = column.after ? placed.findIndex((candidate) => candidate.prop === column.after) : -1;
+    if (anchor >= 0) placed.splice(anchor + 1, 0, buildDerivedGridColumn(column));
+    else trailing.push(buildDerivedGridColumn(column));
+  }
+  return [...placed, ...trailing];
 }
 
 export interface TrackerGridUpdateEntry {
@@ -202,7 +219,7 @@ export function TrackerGridSurface({
 
   const gridColumns = useMemo(
     () => [
-      ...buildGridColumns(visibleColumnDefs, {
+      ...placeDerivedColumns(buildGridColumns(visibleColumnDefs, {
         trackerType: schemaType,
         columnWidths: effectiveConfig.columnWidths,
         isRowEditable,
@@ -217,8 +234,7 @@ export function TrackerGridSurface({
         // only -- the expand icon is omitted rather than rendered inert.
         keyLink: onOpenItem ? { onOpenDetail: onOpenItem } : undefined,
         resolveRelationshipLabel,
-      }),
-      ...(derivedColumns ?? []).map((column) => buildDerivedGridColumn(column)),
+      }), derivedColumns ?? []),
       ...(onRowContextMenu ? [buildGridActionsColumn()] : []),
     ],
     [

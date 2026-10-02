@@ -14,6 +14,14 @@ export interface PlaceableType {
 }
 /** Listed types not placed yet (one placement per type). Empty without a resolver. */
 export declare function getPlaceableTypes(resolver: CollabTypeTreeResolver | undefined, placedTypeIds: ReadonlySet<string>): PlaceableType[];
+/** A page-tree row as a drop target: handlers plus the class showing where it lands. */
+export interface CollabRowDrop {
+    onDragOver: (event: React.DragEvent) => void;
+    onDragLeave: (event: React.DragEvent) => void;
+    onDrop: (event: React.DragEvent) => void;
+    /** '', ' drag-over', ' collab-tree-drop-before' or ' collab-tree-drop-after'. */
+    className: string;
+}
 export declare const CollabTypeNodeRow: React.FC<{
     node: CollabTreeTypeNode;
     indent: number;
@@ -23,6 +31,7 @@ export declare const CollabTypeNodeRow: React.FC<{
     onContextMenu: (event: React.MouseEvent) => void;
     onDragStart: (event: React.DragEvent) => void;
     onDragEnd: () => void;
+    drop?: CollabRowDrop;
 }>;
 /** Move destination that sends a typed page back under its type node. */
 export declare const UNDER_TYPE = "__under_type__";
@@ -33,6 +42,8 @@ export interface CollabItemRowActions {
     onContextMenu: (event: React.MouseEvent, node: CollabTreeItemNode) => void;
     onDragStart: (node: CollabTreeItemNode) => void;
     onDragEnd: () => void;
+    /** Rows under a type (the type and its items) as drop targets. */
+    rowDrop?: (node: CollabTreeTypeNode | CollabTreeItemNode) => CollabRowDrop;
 }
 /**
  * A type's item. In the page tree (`typeLabel` set) it is a page: page icon,

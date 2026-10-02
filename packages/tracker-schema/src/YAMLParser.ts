@@ -297,8 +297,11 @@ export function parseTrackerTypeYAML(yamlString: string): TrackerDataModel | Der
 /**
  * Serialize a TrackerDataModel to YAML string
  */
-export function serializeTrackerYAML(model: TrackerDataModel): string {
-  return yaml.dump(normalizeTrackerSharingModel(model), {
+export function serializeTrackerYAML(model: TrackerDataModel | DerivedTrackerTypeDeclaration): string {
+  // A derived type that says nothing about sharing inherits its base's; the
+  // normalizer would stamp it `personal`.
+  const inheritsSharing = typeof model.extends === 'string' && model.extends.length > 0 && model.sharing === undefined;
+  return yaml.dump(inheritsSharing ? model : normalizeTrackerSharingModel(model as TrackerDataModel), {
     indent: 2,
     lineWidth: 120,
     noRefs: true,
@@ -310,7 +313,7 @@ export function serializeTrackerYAML(model: TrackerDataModel): string {
  */
 export function validateTrackerYAML(yamlString: string): { valid: boolean; error?: string } {
   try {
-    parseTrackerYAML(yamlString);
+    parseTrackerTypeYAML(yamlString);
     return { valid: true };
   } catch (error) {
     return {

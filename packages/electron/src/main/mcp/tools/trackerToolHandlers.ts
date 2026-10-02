@@ -880,7 +880,7 @@ export const trackerToolSchemas = [
       properties: {
         schema: {
           type: "object",
-          description: "Full custom tracker type schema object to persist. Cannot target a built-in type — use `patch` for those.",
+          description: "Full custom tracker type schema object to persist. Cannot target a built-in type — use `patch` for those. A subtype sets `extends: <baseType>` and declares only what it adds: new fields, narrowed select options, or overridden displayName/icon/color/roles/tableView; everything else, including sharing, is inherited from the base.",
         },
         patch: {
           type: "object",

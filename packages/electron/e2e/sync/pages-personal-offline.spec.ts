@@ -1,15 +1,17 @@
 /**
- * Phase 2 acceptance for the Pages Personal section: a fresh install with no
- * account and no collaboration server.
+ * Acceptance for the Pages Personal section on a fresh install with no account
+ * and no collaboration server, on the one page tree (Phase 3b).
  *
  * On a fresh user-data dir (signed out, no wrangler), Pages mode must show the
  * Personal section with no error toast and no scope-resolution console error.
- * The user creates a personal folder, places the seeded personal tracker type
- * under it (the "Place type..." menu must not offer the seeded team type),
- * creates an item of that type and sees it under the type, then creates a
- * personal page and types into its `personal://` tab. After a relaunch on the
- * same user-data dir and workspace, the folder, the placed type, the item, the
- * page and its text are all still there and the page tab is restored.
+ * The user creates a root page and a page inside it, places the seeded
+ * personal tracker type (the "Place type..." menu must not offer the seeded
+ * team type) and drags it under the root page, creates an item of that type
+ * and moves it under the child page, writes a sentence into a plain page, and
+ * gives a second page with a body a type in place. After a relaunch on the same
+ * user-data dir and workspace, the nesting, the placed type, the moved item,
+ * the plain page with its text and restored tab, and the typed page with its
+ * body are all still there.
  *
  * Run with:
  *   npx playwright test e2e/sync/pages-personal-offline.spec.ts --max-failures=1
@@ -27,10 +29,13 @@ const PERSONAL_TYPE_ID = 'offline-note';
 const PERSONAL_TYPE_NAME = 'Offline Note';
 const PERSONAL_TYPE_PLURAL = 'Offline Notes';
 const TEAM_TYPE_PLURAL = 'Team Only Specs';
-const FOLDER_NAME = 'Offline Folder';
+const ROOT_PAGE = 'Offline Root';
+const CHILD_PAGE = 'Offline Child';
 const ITEM_TITLE = 'Offline item survives restart';
 const PAGE_NAME = 'Offline Page';
 const PAGE_SENTENCE = 'Personal pages work with no account.';
+const TYPED_PAGE = 'Offline Typed';
+const TYPED_SENTENCE = 'This personal page keeps its words when it gets a type.';
 
 function typeYaml(type: string, name: string, plural: string, sharing: 'personal' | 'team', prefix: string): string {
   return `type: ${type}
@@ -89,9 +94,10 @@ function personalSidebar(page: Page): Locator {
   return page.locator('[data-testid="collab-sidebar-personal"]:visible');
 }
 
-function folderRow(page: Page): Locator {
-  return personalSidebar(page).locator('button.file-tree-directory:not([data-testid="collab-tree-type-row"])', {
-    hasText: FOLDER_NAME,
+/** A page row (not an item row); new pages may carry a `.md` suffix. */
+function namedPageRow(page: Page, name: string): Locator {
+  return personalSidebar(page).locator('.file-tree-file:not([data-testid="collab-tree-item-row"])', {
+    has: page.locator('.file-tree-name', { hasText: new RegExp(`^${name}(\\.md)?$`) }),
   });
 }
 
@@ -104,7 +110,11 @@ function itemRow(page: Page): Locator {
 }
 
 function pageRow(page: Page): Locator {
-  return personalSidebar(page).locator('.file-tree-file', { hasText: PAGE_NAME });
+  return namedPageRow(page, PAGE_NAME);
+}
+
+function typedItemRow(page: Page): Locator {
+  return personalSidebar(page).locator('[data-testid="collab-tree-item-row"]', { hasText: TYPED_PAGE });
 }
 
 function personalPageTab(page: Page): Locator {
@@ -120,8 +130,33 @@ async function openPagesMode(page: Page): Promise<void> {
   await expect(personalSidebar(page)).toBeVisible({ timeout: 15_000 });
 }
 
+/**
+ * Close the app, killing it if quit has not finished in 20s: a quit that
+ * stalls after the database worker closes would otherwise hold the run until
+ * the test timeout and hide the result.
+ */
+async function closeApp(app: ElectronApplication | undefined): Promise<void> {
+  if (!app) return;
+  const closed = app.close().then(() => true, () => true);
+  const timedOut = new Promise<false>((resolve) => setTimeout(() => resolve(false), 20_000));
+  if (!(await Promise.race([closed, timedOut]))) {
+    log('app.close() did not finish in 20s; killing the app process');
+    app.process().kill('SIGKILL');
+  }
+}
+
+/** How far `child`'s name sits right of `parent`'s: positive when nested under it. */
+async function indentPast(parent: Locator, child: Locator): Promise<number> {
+  const [parentBox, childBox] = await Promise.all([
+    parent.locator('.file-tree-name').boundingBox(),
+    child.locator('.file-tree-name').boundingBox(),
+  ]);
+  return (childBox?.x ?? 0) - (parentBox?.x ?? 0);
+}
+
 /** Expands a collapsed tree row via its chevron, which never opens a tab. */
 async function ensureExpanded(row: Locator): Promise<void> {
+  await expect(row).toBeVisible({ timeout: 10_000 });
   const expand = row.locator('[aria-label="Expand"]');
   if (await expand.count()) {
     await expand.click();
@@ -132,7 +167,7 @@ async function ensureExpanded(row: Locator): Promise<void> {
   if (await closedIcon.count()) await row.click();
 }
 
-test('signed-out personal pages: folder, placed type, item and page survive a relaunch', async ({}, testInfo) => {
+test('signed-out personal page tree: nesting, placed type, moved item, page text and set type survive a relaunch', async ({}, testInfo) => {
   test.setTimeout(180_000);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pages-personal-offline-'));
   const workspace = path.join(root, 'workspace');
@@ -192,26 +227,63 @@ test('signed-out personal pages: folder, placed type, item and page survive a re
       log('step 1 ok: Pages button visible, Personal section shown, team note shown, no error toast, no scope error');
     });
 
-    await test.step('create a personal folder from the title-bar menu', async () => {
-      await page.getByTestId('window-top-bar-create-left-menu-button').click();
-      const menu = page.getByTestId('window-top-bar-create-left-menu');
-      await expect(menu).toBeVisible();
-      await expect(menu).toContainText('Personal');
-      await menu.getByRole('menuitem', { name: 'New folder' }).click();
+    /** Title-bar "+" creates a root page; "New page inside" creates a child. */
+    const createPage = async (name: string, parent?: string) => {
+      if (parent) {
+        await namedPageRow(page, parent).click({ button: 'right' });
+        await page.locator('.collab-page-new-inside').click();
+      } else {
+        await page.getByTestId('window-top-bar-create-left').click();
+      }
       const dialog = page.getByTestId('collab-create-dialog');
       await expect(dialog).toBeVisible();
-      await dialog.getByTestId('collab-create-name-input').fill(FOLDER_NAME);
+      if (!parent) {
+        const root = dialog.getByTestId('collab-create-location-option-root');
+        if (await root.count()) await root.click();
+      }
+      await dialog.getByTestId('collab-create-name-input').fill(name);
       await dialog.locator('.collab-create-confirm').click();
       await expect(dialog).toHaveCount(0);
-      await expect(folderRow(page)).toBeVisible({ timeout: 10_000 });
-      log('step 2 ok: personal folder row visible');
+      if (parent) await ensureExpanded(namedPageRow(page, parent));
+      await expect(namedPageRow(page, name)).toBeVisible({ timeout: 10_000 });
+    };
+
+    /** Type into the open personal page tab and wait until the body is stored. */
+    const writePageBody = async (sentence: string): Promise<string> => {
+      const tab = personalPageTab(page);
+      await expect(tab).toBeVisible({ timeout: 10_000 });
+      const id = (await tab.getAttribute('data-document-id')) ?? '';
+      expect(id).not.toBe('');
+      const editor = tab.locator(selectors.contentEditable).first();
+      await expect(editor).toBeVisible({ timeout: 10_000 });
+      await editor.click();
+      await page.keyboard.type(sentence);
+      await expect(editor).toContainText(sentence);
+      await expect
+        .poll(
+          async () =>
+            ((await page.evaluate(
+              ([ws, docId]) => window.electronAPI.invoke('personal-pages:get-body', ws, docId),
+              [workspace, id] as const,
+            )) as { content?: string } | null)?.content ?? '',
+          { timeout: 10_000 },
+        )
+        .toContain(sentence);
+      return id;
+    };
+
+    await test.step('create a root page and a page inside it', async () => {
+      await createPage(ROOT_PAGE);
+      await createPage(CHILD_PAGE, ROOT_PAGE);
+      log('step 2 ok: root page and nested child page visible');
     });
 
-    await test.step('place the personal type under the folder; the team type is not offered', async () => {
-      await folderRow(page).click({ button: 'right' });
-      const placeAction = page.locator('.collab-place-type-action');
-      await expect(placeAction).toBeEnabled({ timeout: 5_000 });
-      await placeAction.click();
+    await test.step('place the personal type and drag it under the root page; the team type is not offered', async () => {
+      const tree = personalSidebar(page).locator('.session-history-search + div');
+      await expect(tree).toBeVisible();
+      const box = await tree.boundingBox();
+      if (!box) throw new Error('Personal tree has no box');
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height - 12, { button: 'right' });
       const menu = page.locator('.collab-place-type-menu');
       await expect(menu).toBeVisible();
       const options = await menu.locator('.collab-place-type-option').allInnerTexts();
@@ -219,12 +291,15 @@ test('signed-out personal pages: folder, placed type, item and page survive a re
       await expect(menu.locator('.collab-place-type-option', { hasText: PERSONAL_TYPE_PLURAL })).toHaveCount(1);
       await expect(menu.locator('.collab-place-type-option', { hasText: TEAM_TYPE_PLURAL })).toHaveCount(0);
       await menu.locator('.collab-place-type-option', { hasText: PERSONAL_TYPE_PLURAL }).click();
-      await ensureExpanded(folderRow(page));
       await expect(typeRow(page)).toBeVisible({ timeout: 10_000 });
-      log('step 3 ok: personal type row visible under the folder; team type absent from the menu');
+      await typeRow(page).dragTo(namedPageRow(page, ROOT_PAGE));
+      await ensureExpanded(namedPageRow(page, ROOT_PAGE));
+      // Under the root page, the type row is indented past the root row.
+      await expect.poll(() => indentPast(namedPageRow(page, ROOT_PAGE), typeRow(page)), { timeout: 10_000 }).toBeGreaterThan(4);
+      log('step 3 ok: personal type placed and moved under the root page; team type absent from the menu');
     });
 
-    await test.step('create an item of the personal type and see it under the type', async () => {
+    await test.step('create an item of the personal type and move it under the child page', async () => {
       await page.keyboard.press('ControlOrMeta+Shift+I');
       const search = page.locator(selectors.trackerQuickCreateTypeSearch);
       await expect(search).toBeVisible();
@@ -237,79 +312,95 @@ test('signed-out personal pages: folder, placed type, item and page survive a re
       await openPagesMode(page);
       await ensureExpanded(typeRow(page));
       await expect(itemRow(page)).toBeVisible({ timeout: 10_000 });
-      log('step 4 ok: item row visible under the personal type');
+      log('step 4 item row visible under the personal type');
+
+      await itemRow(page).click({ button: 'right' });
+      await page.locator('.collab-item-move-to').click();
+      const moveDialog = page.locator('.collab-page-move-dialog');
+      await expect(moveDialog).toBeVisible();
+      await moveDialog.locator('.collab-page-move-option', { hasText: CHILD_PAGE }).click();
+      await moveDialog.locator('.collab-page-move-confirm').click();
+      await expect(moveDialog).toHaveCount(0);
+      await ensureExpanded(namedPageRow(page, CHILD_PAGE));
+      await expect(itemRow(page)).toHaveCount(1);
+      await expect(itemRow(page)).toBeVisible({ timeout: 10_000 });
+      await expect.poll(() => indentPast(namedPageRow(page, CHILD_PAGE), itemRow(page)), { timeout: 10_000 }).toBeGreaterThan(4);
+      log('step 4 ok: item moved under the child page');
     });
 
     await test.step('create a personal page and type a sentence into its tab', async () => {
-      await page.getByTestId('window-top-bar-create-left').click();
-      const dialog = page.getByTestId('collab-create-dialog');
-      await expect(dialog).toBeVisible();
-      await dialog.getByTestId('collab-create-name-input').fill(PAGE_NAME);
-      await dialog.locator('.collab-create-confirm').click();
-      await expect(dialog).toHaveCount(0);
-      await expect(pageRow(page)).toBeVisible({ timeout: 10_000 });
+      await createPage(PAGE_NAME);
       if (!(await personalPageTab(page).isVisible())) {
         log('step 5 note: creating the page did not open it; opening it from the tree');
         await pageRow(page).click();
       }
-      const tab = personalPageTab(page);
-      await expect(tab).toBeVisible({ timeout: 10_000 });
-      documentId = (await tab.getAttribute('data-document-id')) ?? '';
-      expect(documentId).not.toBe('');
-      const editor = tab.locator(selectors.contentEditable).first();
-      await expect(editor).toBeVisible({ timeout: 10_000 });
-      await editor.click();
-      await page.keyboard.type(PAGE_SENTENCE);
-      await expect(editor).toContainText(PAGE_SENTENCE);
-      await expect
-        .poll(
-          async () =>
-            ((await page.evaluate(
-              ([ws, id]) => window.electronAPI.invoke('personal-pages:get-body', ws, id),
-              [workspace, documentId] as const,
-            )) as { content?: string } | null)?.content ?? '',
-          { timeout: 10_000 },
-        )
-        .toContain(PAGE_SENTENCE);
+      documentId = await writePageBody(PAGE_SENTENCE);
       log(`step 5 ok: personal page ${documentId} saved with the sentence (personal-pages:get-body)`);
+    });
+
+    await test.step('set type on a personal page with a body', async () => {
+      await createPage(TYPED_PAGE);
+      if (!(await personalPageTab(page).getAttribute('data-document-id').catch(() => null))) {
+        await namedPageRow(page, TYPED_PAGE).click();
+      }
+      await writePageBody(TYPED_SENTENCE);
+      await namedPageRow(page, TYPED_PAGE).click({ button: 'right' });
+      await page.locator('.collab-page-set-type').click();
+      const dialog = page.getByTestId('set-page-type-dialog');
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId('set-page-type-option-team-only-spec')).toHaveCount(0);
+      await dialog.getByTestId(`set-page-type-option-${PERSONAL_TYPE_ID}`).click();
+      await expect(dialog).toHaveCount(0, { timeout: 20_000 });
+      await expect(typedItemRow(page)).toBeVisible({ timeout: 10_000 });
+      await expect(namedPageRow(page, TYPED_PAGE)).toHaveCount(0);
+      const view = page.locator('[data-testid="tracker-page-view"]:visible');
+      await expect(view).toBeVisible({ timeout: 10_000 });
+      await expect(view).toContainText(TYPED_SENTENCE, { timeout: 10_000 });
+      log('step 6 ok: typed page replaced the page in place with the same body');
     });
 
     // Let tab persistence settle, then relaunch on the same user data and workspace.
     await page.waitForTimeout(1_000);
-    await app?.close();
+    await closeApp(app);
     app = undefined;
     log('closed run 1');
 
     page = await launch('run2');
 
-    await test.step('after relaunch the folder, type, item, page, text and tab are back', async () => {
+    await test.step('after relaunch the tree, item, page text, tab and typed page are back', async () => {
       await openPagesMode(page);
       await expect(page.locator('.error-toast--error')).toHaveCount(0);
-      await expect(folderRow(page)).toBeVisible({ timeout: 15_000 });
-      log('step 6 folder present');
-      await ensureExpanded(folderRow(page));
+      await ensureExpanded(namedPageRow(page, ROOT_PAGE));
+      await expect(namedPageRow(page, CHILD_PAGE)).toBeVisible({ timeout: 10_000 });
+      log('step 7 root and child pages present');
       await expect(typeRow(page)).toBeVisible({ timeout: 10_000 });
-      log('step 6 placed type present');
-      await ensureExpanded(typeRow(page));
+      log('step 7 placed type present under the root page');
+      await ensureExpanded(namedPageRow(page, CHILD_PAGE));
       await expect(itemRow(page)).toBeVisible({ timeout: 10_000 });
-      log('step 6 item present');
+      expect(await indentPast(namedPageRow(page, ROOT_PAGE), typeRow(page))).toBeGreaterThan(4);
+      expect(await indentPast(namedPageRow(page, CHILD_PAGE), itemRow(page))).toBeGreaterThan(4);
+      log('step 7 moved item present under the child page');
+      await expect(typedItemRow(page)).toBeVisible({ timeout: 10_000 });
+      await expect(namedPageRow(page, TYPED_PAGE)).toHaveCount(0);
+      log('step 7 typed page present as an item row');
       await expect(pageRow(page)).toBeVisible({ timeout: 10_000 });
-      log('step 6 page row present');
       const restoredTab = page.locator(`.tab[data-filename]:visible`, { hasText: PAGE_NAME });
       await expect(restoredTab).toHaveCount(1, { timeout: 15_000 });
-      log('step 6 page tab restored');
+      log('step 7 page tab restored');
       const tab = page.locator(`[data-testid="personal-page-tab"][data-document-id="${documentId}"]:visible`);
       if (!(await tab.isVisible())) await restoredTab.click();
       await expect(tab).toBeVisible({ timeout: 10_000 });
       await expect(tab.locator(selectors.contentEditable).first()).toContainText(PAGE_SENTENCE, { timeout: 10_000 });
+      await typedItemRow(page).click();
+      await expect(page.locator('[data-testid="tracker-page-view"]:visible')).toContainText(TYPED_SENTENCE, { timeout: 10_000 });
       expect(consoleLines.filter((line) => line.includes(SCOPE_ERROR))).toEqual([]);
-      log('step 6 ok: restored page tab shows the sentence; no scope error in either run');
+      log('step 7 ok: page text and typed page body restored; no scope error in either run');
     });
   } catch (error) {
     console.log(`[P2-E] renderer console (last 80 relevant lines):\n${consoleLines.slice(-80).join('\n')}`);
     throw error;
   } finally {
-    await app?.close().catch(() => undefined);
+    await closeApp(app);
     await fs.rm(root, { recursive: true, force: true }).catch(() => undefined);
   }
 });

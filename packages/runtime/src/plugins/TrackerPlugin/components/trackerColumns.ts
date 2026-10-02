@@ -217,6 +217,9 @@ export function resolveColumnsForType(type: string): TrackerColumnDef[] {
       fieldToRole.set(fieldName, role as TrackerSchemaRole);
     }
   }
+  // An item's title is its `title` field unless a role says otherwise, so a
+  // type that declares no roles still gets a Title column.
+  if (!model.roles?.title && !fieldToRole.has('title')) fieldToRole.set('title', 'title');
 
   // Structural columns always present
   const columns: TrackerColumnDef[] = [...STRUCTURAL_COLUMNS];

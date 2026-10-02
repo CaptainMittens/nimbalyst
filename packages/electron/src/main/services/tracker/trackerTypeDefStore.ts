@@ -14,7 +14,14 @@
  * schema loading or `tracker_define_type`. The table may not exist yet on a
  * database that hasn't run the v12 migration, so callers tolerate errors.
  */
-import type { TrackerDataModel } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
+import {
+  declarationForResolvedModel,
+  encodeTrackerSchemaModelPayload,
+  globalRegistry,
+  TRACKER_SCHEMA_DECLARED_FORM_KEY,
+  type DerivedTrackerTypeDeclaration,
+  type TrackerDataModel,
+} from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { getDatabase } from '../../database/initialize';
 import { logger } from '../../utils/logger';
 import { appendActivity } from './trackerActivity';
@@ -70,14 +77,44 @@ async function readOwnership(
 /** Compare two stored/JSON models for semantic equality (key order ignored). */
 function sameModel(a: unknown, b: unknown): boolean {
   const parse = (v: unknown): unknown => {
-    if (typeof v !== 'string') return v;
+    if (typeof v !== 'string') return withoutDeclaredForm(v);
     try {
-      return JSON.parse(v);
+      return withoutDeclaredForm(JSON.parse(v));
     } catch {
       return v;
     }
   };
   return canonicalize(parse(a)) === canonicalize(parse(b));
+}
+
+/**
+ * A subtype's declaration rides beside its resolved model in the `model`
+ * column. It is bookkeeping for re-resolution, not schema content, so it never
+ * makes two rows differ.
+ */
+function withoutDeclaredForm(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const { [TRACKER_SCHEMA_DECLARED_FORM_KEY]: _declared, ...rest } = value as Record<string, unknown>;
+  return rest;
+}
+
+/**
+ * The `model` column for a resolved model: a subtype carries its declaration
+ * (the one already beside it, the one in force, or one recovered from the
+ * base), so restart registers the declaration and not this frozen copy.
+ */
+function storedModelJson(model: TrackerDataModel): string {
+  const { [TRACKER_SCHEMA_DECLARED_FORM_KEY]: carried, ...resolved } =
+    model as TrackerDataModel & Record<string, unknown>;
+  const resolvedModel = resolved as unknown as TrackerDataModel;
+  if (!resolvedModel.extends) return JSON.stringify(model);
+  const registered = globalRegistry.getDeclaredModel(resolvedModel.type);
+  const declared = declarationForResolvedModel(
+    resolvedModel,
+    (carried as DerivedTrackerTypeDeclaration | undefined)
+      ?? (registered?.extends === resolvedModel.extends ? registered : undefined),
+  );
+  return encodeTrackerSchemaModelPayload(resolvedModel, declared);
 }
 
 export interface MaterializeYamlOptions {
@@ -120,7 +157,7 @@ function schemaWithoutActivity(model: unknown): unknown {
     }
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return parsed;
-  const { activity: _activity, ...schema } = parsed as Record<string, unknown>;
+  const { activity: _activity, [TRACKER_SCHEMA_DECLARED_FORM_KEY]: _declared, ...schema } = parsed as Record<string, unknown>;
   return schema;
 }
 
@@ -219,7 +256,7 @@ export async function materializeYamlTrackerTypeDef(
                 synced_model = NULL,
                 deleted_at = NULL
           WHERE workspace = $1 AND type = $2`,
-        [workspace, model.type, JSON.stringify(attributedModel)],
+        [workspace, model.type, storedModelJson(attributedModel)],
       );
       return;
     }
@@ -260,7 +297,7 @@ export async function materializeYamlTrackerTypeDef(
       `UPDATE tracker_type_defs
           SET model = $3, updated = NOW(), sync_status = 'pending', deleted_at = NULL
         WHERE workspace = $1 AND type = $2`,
-      [workspace, model.type, JSON.stringify(attributedModel)],
+      [workspace, model.type, storedModelJson(attributedModel)],
     );
     requestTrackerSchemaFlush(workspace);
   } catch (err) {
@@ -321,7 +358,7 @@ export async function materializeTrackerTypeDef(
              source = EXCLUDED.source,
              updated = NOW(),
              deleted_at = NULL`,
-      [typeDefId(workspace, model.type), workspace, model.type, JSON.stringify(model), source],
+      [typeDefId(workspace, model.type), workspace, model.type, storedModelJson(model), source],
     );
     // A new row enters the outbox at 'local'; an existing row keeps its status,
     // so for it this is a no-op push.
@@ -508,7 +545,7 @@ export function classifyTrackerSchemaDrift(
     if (yaml && db) {
       let dbCanon: string;
       try {
-        dbCanon = canonicalize(JSON.parse(db.model));
+        dbCanon = canonicalize(withoutDeclaredForm(JSON.parse(db.model)));
       } catch {
         dbCanon = '';
       }

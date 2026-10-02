@@ -246,6 +246,25 @@ export async function handleTrackerDefineType(
   args: any,
   workspacePath: string | undefined,
 ): Promise<McpToolResult> {
+  const vocabularySummaries: string[] = [];
+  const result = await defineTrackerType(args, workspacePath, vocabularySummaries);
+  if (!result.isError || vocabularySummaries.length === 0) return result;
+  // Vocabulary is written before the type is checked, and is not rolled back.
+  // Without this the caller sees only the type error, retries, and is told the
+  // registry is "unchanged" by a call that never wrote anything.
+  const note = `\n\nAlready applied before this error:\n${vocabularySummaries.join('\n')}`;
+  return {
+    ...result,
+    content: result.content.map((part, index) =>
+      index === 0 && part.type === 'text' ? { ...part, text: `${part.text ?? ''}${note}` } : part),
+  };
+}
+
+async function defineTrackerType(
+  args: any,
+  workspacePath: string | undefined,
+  vocabularySummaries: string[],
+): Promise<McpToolResult> {
   try {
     if (!workspacePath) {
       return {
@@ -261,7 +280,6 @@ export async function handleTrackerDefineType(
     // Vocabulary first: a type declaring `predicate:` on a field needs the verb
     // to exist before the declaration below is checked against the registry,
     // and labels are validated against the predicates they name.
-    const vocabularySummaries: string[] = [];
     let appliedPredicates: PredicateDefinition[] | null = null;
     if (Array.isArray(args?.predicates) || Array.isArray(args?.removePredicates)) {
       const outcome = await applyPredicateRegistryArgs(workspacePath, args);

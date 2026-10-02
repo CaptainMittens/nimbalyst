@@ -27,9 +27,11 @@ import {
   getCollabParentPath,
   joinCollabPath,
   normalizeCollabPath,
+  pageDisplayName,
   resolveCollabCreateTargetFolderId,
   type CollabTreeItemNode,
   type CollabTreeNode,
+  type CollabTreeTypeNode,
   type CollabTypeTreeResolver,
 } from '@nimbalyst/collab-client/docs';
 import {
@@ -39,6 +41,7 @@ import {
   getPlaceableTypes,
   UNDER_TYPE,
   type CollabPageMoveTarget,
+  type CollabRowDrop,
 } from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from './primitives/useFloatingMenu';
 
@@ -55,6 +58,7 @@ type PageTreeBuilder = Awaited<ReturnType<typeof loadPageTreeBuilder>>;
 const CollabPageMenuHead = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageMenuHead })));
 const CollabPageDeleteEntry = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageDeleteEntry })));
 const CollabItemMenu = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabItemMenu })));
+const CollabMenuButton = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabMenuButton })));
 const CollabPageMoveDialog = React.lazy(() => import('./CollabPageMoveDialog'));
 import { CollabSearchInput } from './primitives/CollabSearchInput';
 import { DocUnreadDot } from './DocUnreadDot';
@@ -143,6 +147,12 @@ export interface CollabSidebarProps {
    */
   sectionTitle?: string;
   /**
+   * Section only: with `onToggleCollapsed` the title row becomes a toggle, and
+   * a collapsed section renders that row alone (no filters, search or tree).
+   */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+  /**
    * Page tree only: turn a plain page into a typed page in place. Without it
    * the menu's "Set type" entry is shown disabled.
    */
@@ -173,6 +183,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   registerCreateMenu,
   typeResolver,
   sectionTitle,
+  collapsed = false,
+  onToggleCollapsed,
   onSetPageType,
 }) => {
   const { scope, host, session, controller } = useCollabDocsUI();
@@ -215,8 +227,13 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   const [draggedType, setDraggedType] = useState<string | null>(null);
   const [draggedItem, setDraggedItem] = useState<CollabTreeItemNode | null>(null);
   const [moveTarget, setMoveTarget] = useState<
-    { kind: 'page'; document: SharedDocument } | { kind: 'item'; node: CollabTreeItemNode } | null
+    | { kind: 'page'; document: SharedDocument }
+    | { kind: 'item'; node: CollabTreeItemNode }
+    | { kind: 'type'; node: CollabTreeTypeNode }
+    | null
   >(null);
+  // Edge (before/after) drop marker for page-tree rows; a middle drop uses `dropTargetPath`.
+  const [dropIndicator, setDropIndicator] = useState<{ nodeId: string; zone: 'before' | 'after' } | null>(null);
   const documentTypesRevision = useSyncExternalStore(
     (listener) => host.documents?.onDocumentTypesChanged?.(listener) ?? (() => undefined),
     () => host.documents?.documentTypes() ?? [],
@@ -318,6 +335,26 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     },
     [itemPlacements, pageTree, pageTreeBuilder, sharedDocuments, sharedFolders, typePlacements, typeResolver, typeTreeInput]
   );
+
+  // Placed subtypes shown inside their base type (see `attachTypeNodes`).
+  const nestedTypeIds = useMemo(() => {
+    const ids = new Set<string>();
+    const walk = (nodes: CollabTreeNode[]) => {
+      for (const node of nodes) {
+        if (node.type === 'type') node.children.forEach((child) => { if (child.type === 'type') ids.add(child.typeId); });
+        if ('children' in node && node.children) walk(node.children);
+      }
+    };
+    walk(tree);
+    return ids;
+  }, [tree]);
+
+  // Move dialog destinations, named the way the tree shows them.
+  const movePageOptions = useMemo(() => {
+    if (!pageTree) return sharedFolders;
+    const typeById = new Map(sharedDocuments.map((document) => [document.documentId, document.documentType]));
+    return sharedFolders.map((page) => ({ ...page, name: pageDisplayName(page.name, typeById.get(page.folderId)) }));
+  }, [pageTree, sharedDocuments, sharedFolders]);
 
   // Docs visible under the active segmented filter (All / Favorites / Updated).
   const visibleDocuments = useMemo(() => {
@@ -605,7 +642,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         if (!canMutateMetadata('delete this page')) return;
         const pages = `${childCount} child page${childCount === 1 ? '' : 's'}`;
         // Counts the prose of types placed inside it, which goes too.
-        if (window.confirm(`Delete "${contextMenu.node.name}" and its ${pages}? Types and typed pages inside move back to their usual place. This cannot be undone.`)) {
+        if (window.confirm(`Delete "${pageDisplayName(contextMenu.node.name, document.documentType)}" and its ${pages}? Types and typed pages inside move back to their usual place. This cannot be undone.`)) {
           session.removePage(document.documentId);
           host.trackEvent?.('collab_folder_deleted', {
             actorType: 'user',
@@ -1141,14 +1178,101 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     void moveDraggedDocument(pageId, pagePath);
   }, [draggedItem, draggedType, moveDraggedDocument, moveDraggedType, moveItemTo]);
 
+  // Page tree rows: an edge drop inserts beside the row, the middle drops inside.
+  const planRowDrop = useCallback((nodeId: string, event: React.DragEvent) => {
+    if (!pageTreeBuilder) return null;
+    const dragged = draggedType ? { kind: 'type' as const, typeId: draggedType }
+      : draggedItem ? { kind: 'item' as const, itemId: draggedItem.itemId, typeId: draggedItem.typeId }
+        : draggedDocument ? { kind: 'page' as const, documentId: draggedDocument.documentId }
+          : null;
+    if (!dragged) return null;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const zone = pageTreeBuilder.pageTreeDropZone(event.clientY - rect.top, rect.height);
+    const plan = pageTreeBuilder.planPageTreeDrop(tree, dragged, nodeId, zone);
+    // A page drop also needs a free name at its destination.
+    if (plan?.kind === 'page' && !canDropOnPage(plan.parentId, plan.parentId ? folderPathById.get(plan.parentId) ?? null : null)) return null;
+    return plan ? { plan, zone } : null;
+  }, [canDropOnPage, draggedDocument, draggedItem, draggedType, folderPathById, pageTreeBuilder, tree]);
+
+  const clearRowDrag = useCallback(() => {
+    setDraggedType(null);
+    setDraggedItem(null);
+    setDraggedDocument(null);
+    setDropTargetPath(null);
+    setDropIndicator(null);
+  }, []);
+
+  const rowDrop = useCallback((node: CollabTreeNode): CollabRowDrop => ({
+    onDragOver: (event) => {
+      const planned = planRowDrop(node.id, event);
+      if (!planned) {
+        if (dropIndicator?.nodeId === node.id) setDropIndicator(null);
+        if (dropTargetPath === node.path) setDropTargetPath(null);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = 'move';
+      if (planned.zone === 'inside') {
+        if (dropIndicator) setDropIndicator(null);
+        if (dropTargetPath !== node.path) setDropTargetPath(node.path);
+      } else {
+        if (dropTargetPath) setDropTargetPath(null);
+        if (dropIndicator?.nodeId !== node.id || dropIndicator.zone !== planned.zone) {
+          setDropIndicator({ nodeId: node.id, zone: planned.zone });
+        }
+      }
+    },
+    onDragLeave: (event) => {
+      event.stopPropagation();
+      const relatedTarget = event.relatedTarget as Node | null;
+      if (relatedTarget && event.currentTarget.contains(relatedTarget)) return;
+      if (dropTargetPath === node.path) setDropTargetPath(null);
+      if (dropIndicator?.nodeId === node.id) setDropIndicator(null);
+    },
+    onDrop: (event) => {
+      const planned = planRowDrop(node.id, event);
+      if (!planned) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const { plan } = planned;
+      if (plan.kind === 'page') {
+        const path = plan.parentId ? folderPathById.get(plan.parentId) ?? null : null;
+        setDropIndicator(null);
+        dropOnPage(plan.parentId, path);
+        return;
+      }
+      clearRowDrag();
+      if (plan.kind === 'unplace-item') {
+        moveItemTo(plan.itemId, UNDER_TYPE);
+      } else if (plan.kind === 'item') {
+        if (!canMutateMetadata('move this page')) return;
+        // Re-spaced siblings first, so the moved row never shares a key with one.
+        for (const write of [...(plan.renumber ?? []), plan]) {
+          void session.setItemPlacement(write.itemId, write.parentId, write.sortOrder).then((result) => {
+            if (!result.ok) reportTypePlacementError(new Error(result.error));
+          });
+        }
+      } else if (canMutateMetadata('move this type')) {
+        for (const write of [...(plan.renumber ?? []), plan]) {
+          session.moveTypePlacement(write.typeId, write.parentFolderId, write.sortOrder).catch(reportTypePlacementError);
+        }
+      }
+      const parentId = plan.kind === 'type' ? plan.parentFolderId : plan.kind === 'item' ? plan.parentId : null;
+      const parentPath = parentId ? folderPathById.get(parentId) : null;
+      if (parentPath && planned.zone === 'inside') setExpandedFolders((current) => new Set(current).add(parentPath));
+    },
+    className: dropIndicator?.nodeId === node.id
+      ? ` collab-tree-drop-${dropIndicator.zone}`
+      : dropTargetPath === node.path ? ' drag-over' : '',
+  }), [canMutateMetadata, clearRowDrag, dropIndicator, dropOnPage, dropTargetPath, folderPathById, moveItemTo, planRowDrop, reportTypePlacementError, session]);
+
   const itemRowActions = useMemo(() => (pageTree ? {
     onContextMenu: (event: React.MouseEvent, node: CollabTreeItemNode) => handleContextMenu(event, node),
     onDragStart: setDraggedItem,
-    onDragEnd: () => {
-      setDraggedItem(null);
-      setDropTargetPath(null);
-    },
-  } : undefined), [handleContextMenu, pageTree]);
+    onDragEnd: clearRowDrag,
+    rowDrop,
+  } : undefined), [clearRowDrag, handleContextMenu, pageTree, rowDrop]);
 
   const renderTree = useCallback((nodes: CollabTreeNode[], depth = 0): React.ReactNode => {
     return nodes.map((node) => {
@@ -1180,10 +1304,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             onOpenItem={(trackerId) => host.openArtifact({ kind: 'tracker', scope, trackerId }, 'sidebar')}
             onContextMenu={(event) => handleContextMenu(event, node)}
             onDragStart={setDraggedType}
-            onDragEnd={() => {
-              setDraggedType(null);
-              setDropTargetPath(null);
-            }}
+            onDragEnd={clearRowDrag}
             renderSubtypes={(subtypes) => renderTree(subtypes, depth + 1)}
             itemActions={itemRowActions}
           />
@@ -1314,36 +1435,15 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       const isFavorite = favoriteSet.has(node.document.documentId);
       const typePresentation = resolveSharedDocumentTypePresentation(node.document, documentTypeDescriptors);
       // Page tree: a page with children expands like a folder and takes drops.
-      const pageId = node.document.documentId;
       const hasChildren = (node.children?.length ?? 0) > 0;
       const isPageExpanded = hasChildren && (hasActiveSearch || expandedFolders.has(node.path));
-      const pageDropProps = pageTree ? {
-        onDragOver: (event: React.DragEvent) => {
-          if (!canDropOnPage(pageId, node.path)) return;
-          event.preventDefault();
-          event.stopPropagation();
-          event.dataTransfer.dropEffect = 'move';
-          if (dropTargetPath !== node.path) setDropTargetPath(node.path);
-        },
-        onDragLeave: (event: React.DragEvent) => {
-          event.stopPropagation();
-          const relatedTarget = event.relatedTarget as Node | null;
-          if (relatedTarget && event.currentTarget.contains(relatedTarget)) return;
-          if (dropTargetPath === node.path) setDropTargetPath(null);
-        },
-        onDrop: (event: React.DragEvent) => {
-          if (!canDropOnPage(pageId, node.path)) return;
-          event.preventDefault();
-          event.stopPropagation();
-          dropOnPage(pageId, node.path);
-        },
-      } : {};
+      const { className: dropClassName = '', ...pageDropProps } = pageTree ? rowDrop(node) : {};
 
       const row = (
         <SharedDocumentLink
           href={host.surface === 'web_console' ? host.artifactUrl?.({ kind: 'document', scope, documentId: node.document.documentId, teamProjectId: node.document.teamProjectId }) : null}
           key={node.id}
-          className={`group w-full flex items-center text-left file-tree-file${isActive ? ' active' : ''}${pageTree && dropTargetPath === node.path ? ' drag-over' : ''}`}
+          className={`group w-full flex items-center text-left file-tree-file${isActive ? ' active' : ''}${dropClassName}`}
           style={{ paddingLeft: indent }}
           {...pageDropProps}
           onClick={() => {
@@ -1381,10 +1481,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               name: node.name,
             });
           }}
-          onDragEnd={() => {
-            setDraggedDocument(null);
-            setDropTargetPath(null);
-          }}
+          onDragEnd={clearRowDrag}
           title={node.path}
         >
           {hasChildren ? (
@@ -1404,7 +1501,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           <span className="file-tree-icon">
             <MaterialSymbol icon={typePresentation.icon} size={16} />
           </span>
-          <span className="file-tree-name">{node.name}</span>
+          <span className="file-tree-name">{pageTree ? pageDisplayName(node.name, node.document.documentType) : node.name}</span>
           {personalStateAvailable && (
             <span
               role="button"
@@ -1442,8 +1539,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   }, [
     pageTree,
     itemRowActions,
-    canDropOnPage,
-    dropOnPage,
+    rowDrop,
+    clearRowDrag,
     activeDocumentId,
     canDropDocument,
     canDropFolder,
@@ -1520,25 +1617,54 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     </>
   );
 
+  const sectionLabel = sectionTitle ? (
+    <>
+      <h3 className="collab-sidebar-section-title m-0 text-[11px] font-semibold uppercase tracking-wide text-[var(--nim-text-muted)]">
+        {sectionTitle}
+      </h3>
+      <span className="text-[11px] text-[var(--nim-text-faint)] whitespace-nowrap">
+        <TeamSyncStatusLabel status={teamSyncStatus} personal={personal} />
+      </span>
+    </>
+  ) : null;
+  const sectionHeader = sectionTitle ? (
+    <div
+      className="collab-sidebar-section-header flex items-center gap-2 px-3 pt-2 pb-1.5 border-b border-[var(--nim-border)] shrink-0"
+      data-testid={`collab-sidebar-section-${personal ? 'personal' : 'team'}`}
+    >
+      {onToggleCollapsed ? (
+        <button
+          type="button"
+          className="collab-sidebar-section-toggle flex items-center gap-2 min-w-0 -ml-1 pl-0.5 pr-1 py-0 bg-transparent border-none rounded cursor-pointer hover:bg-[var(--nim-bg-hover)]"
+          aria-expanded={!collapsed}
+          onClick={onToggleCollapsed}
+        >
+          <MaterialSymbol icon={collapsed ? 'chevron_right' : 'expand_more'} size={16} className="text-[var(--nim-text-faint)]" />
+          {sectionLabel}
+        </button>
+      ) : sectionLabel}
+      {/* Collapsed drops the actions too: the overflow menu renders with the tree. */}
+      {!collapsed && <div className="ml-auto flex items-center gap-1">{headerActionButtons}</div>}
+    </div>
+  ) : null;
+
+  if (sectionHeader && collapsed) {
+    return (
+      <div
+        className="collab-sidebar collab-sidebar-collapsed w-full flex flex-col bg-nim-secondary border-r border-nim"
+        data-testid={personal ? 'collab-sidebar-personal' : 'collab-sidebar'}
+      >
+        {sectionHeader}
+      </div>
+    );
+  }
+
   return (
     <div
       className="collab-sidebar w-full h-full flex flex-col bg-nim-secondary border-r border-nim overflow-hidden"
       data-testid={personal ? 'collab-sidebar-personal' : 'collab-sidebar'}
     >
-      {sectionTitle ? (
-        <div
-          className="collab-sidebar-section-header flex items-center gap-2 px-3 pt-2 pb-1.5 border-b border-[var(--nim-border)] shrink-0"
-          data-testid={`collab-sidebar-section-${personal ? 'personal' : 'team'}`}
-        >
-          <h3 className="collab-sidebar-section-title m-0 text-[11px] font-semibold uppercase tracking-wide text-[var(--nim-text-muted)]">
-            {sectionTitle}
-          </h3>
-          <span className="text-[11px] text-[var(--nim-text-faint)] whitespace-nowrap">
-            <TeamSyncStatusLabel status={teamSyncStatus} personal={personal} />
-          </span>
-          <div className="ml-auto flex items-center gap-1">{headerActionButtons}</div>
-        </div>
-      ) : (
+      {sectionHeader ?? (
         <ScopeSummaryHeader
           scopeKey={scope.scopeKey}
           scopeName={scopeName}
@@ -1872,6 +1998,21 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               </button>
             </>
           ) : contextMenu.node.type === 'type' ? (
+            <>
+            {pageTree && (
+              <CollabMenuButton
+                className="collab-type-move-to"
+                icon="drive_file_move"
+                label="Move to..."
+                // A subtype renders inside its placed base wherever it is placed.
+                disabled={nestedTypeIds.has(contextMenu.node.typeId)}
+                title={nestedTypeIds.has(contextMenu.node.typeId) ? 'Shown inside the type it extends' : undefined}
+                onClick={() => {
+                  if (contextMenu.node.type === 'type') setMoveTarget({ kind: 'type', node: contextMenu.node });
+                  setContextMenu(null);
+                }}
+              />
+            )}
             <button
               type="button"
               className="collab-remove-type-placement w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
@@ -1886,6 +2027,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               <MaterialSymbol icon="playlist_remove" size={18} />
               <span>Remove from tree</span>
             </button>
+            </>
           ) : contextMenu.node.type === 'item' ? (
             <CollabItemMenu
               placed={contextMenu.node.placed === true}
@@ -1911,6 +2053,10 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                   onSetType={onSetPageType ? () => {
                     setContextMenu(null);
                     onSetPageType(contextDocument);
+                  } : undefined}
+                  onPlaceType={typeResolver ? () => {
+                    setPlaceTypeMenu({ x: contextMenu.x, y: contextMenu.y, parentFolderId: contextDocument.documentId });
+                    setContextMenu(null);
                   } : undefined}
                   onRename={() => {
                     setDocumentToRename(contextDocument);
@@ -2108,15 +2254,17 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         <React.Suspense fallback={null}>
           <CollabPageMoveDialog
             name={moveTarget.kind === 'page'
-              ? getCollabNodeName(moveTarget.document.title) || moveTarget.document.title
+              ? pageDisplayName(getCollabNodeName(moveTarget.document.title) || moveTarget.document.title, moveTarget.document.documentType)
               : moveTarget.node.name}
-            pages={sharedFolders}
+            pages={movePageOptions}
             excludedIds={new Set(moveTarget.kind === 'page'
               ? collectPageSubtree(sharedDocuments, moveTarget.document.documentId)
               : [])}
             current={moveTarget.kind === 'page'
               ? (moveTarget.document.parentFolderId ?? null)
-              : itemPlacementParent(moveTarget.node.itemId)}
+              : moveTarget.kind === 'type'
+                ? (moveTarget.node.placement.parentFolderId ?? null)
+                : itemPlacementParent(moveTarget.node.itemId)}
             rootLabel={personal ? 'Personal' : 'Team'}
             underTypeLabel={moveTarget.kind === 'item'
               ? `Under ${typeResolver?.typeName(moveTarget.node.typeId) ?? 'its type'}`
@@ -2126,6 +2274,13 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               setMoveTarget(null);
               if (current.kind === 'item') {
                 moveItemTo(current.node.itemId, target);
+                return;
+              }
+              if (current.kind === 'type') {
+                if (target === UNDER_TYPE || !canMutateMetadata('move this type')) return;
+                session.moveTypePlacement(current.node.typeId, target).catch(reportTypePlacementError);
+                const parentPath = target ? folderPathById.get(target) : null;
+                if (parentPath) setExpandedFolders((folders) => new Set(folders).add(parentPath));
                 return;
               }
               const { document } = current;
@@ -2186,7 +2341,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         title="Rename Shared Document"
         placeholder="Document name"
         defaultValue={documentRenameParts.baseName}
-        suffix={documentRenameParts.suffix}
+        // A markdown page reads without ".md"; the save still re-applies it.
+        suffix={pageTree && documentToRename?.documentType === 'markdown' ? undefined : documentRenameParts.suffix}
         confirmLabel="Rename"
         onConfirm={handleRenameDocument}
         onCancel={() => {

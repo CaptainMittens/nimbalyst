@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 <!-- New features go here -->
-- Pages mode: pages nest inside pages, and a tracker type placed in the tree opens as a page with its own prose above a table of every item of that type. Typed pages open as document pages with a header of single-valued fields, can be moved under any page, and a plain page can be given a type in place. Hovering a link in a page offers the named relations allowed between the two pages' types, and a Links section at the bottom lists each relation on one line, incoming ones under their inverse name, with the sentence that made the link.
+- Pages mode: pages nest inside pages, and a tracker type placed in the tree opens as a page with its own prose above a table of every item of that type. Typed pages open as document pages with a header of single-valued fields, can be moved under any page or reordered by drag, and a plain page can be given a type in place. A tracker type can extend another type and nests inside it. The Team and Personal sections collapse. Hovering a link in a page offers the named relations allowed between the two pages' types, and a Links section at the bottom lists each relation on one line, incoming ones under their inverse name, with the sentence that made the link.
 - Pages mode has a Personal section that works with no account or team: personal pages and tracker types are stored on this device.
 
 ### Changed

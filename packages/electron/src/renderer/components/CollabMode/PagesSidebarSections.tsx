@@ -17,6 +17,7 @@ import { useCollabTypeResolver } from './useCollabTypeResolver';
 import { SetPageTypeDialog } from './SetPageTypeDialog';
 import type { PageTypeLane } from './setPageType';
 import { useSetPageType } from './useSetPageType';
+import { usePagesSidebarCollapse } from './usePagesSidebarCollapse';
 
 interface PagesSidebarSectionsProps {
   workspacePath: string;
@@ -45,6 +46,9 @@ export function PagesSidebarSections({
   const personalTypeResolver = useCollabTypeResolver('personal');
   const setPageType = useSetPageType(workspacePath, teamScope);
   const [typingPage, setTypingPage] = useState<{ lane: PageTypeLane; page: SharedDocument } | null>(null);
+  const { collapsed, toggle } = usePagesSidebarCollapse(workspacePath, teamScope !== null);
+  // Open sections share the height; a collapsed one keeps only its header row.
+  const sectionClass = (isCollapsed: boolean) => (isCollapsed ? 'shrink-0' : 'flex-1 min-h-0');
 
   const pickType = (typeId: string) => {
     if (!typingPage) return;
@@ -60,7 +64,7 @@ export function PagesSidebarSections({
   return (
     <div className="pages-sidebar-sections flex flex-col h-full min-h-0">
       {teamScope ? (
-        <div className="pages-sidebar-team-section flex-1 min-h-0">
+        <div className={`pages-sidebar-team-section ${sectionClass(collapsed.team)}`}>
           {/* No Feedback action here any more: the request list is an
               organization surface, not a shared-docs one, and it moved beside
               the Inbox in Org mode (#3704). A document's own feedback still
@@ -73,6 +77,8 @@ export function PagesSidebarSections({
               homeActive={homeActive}
               registerCreateMenu={registerTeamCreateMenu}
               typeResolver={teamTypeResolver}
+              collapsed={collapsed.team}
+              onToggleCollapsed={() => toggle('team')}
               onSetPageType={(page) => setTypingPage({ lane: 'team', page })}
             />
           </ElectronCollabDocsUIRoot>
@@ -85,13 +91,15 @@ export function PagesSidebarSections({
           Sign in and share this project to see team pages
         </div>
       )}
-      <div className="pages-sidebar-personal-section flex-1 min-h-0">
+      <div className={`pages-sidebar-personal-section ${sectionClass(collapsed.personal)}`}>
         <ElectronCollabDocsUIRoot scope={personalScope}>
           <CollabSidebar
             sectionTitle="Personal"
             activeDocumentId={activePersonalDocumentId}
             registerCreateMenu={registerPersonalCreateMenu}
             typeResolver={personalTypeResolver}
+            collapsed={collapsed.personal}
+            onToggleCollapsed={() => toggle('personal')}
             onSetPageType={(page) => setTypingPage({ lane: 'personal', page })}
           />
         </ElectronCollabDocsUIRoot>

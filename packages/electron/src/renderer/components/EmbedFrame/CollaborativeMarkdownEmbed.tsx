@@ -6,7 +6,8 @@
  * the binding. Markdown has no registration and no hook: it is the app's own
  * Lexical editor, and its collaborative wiring lives in `CollaborativeTabEditor`
  * as a hand-rolled branch. This is that branch, reduced to what a card needs --
- * no tab header, no diff adapter, no revision rail, no history controller.
+ * no tab header, no revision rail, no history controller. It keeps the tab's
+ * Keep/Revert bar for pending agent edits.
  *
  * What could NOT be reduced away, and why (all four are load-bearing; see the
  * header of `CollabLexicalProvider` for the failure history):
@@ -53,6 +54,7 @@ import { CollabLexicalProvider } from '@nimbalyst/runtime/collab-lexical';
 import { buildCollabUri } from '@nimbalyst/collab-protocol';
 
 import type { CollaborativeEmbedProviderResource } from '../../services/CollaborativeEmbedProviderCache';
+import { LexicalDiffHeaderAdapter } from '../UnifiedDiffHeader';
 
 interface CollaborativeMarkdownEmbedProps {
   host: EditorHost;
@@ -129,6 +131,12 @@ export const CollaborativeMarkdownEmbed: React.FC<
     [config.orgId, config.documentId]
   );
 
+  // An agent edit through applyCollabDocEdit lands here as a pending diff,
+  // exactly as in a collab:// tab, so the embed carries the same Keep/Revert
+  // bar. Without it the removed text stays on screen with no way to resolve it.
+  const [lexicalEditor, setLexicalEditor] = useState<any | null>(null);
+  const handleEditorReady = useCallback((editor: any) => setLexicalEditor(editor), []);
+
   if (epoch === 0) {
     return (
       <div className="embed-frame__loading" data-testid="collab-markdown-loading">
@@ -139,9 +147,17 @@ export const CollaborativeMarkdownEmbed: React.FC<
 
   return (
     <DocumentPathProvider key={epoch} documentPath={documentPath}>
+      {!readOnly && (
+        <LexicalDiffHeaderAdapter
+          editor={lexicalEditor ?? undefined}
+          filePath={documentPath}
+          fileName={host.fileName}
+        />
+      )}
       <MarkdownEditor
         host={host}
         config={editorConfig}
+        onEditorReady={handleEditorReady}
         collaborationConfig={collaborationConfig}
       />
     </DocumentPathProvider>

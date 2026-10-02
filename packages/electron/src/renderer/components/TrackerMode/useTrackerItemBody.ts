@@ -127,8 +127,8 @@ export interface UseTrackerItemBodyOptions {
   forceFloatingToolbar: boolean;
   /** Publish the body's Lexical editor to the host (null when it goes away). */
   onBodyEditorReady?: (editor: unknown | null) => void;
-  /** Called after a body save lands, so the host can refetch derived links. */
-  onContentSaved?: () => void;
+  /** Called with the saved markdown after a body save lands, so the host can refetch derived links. */
+  onContentSaved?: (markdown: string) => void;
 }
 
 export interface TrackerItemBody {
@@ -431,7 +431,7 @@ export function useTrackerItemBody({
           itemId: item!.id,
           content: markdown,
         });
-        onContentSavedRef.current?.();
+        onContentSavedRef.current?.(markdown);
       } catch (err) {
         console.error('[TrackerItemDetail] Failed to save content:', err);
       } finally {

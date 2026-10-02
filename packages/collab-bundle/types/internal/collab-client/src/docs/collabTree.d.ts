@@ -51,6 +51,8 @@ export interface CollabTreeItemNode {
     typeLabel?: string;
     /** True when the item has a tree placement of its own. */
     placed?: boolean;
+    /** A placed item's placement order among its placed siblings. */
+    sortOrder?: number;
 }
 export type CollabTreeNode = CollabTreeFolderNode | CollabTreeDocumentNode | CollabTreeTypeNode | CollabTreeItemNode;
 /**
@@ -200,6 +202,12 @@ export declare function buildCollabTreeAdaptive(documents: SharedDocument[], fol
  */
 export declare function pruneEmptyFolders(nodes: CollabTreeNode[]): CollabTreeNode[];
 export declare function filterCollabTree(nodes: CollabTreeNode[], query: string): CollabTreeNode[];
+/**
+ * Page tree: a markdown page reads as its name, so "Architecture.md" shows as
+ * "Architecture". Display only; the stored title keeps its extension, and
+ * other document types keep theirs.
+ */
+export declare function pageDisplayName(name: string, documentType: string | undefined): string;
 export declare const isTypePageDocumentId: (documentId: string) => boolean;
 /**
  * Every page as a folder-shaped row, for a page tree. Paths, crumbs, pickers

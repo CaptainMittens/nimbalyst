@@ -269,6 +269,13 @@ describe('type column identity and display', () => {
     globalRegistry.register(declaresNoIcon);
   });
 
+  it('shows a Title column for a custom type that declares no roles', () => {
+    globalRegistry.register({ ...declaresIcon, type: 'gadget', idPrefix: 'GAD', roles: undefined });
+
+    expect(resolveColumnsForType('gadget').find(column => column.id === 'title')?.role).toBe('title');
+    expect(getDefaultColumnConfig('gadget').visibleColumns).toContain('title');
+  });
+
   it('resolves a custom type icon from its own schema', () => {
     expect(getTypeIcon('incidentReview')).toBe('siren');
   });

@@ -77,8 +77,9 @@ function clip(text: string): string {
 }
 
 /**
- * Every tracker link in the body, in order, with the sentence it sits in. The
- * sentence renders tracker links as their KEY and other links as their label.
+ * Every tracker link in the body, in order, with the sentence it sits in, as
+ * the reader sees it: every link renders as its label (a tracker link with an
+ * empty label as its KEY).
  */
 export function parseBodyLinks(markdown: string): ParsedBodyLink[] {
   const links: ParsedBodyLink[] = [];
@@ -109,7 +110,8 @@ export function parseBodyLinks(markdown: string): ParsedBodyLink[] {
     for (let m = LINK_RE.exec(matchable); m; m = LINK_RE.exec(matchable)) {
       rendered += line.slice(cursor, m.index).replace(OTHER_LINK_RE, '$1');
       found.push({ key: m[2], rel: relOf(m[3]), at: rendered.length });
-      rendered += m[2];
+      // The reader sees the label; a link with none shows its key.
+      rendered += line.slice(m.index + 1, m.index + 1 + m[1].length).trim() || m[2];
       cursor = m.index + m[0].length;
     }
     rendered += line.slice(cursor).replace(OTHER_LINK_RE, '$1');

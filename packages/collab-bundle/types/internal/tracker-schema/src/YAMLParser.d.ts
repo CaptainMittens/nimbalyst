@@ -29,7 +29,7 @@ export declare function parseTrackerTypeYAML(yamlString: string): TrackerDataMod
 /**
  * Serialize a TrackerDataModel to YAML string
  */
-export declare function serializeTrackerYAML(model: TrackerDataModel): string;
+export declare function serializeTrackerYAML(model: TrackerDataModel | DerivedTrackerTypeDeclaration): string;
 /**
  * Validate a YAML string without fully parsing
  */

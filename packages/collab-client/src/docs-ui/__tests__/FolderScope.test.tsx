@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { cleanup, createEvent, fireEvent, render, waitFor } from '@testing-library/react';
 import { atom, createStore, Provider } from 'jotai';
 import type { CollabHost } from '@nimbalyst/collab-client/core';
 import {
@@ -105,6 +105,10 @@ function renderDocsUIWithHost(
     toggleFavorite: vi.fn(),
     markAllDocumentsViewed: vi.fn(),
     markDocumentViewed: vi.fn(),
+    placeType: vi.fn(async () => undefined),
+    moveTypePlacement: vi.fn(async () => undefined),
+    movePage: vi.fn(() => true),
+    updateDocumentTitle: vi.fn(async () => undefined),
   } as unknown as CollabDocsSession;
 
   const result = render(
@@ -112,11 +116,17 @@ function renderDocsUIWithHost(
       <CollabDocsUIProvider session={session}>{children}</CollabDocsUIProvider>
     </Provider>,
   );
-  return { ...result, host };
+  return { ...result, host, session };
 }
 
 afterEach(() => {
   cleanup();
+});
+
+const found = <T,>(lookup: () => T | null | undefined) => waitFor(() => {
+  const element = lookup();
+  if (!element) throw new Error('not rendered yet');
+  return element;
 });
 
 /**
@@ -271,5 +281,78 @@ describe('one page tree', () => {
     const entries = [...document.querySelectorAll('button')].map((button) => button.textContent);
     expect(entries).toEqual(expect.arrayContaining(['New pageinside', 'Set type', 'Rename', 'Move to...', 'Copy link', 'Delete1 child page']));
     expect(document.querySelector<HTMLButtonElement>('.collab-page-set-type')!.disabled).toBe(true);
+  });
+
+  it('shows markdown pages without ".md" while rename and move keep the stored title', async () => {
+    const board = { ...page('board', 'Board.canvas', null), documentType: 'canvas' };
+    const { container, session } = renderDocsUIWithHost(<CollabSidebar />, [], {
+      documents: [page('arch', 'Architecture.md', null), page('overview', 'Overview.md', 'arch'), board],
+      itemPlacements: [],
+    });
+    const rowText = () => [...container.querySelectorAll('.file-tree-file')].map((row) => row.textContent);
+    await waitFor(() => expect(rowText()).toEqual(['Architecture', 'Overview', 'Board.canvas']));
+
+    const overview = [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Overview')!;
+    fireEvent.contextMenu(overview);
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-page-move-to')));
+    const dialog = await found(() => document.querySelector<HTMLElement>('.collab-page-move-dialog'));
+    expect(dialog.querySelector('h2')!.textContent).toBe('Move “Overview”');
+    expect(dialog.querySelector('[data-page-option="arch"]')!.textContent).toBe('Architecture');
+    fireEvent.click(dialog.querySelector('[data-page-option="root"]')!);
+    fireEvent.click(dialog.querySelector('.collab-page-move-confirm')!);
+    // The stored leaf keeps its extension.
+    await waitFor(() => expect(session.updateDocumentTitle).toHaveBeenCalledWith('overview', 'Overview.md'));
+
+    // Rename edits the bare name and saves it with ".md" exactly once.
+    const architecture = [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture')!;
+    fireEvent.contextMenu(architecture);
+    fireEvent.click(await found(() => [...document.querySelectorAll<HTMLElement>('button')].find((button) => button.textContent === 'Rename')));
+    const input = await found(() => document.querySelector<HTMLInputElement>('.input-modal-input'));
+    expect(input.value).toBe('Architecture');
+    expect(document.querySelector('.input-modal-suffix')).toBeNull();
+    fireEvent.change(input, { target: { value: 'System.md' } });
+    fireEvent.click(document.querySelector<HTMLElement>('.input-modal-confirm')!);
+    await waitFor(() => expect(session.updateDocumentTitle).toHaveBeenLastCalledWith('arch', 'System.md'));
+  });
+
+  it('places a type under a page, moves a type from its menu, and reorders types by edge drop', async () => {
+    const names: Record<string, string> = { module: 'Modules', person: 'People', competitor: 'Competitors' };
+    const typeResolver = {
+      typeName: (typeId: string) => names[typeId] ?? null,
+      itemsOfType: () => [],
+      listedTypes: () => Object.entries(names).map(([typeId, name]) => ({ typeId, name })),
+    };
+    const placement = (typeId: string, sortOrder: number) => ({
+      typeId, projectId: null, parentFolderId: null, sortOrder, createdBy: 'm', createdAt: 1, updatedAt: 1,
+    });
+    const { container, session } = renderDocsUIWithHost(
+      <CollabSidebar typeResolver={typeResolver} />,
+      [placement('module', 10), placement('person', 30)],
+      { documents: [page('arch', 'Architecture', null)], itemPlacements: [] },
+    );
+    const pageRow = await found(() => [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture'));
+
+    fireEvent.contextMenu(pageRow);
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-place-type-action')));
+    fireEvent.click([...document.querySelectorAll<HTMLElement>('.collab-place-type-option')].find((option) => option.textContent === 'Competitors')!);
+    expect(session.placeType).toHaveBeenCalledWith('competitor', 'arch');
+
+    const typeRow = (typeId: string) => container.querySelector<HTMLElement>(`.collab-tree-type-row[data-type-id="${typeId}"]`)!;
+    fireEvent.contextMenu(typeRow('person'));
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-type-move-to')));
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('[data-page-option="arch"]')));
+    fireEvent.click(document.querySelector<HTMLElement>('.collab-page-move-confirm')!);
+    expect(session.moveTypePlacement).toHaveBeenLastCalledWith('person', 'arch');
+
+    // People dragged onto the upper edge of Modules lands before it.
+    const target = typeRow('module');
+    target.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 100, width: 200, height: 28 });
+    fireEvent.dragStart(typeRow('person'), { dataTransfer: { setData: () => undefined } });
+    // jsdom has no DragEvent, so the pointer position is set by hand.
+    const at = (event: Event) => Object.defineProperty(event, 'clientY', { value: 102 });
+    fireEvent(target, at(createEvent.dragOver(target, { dataTransfer: {} })));
+    expect(target.className).toContain('collab-tree-drop-before');
+    fireEvent(target, at(createEvent.drop(target, { dataTransfer: {} })));
+    expect(session.moveTypePlacement).toHaveBeenLastCalledWith('person', null, 9);
   });
 });

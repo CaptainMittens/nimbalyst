@@ -1144,8 +1144,13 @@ export function ensureTagsSupport(model: TrackerDataModel): TrackerDataModel {
   if (model.supportsTags === false) return model;
   // If the schema already declares a tags role, the author has explicitly
   // chosen where tags live (possibly under a different field name like
-  // `labels`). Respect that completely and don't inject anything.
-  if (model.roles?.tags != null) return model;
+  // `labels`). Respect that completely and don't inject anything -- except
+  // when the role names the default `tags` field the type never declared, which
+  // would otherwise make adding `roles: {tags: tags}` drop the injected field.
+  if (model.roles?.tags != null) {
+    if (model.roles.tags !== 'tags' || model.fields.some(f => f.name === 'tags')) return model;
+    return { ...model, fields: [...model.fields, TAGS_FIELD] };
+  }
 
   const hasTagsField = model.fields.some(f => f.name === 'tags');
   const fields = hasTagsField ? model.fields : [...model.fields, TAGS_FIELD];
