@@ -49,6 +49,11 @@ export const collabHistoryControllerAtom = atom(
   }
 );
 
+/** Non-reactive read for services outside React (e.g. the agent edit path). */
+export function getCollabHistoryController(uri: string): CollabHistoryController | null {
+  return controllers.get(uri) ?? null;
+}
+
 export function registerCollabHistoryController(
   uri: string,
   controller: CollabHistoryController,

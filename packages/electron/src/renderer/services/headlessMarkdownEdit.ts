@@ -75,7 +75,9 @@ export function applyMarkdownReplacementsToYDoc(
         // structural guess that rewrites the FIRST list in the document when a
         // list-shaped `oldText` misses -- survivable on screen, silent
         // deletion here.
-        { exactTextMatchRequired: true },
+        // A shared document takes the edit as final text, never a pending
+        // diff written into the room for every collaborator to see.
+        { exactTextMatchRequired: true, acceptChanges: true },
       );
     },
   );

@@ -7,7 +7,7 @@
  * Lexical editor, and its collaborative wiring lives in `CollaborativeTabEditor`
  * as a hand-rolled branch. This is that branch, reduced to what a card needs --
  * no tab header, no revision rail, no history controller. It keeps the tab's
- * Keep/Revert bar for pending agent edits.
+ * Keep/Revert bar for pending diffs left in a room by older builds.
  *
  * What could NOT be reduced away, and why (all four are load-bearing; see the
  * header of `CollabLexicalProvider` for the failure history):
@@ -131,9 +131,10 @@ export const CollaborativeMarkdownEmbed: React.FC<
     [config.orgId, config.documentId]
   );
 
-  // An agent edit through applyCollabDocEdit lands here as a pending diff,
-  // exactly as in a collab:// tab, so the embed carries the same Keep/Revert
-  // bar. Without it the removed text stays on screen with no way to resolve it.
+  // Agent edits now land in shared documents as final text, so this bar only
+  // appears for pending diffs written into the room before that change. It
+  // renders nothing otherwise; without it that leftover removed text would stay
+  // on screen with no way to resolve it.
   const [lexicalEditor, setLexicalEditor] = useState<any | null>(null);
   const handleEditorReady = useCallback((editor: any) => setLexicalEditor(editor), []);
 

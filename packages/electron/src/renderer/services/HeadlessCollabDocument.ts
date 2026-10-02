@@ -24,6 +24,7 @@
 import { getCollabContentAdapter } from '@nimbalyst/collab-adapters';
 import { parseCollabUri, type DocumentDecisionCommand, type DocumentDecisionResult } from '@nimbalyst/collab-protocol';
 import type { Doc } from 'yjs';
+import type { CollabDocumentConfig } from '../utils/collabDocumentOpener';
 
 import {
   getSharedDocumentsForScopeKey,
@@ -75,7 +76,17 @@ export interface HeadlessCollabDocumentAcquisition {
     teamProjectId?: string | null;
   };
   documentType: string;
-  config: { orgId: string; teamMemberId: string; userName?: string; userEmail?: string };
+  config: {
+    orgId: string;
+    teamMemberId: string;
+    userName?: string;
+    userEmail?: string;
+    /** Room history endpoint access, used to record a pre-edit revision. */
+    documentId?: string;
+    serverUrl?: string;
+    getJwt?: CollabDocumentConfig['getJwt'];
+    urlExtraQuery?: string;
+  };
   yDoc: Doc;
   /**
    * The same DocumentSyncProvider a mounted editor would hold.
@@ -90,6 +101,7 @@ export interface HeadlessCollabDocumentAcquisition {
     getStatus(): string;
     hasUndecodedContent(): boolean;
     flushWithAck(timeoutMs?: number): Promise<boolean>;
+    getLastSeq?(): number;
     requestDecision?(command: DocumentDecisionCommand): Promise<DocumentDecisionResult>;
     sendAwareness?(state: unknown): Promise<void>;
     sendAwarenessDeparture?(user: unknown): boolean;

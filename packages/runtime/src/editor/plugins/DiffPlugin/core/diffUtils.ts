@@ -172,6 +172,9 @@ import {
 } from './ThresholdedOrderPreservingTree';
 import type {CanonicalTreeNode} from './canonicalTree';
 import { applyFrontmatterUpdateIfNeeded } from './diffFrontmatter';
+// Circular with diffPluginUtils (which imports `initializeHandlers` from here);
+// both sides only call the other at run time, never during module evaluation.
+import {$approveDiffs} from './diffPluginUtils';
 
 // Initialize a simple registry (in future this could be external)
 let _handlersInitialized = false;
@@ -606,6 +609,15 @@ export interface ApplyMarkdownReplaceOptions {
    * Callers with no human in the loop set this. See `headlessMarkdownEdit`.
    */
   exactTextMatchRequired?: boolean;
+  /**
+   * Land the edit as final text instead of a pending red/green diff.
+   *
+   * The approval runs inside the same Lexical update that applies the change,
+   * so a collaborative binding emits one Y.Doc transaction holding only the
+   * final text. Approving in a later update would broadcast the pending diff
+   * nodes to every collaborator first. See `agentEditsApplyDirectly`.
+   */
+  acceptChanges?: boolean;
 }
 
 export function applyMarkdownReplace(
@@ -775,6 +787,7 @@ export function applyMarkdownReplace(
       originalMarkdown,
       normalizedNewMarkdown,
       transformers,
+      {acceptChanges: options.acceptChanges},
     );
     // console.log('✅ applyMarkdownDiffToDocument completed successfully');
 
@@ -954,6 +967,7 @@ export function applyMarkdownDiffToDocument(
   originalMarkdown: string,
   newMarkdown: string,
   transformers: Array<Transformer>,
+  options: {acceptChanges?: boolean} = {},
 ): void {
   // Debug: Starting diff application
   // console.log('\n🔍 STARTING DIFF APPLICATION...');
@@ -1269,6 +1283,10 @@ export function applyMarkdownDiffToDocument(
             for (const diff of sorted) {
               $applyNodeDiff(editor, diff, transformers, sourceEditor, targetEditor, treeMatcher);
             }
+          }
+
+          if (options.acceptChanges) {
+            $approveDiffs();
           }
         },
         {discrete: true},

@@ -1511,8 +1511,8 @@ export const CollaborativeTabEditor: React.FC<CollaborativeTabEditorProps> = ({
               editor={lexicalEditor ?? undefined}
             />
             <DecisionOutline editor={lexicalEditor} />
-            {/* Accept/reject bar when an AI edit is pending review. Mirrors
-                the TabEditor markdown branch. */}
+            {/* Agent edits land in shared documents as final text; this bar
+                only shows for pending diffs older builds wrote into the room. */}
             <LexicalDiffHeaderAdapter
               editor={lexicalEditor ?? undefined}
               filePath={filePath}

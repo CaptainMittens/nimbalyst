@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- Changes to existing functionality go here -->
+- Agent edits to shared pages and typed page bodies now apply directly instead of waiting for Keep or Revert; a version is saved to the page's history before an agent starts editing.
 - Shared Docs mode is now called Pages.
 - Enlarged transcript images can be zoomed with a two-finger pinch on touch screens or a trackpad pinch.
 - iOS: the session list and session header take less space, with search and filters in the toolbar and the prompt list in the session title's popover.

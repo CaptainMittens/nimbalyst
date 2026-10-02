@@ -21,6 +21,7 @@ import { editorRegistry } from '@nimbalyst/runtime/ai/EditorRegistry';
 import { isCollabUri } from '@nimbalyst/collab-protocol';
 
 import {
+  acquireHeadlessCollabDocument,
   HeadlessCollabDocumentError,
   readHeadlessCollabDocContent,
 } from './HeadlessCollabDocument';
@@ -28,6 +29,12 @@ import {
   applyHeadlessCollabDocEdit,
   type CollabDocAgentIdentity,
 } from './HeadlessCollabDocEdit';
+import {
+  hasRecentAgentEditRevision,
+  recordRevisionBeforeAgentEdit,
+  revisionSourceFromAcquisition,
+  revisionSourceFromOpenTab,
+} from './collabAgentEditRevision';
 
 export type CollabDocAccessRoute = 'mounted' | 'headless';
 
@@ -73,6 +80,40 @@ export async function readCollabDocForAgent(
     content: await readHeadlessCollabDocContent(documentUri, workspacePath),
     route: 'headless',
   };
+}
+
+/**
+ * A mounted shared document takes the agent edit as final text (the editor
+ * decides that from its `collab://` path), so record the pre-edit state in its
+ * version history first. A tab publishes a history controller; a document open
+ * only as an embed is reached through the embed's own cached provider, so this
+ * adds no second peer to the room. Never throws.
+ */
+async function recordRevisionBeforeMountedCollabEdit(
+  documentUri: string,
+  workspacePath: string | null | undefined,
+): Promise<void> {
+  if (hasRecentAgentEditRevision(documentUri)) return;
+  try {
+    const fromTab = revisionSourceFromOpenTab(documentUri);
+    if (fromTab) {
+      await recordRevisionBeforeAgentEdit(documentUri, fromTab);
+      return;
+    }
+    if (!workspacePath) return;
+    const acquisition = await acquireHeadlessCollabDocument(documentUri, workspacePath);
+    try {
+      const source = revisionSourceFromAcquisition(acquisition);
+      if (source) await recordRevisionBeforeAgentEdit(documentUri, source);
+    } finally {
+      acquisition.release();
+    }
+  } catch (error) {
+    console.warn(
+      `[agentDocumentAccess] Could not record the pre-edit revision of ${documentUri}; applying the agent edit anyway.`,
+      error,
+    );
+  }
 }
 
 /**
@@ -133,6 +174,10 @@ export async function applyAgentDiff(
       targetFilePath,
       result?.success ? result.content : '',
     );
+  }
+
+  if (isCollab) {
+    await recordRevisionBeforeMountedCollabEdit(targetFilePath, options.workspacePath);
   }
 
   const result = await editorRegistry.applyReplacements(

@@ -17,7 +17,13 @@ import * as Y from 'yjs';
 import { describe, expect, it } from 'vitest';
 import { MarkdownCollabContentAdapter } from '@nimbalyst/runtime/sync/MarkdownCollabContentAdapter';
 import { $wrapSelectionInMarkNode } from '@lexical/mark';
-import { $createRangeSelection, $getRoot, $setSelection } from 'lexical';
+import {
+  $createRangeSelection,
+  $getRoot,
+  $isElementNode,
+  $setSelection,
+  type LexicalNode,
+} from 'lexical';
 import { HeadlessBodyNodes } from '@nimbalyst/runtime/editor/nodes/headlessBodyNodes';
 import { withHeadlessLexicalBridge } from '@nimbalyst/runtime/sync/withHeadlessLexicalBridge';
 import type { HeadlessLexicalYDoc } from '@nimbalyst/runtime/sync/HeadlessLexicalYDoc';
@@ -28,17 +34,11 @@ import {
 } from '@nimbalyst/runtime/editor/commenting';
 import { CommentCollabProvider } from '@nimbalyst/runtime/editor/commenting/CommentCollabProvider';
 import { createCollabCommentController } from '@nimbalyst/runtime/editor/commenting/CollabCommentControllerRegistry';
-import {
-  $approveDiffs,
-  $rejectDiffs,
-  $approveChangeGroup,
-  $rejectChangeGroup,
-} from '@nimbalyst/runtime/editor/plugins/DiffPlugin/core/diffPluginUtils';
+import { $approveDiffs } from '@nimbalyst/runtime/editor/plugins/DiffPlugin/core/diffPluginUtils';
 import {
   $getDiffState,
   $getOriginalMarkdown,
 } from '@nimbalyst/runtime/editor/plugins/DiffPlugin/core/DiffState';
-import { groupDiffChanges } from '@nimbalyst/runtime/editor/plugins/DiffPlugin/core/diffChangeGroups';
 
 import { applyMarkdownReplacementsToYDoc } from '../headlessMarkdownEdit';
 
@@ -78,6 +78,36 @@ describe('applyMarkdownReplacementsToYDoc', () => {
     const result = MarkdownCollabContentAdapter.exportToFile(doc) as string;
     expect(result).toContain('Paragraph two mentions BETA.');
     expect(result).toContain(UNTOUCHED);
+  });
+
+  /**
+   * A shared document takes an agent edit as final text. Pending red/green
+   * nodes written into the room would show both versions to every
+   * collaborator, with only the requester able to resolve them.
+   */
+  it('leaves no pending diff nodes in the shared document', () => {
+    const doc = seeded();
+
+    applyMarkdownReplacementsToYDoc(doc, [
+      { oldText: 'Paragraph two mentions beta.', newText: 'Paragraph two mentions gamma.' },
+    ]);
+
+    const states = withHeadlessLexicalBridge(doc, { nodes: HeadlessBodyNodes }, (headless) =>
+      headless.editor.getEditorState().read(() => {
+        const found: string[] = [];
+        const visit = (node: LexicalNode) => {
+          const state = $getDiffState(node);
+          if (state) found.push(state);
+          if ($isElementNode(node)) node.getChildren().forEach(visit);
+        };
+        $getRoot().getChildren().forEach(visit);
+        return found;
+      })
+    );
+    expect(states).toEqual([]);
+    const result = MarkdownCollabContentAdapter.exportToFile(doc) as string;
+    expect(result).toContain('Paragraph two mentions gamma.');
+    expect(result).not.toContain('mentions beta');
   });
 
   it('does not rewrite paragraphs it did not touch', () => {
@@ -357,59 +387,35 @@ describe('headless edit comment attachment through the Lexical/Yjs bridge', () =
     }
   });
 
-  it.each(['approve all', 'reject all', 'approve group', 'reject group'])(
-    'preserves one decision and its real comment when reopening to %s',
-    (action) => {
-      const doc = commentedDecisionDoc();
-      try {
-        applyMarkdownReplacementsToYDoc(doc, [
-          {
-            oldText: DECISION,
-            newText: DECISION.replace('current layout', 'revised layout'),
-          },
-        ]);
-        withCommentEditor(doc, ({ headless }) => {
-          headless.editor.getEditorState().read(() => {
-            const decisions = $getRoot()
-              .getChildren()
-              .filter((node) => node.getType() === 'decision');
-            expect(decisions).toHaveLength(1);
-            expect($getDiffState(decisions[0])).toBe('modified');
-            expect($getOriginalMarkdown(decisions[0])).toContain(
-              'Approve the current layout?'
-            );
-          });
-          const groups = groupDiffChanges(headless.editor);
-          expect(groups).toHaveLength(1);
-          const nodes = groups[0].nodes;
-          if (action === 'approve all') headless.applyUpdate($approveDiffs);
-          else if (action === 'reject all') headless.applyUpdate($rejectDiffs);
-          else if (action === 'approve group')
-            $approveChangeGroup(headless.editor, nodes);
-          else $rejectChangeGroup(headless.editor, nodes);
-        });
-        const question = action.startsWith('reject') ? 'current' : 'revised';
-        expect(MarkdownCollabContentAdapter.exportToFile(doc)).toContain(
-          `Approve the ${question} layout?`
-        );
-        expect(readCommentAttachment(doc).threads[0].anchorState).toBe(
-          'attached'
-        );
-        withCommentEditor(doc, ({ headless }) =>
-          headless.editor.getEditorState().read(() => {
-            const decisions = $getRoot()
-              .getChildren()
-              .filter((node) => node.getType() === 'decision');
-            expect(decisions).toHaveLength(1);
-            expect($getDiffState(decisions[0])).toBeNull();
-            expect($getOriginalMarkdown(decisions[0])).toBeNull();
-          })
-        );
-      } finally {
-        doc.destroy();
-      }
+  it('lands a decision edit as one final decision with its comment still attached', () => {
+    const doc = commentedDecisionDoc();
+    try {
+      applyMarkdownReplacementsToYDoc(doc, [
+        {
+          oldText: DECISION,
+          newText: DECISION.replace('current layout', 'revised layout'),
+        },
+      ]);
+      expect(MarkdownCollabContentAdapter.exportToFile(doc)).toContain(
+        'Approve the revised layout?'
+      );
+      expect(readCommentAttachment(doc).threads[0].anchorState).toBe(
+        'attached'
+      );
+      withCommentEditor(doc, ({ headless }) =>
+        headless.editor.getEditorState().read(() => {
+          const decisions = $getRoot()
+            .getChildren()
+            .filter((node) => node.getType() === 'decision');
+          expect(decisions).toHaveLength(1);
+          expect($getDiffState(decisions[0])).toBeNull();
+          expect($getOriginalMarkdown(decisions[0])).toBeNull();
+        })
+      );
+    } finally {
+      doc.destroy();
     }
-  );
+  });
 
   it('control: clear-and-reseed keeps thread data and its quote but orphans the real MarkNode anchor', () => {
     const doc = commentedDecisionDoc();
