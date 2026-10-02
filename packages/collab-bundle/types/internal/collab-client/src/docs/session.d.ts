@@ -3,7 +3,12 @@ import { type ReadReceipt, type UnreadEntitySnapshot } from '../../../runtime/sr
 import { type CollabDocsCapability, type CollabHost, type CollabScope } from '../core/index';
 import { type ChangedSharedDoc } from './collabDiscovery';
 import type { CollabDocsDataSource } from './dataSource';
-import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedTypePlacement } from './types';
+import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
+/** Where a page moves: its parent's kind and its order there (absent = no order). */
+export interface CollabPageMoveOptions {
+    parentKind?: SharedParentKind;
+    sortOrder?: number | null;
+}
 export type CollabTreeFilter = 'all' | 'favorites' | 'updated';
 /** Outcome of a placement write, once the store has confirmed or refused it. */
 export type CollabPlacementWriteResult = {
@@ -169,6 +174,10 @@ export interface CollabDocsSession {
         title: string;
         documentType: string;
         parentFolderId: string | null;
+        /** What `parentFolderId` names; absent means a page. */
+        parentKind?: SharedParentKind;
+        /** Absent: the end of a reordered group, or no order in a group nobody reordered. */
+        sortOrder?: number | null;
         metadata?: {
             metadataVersion: 2;
             fileExtension: string;
@@ -180,7 +189,7 @@ export interface CollabDocsSession {
     trashDocument(documentId: string): void;
     restoreDocument(documentId: string): void;
     emptyTrash(): number;
-    moveDocument(documentId: string, parentFolderId: string | null): void;
+    moveDocument(documentId: string, parentFolderId: string | null, options?: CollabPageMoveOptions): void;
     createFolder(name: string, parentFolderId: string | null): Promise<string>;
     renameFolder(folderId: string, name: string): Promise<void>;
     renameLegacyFolder(path: string, name: string): Promise<number>;
@@ -188,13 +197,16 @@ export interface CollabDocsSession {
     removeFolder(folderId: string): void;
     refreshFolders(): Promise<boolean>;
     /** Place a tracker type in the page tree; an already placed type moves. */
-    placeType(typeId: string, parentFolderId: string | null): Promise<void>;
-    moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number): Promise<void>;
+    placeType(typeId: string, parentFolderId: string | null, parentKind?: SharedParentKind): Promise<void>;
+    moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number, parentKind?: SharedParentKind): Promise<void>;
     removeTypePlacement(typeId: string): Promise<void>;
     /** True once the snapshot said the tree is the one page tree. */
     isPageTree(): boolean;
-    /** Page tree: move a page under another page (null = root). Refuses a cycle. */
-    movePage(documentId: string, parentId: string | null): boolean;
+    /**
+     * Page tree: move a page under a page or a typed page (null = root). Refuses
+     * a cycle through pages and placed typed pages.
+     */
+    movePage(documentId: string, parentId: string | null, options?: CollabPageMoveOptions): boolean;
     /**
      * Page tree: remove a page and every page below it, the way a folder delete
      * worked (types and items placed under them fall back, nothing else goes).
@@ -209,7 +221,7 @@ export interface CollabDocsSession {
      * server's broadcast for this item, or the local write for Personal), and
      * `{ ok: false, error }` on a refusal or timeout, after rolling back.
      */
-    setItemPlacement(itemId: string, parentId: string | null, sortOrder?: number): Promise<CollabPlacementWriteResult>;
+    setItemPlacement(itemId: string, parentId: string | null, sortOrder?: number, parentKind?: SharedParentKind): Promise<CollabPlacementWriteResult>;
     /** Send a typed page back under its type. Same outcome contract as `setItemPlacement`. */
     removeItemPlacement(itemId: string): Promise<CollabPlacementWriteResult>;
     getItemPlacements(): SharedItemPlacement[];

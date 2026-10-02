@@ -19,12 +19,13 @@ import {
   TrackerViewEmbed,
   createItemWhereResolver,
   createTypePageView,
+  typeWithSubtypes,
   type TrackerGridDerivedColumn,
 } from '@nimbalyst/collab-client/trackers-ui/embed';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { resolveColumnsForType } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerColumns';
-import { trackerItemCountByTypeAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
+import { trackerItemCountByTypeAtom, trackerItemsMapAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
 import { resolveRoleFieldName } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
 import { ElectronTrackerDataSource } from '../../services/ElectronTrackerDataSource';
 import {
@@ -35,16 +36,16 @@ import {
 import { createDesktopTrackerDataSource } from '../EmbedFrame/desktopTrackerDataSource';
 import { useDesktopTrackerIdentity } from '../EmbedFrame/useDesktopTrackerIdentity';
 import { isTeamTrackerSharing } from '../Settings/panels/trackerConfigUpgrade';
-import { trackerPageCrumbFolders } from '../TrackerMode/TrackerPageView';
+import { crumbItemLookup, trackerPageCrumbFolders } from '../TrackerMode/TrackerPageView';
 import { typePageTitle } from './collabPageTabs';
 import { TypePageProse } from './TypePageProse';
 import '../TrackerMode/TrackerPageView.css';
 import './TypePageTab.css';
 
 type Lane = 'team' | 'personal';
-interface TypePlacementRow { typeId: string; parentFolderId?: string | null }
-interface ItemPlacementRow { itemId: string; parentId?: string | null }
-interface PageRow { folderId: string; parentFolderId?: string | null; name: string }
+interface TypePlacementRow { typeId: string; parentFolderId?: string | null; parentKind?: 'page' | 'item' }
+interface ItemPlacementRow { itemId: string; parentId?: string | null; parentKind?: 'page' | 'item' }
+interface PageRow { folderId: string; parentFolderId?: string | null; parentKind?: 'page' | 'item'; name: string }
 
 const NO_TYPE_PLACEMENTS: Atom<readonly TypePlacementRow[]> = atom([]);
 const NO_ITEM_PLACEMENTS: Atom<readonly ItemPlacementRow[]> = atom([]);
@@ -111,11 +112,26 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
   // In the page tree every page can be a parent, and the session lists the pages here.
   const pages = useAtomValue<readonly PageRow[]>(session?.atoms.sharedFolders ?? NO_PAGES);
   const documents = useAtomValue<readonly SharedDocument[]>(session?.atoms.allSharedDocuments ?? NO_DOCUMENTS);
-  const itemCount = useAtomValue(trackerItemCountByTypeAtom(typeId));
+  // The type and every type that extends it: the tree row counts them all, so the table lists them all.
+  const typeIds = useMemo(() => typeWithSubtypes(typeId, {
+    typeExtends: (id) => globalRegistry.get(id)?.extends ?? null,
+    listedTypes: () => globalRegistry.getListed().map((listed) => ({ typeId: listed.type, name: listed.displayName })),
+  }), [typeId, model]);
+  const itemCountAtom = useMemo(
+    () => atom((get) => typeIds.reduce((total, id) => total + get(trackerItemCountByTypeAtom(id)), 0)),
+    [typeIds],
+  );
+  const itemCount = useAtomValue(itemCountAtom);
 
+  // Typed-page titles above the type are read when the tree changes, not on every tracker edit.
+  const itemLookup = useMemo(
+    () => crumbItemLookup(store.get(trackerItemsMapAtom)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [store, typePlacements, itemPlacements, pages],
+  );
   const crumb = useMemo(
-    () => [...(lane === 'personal' ? ['Personal'] : []), ...trackerPageCrumbFolders(typeId, typePlacements, pages)],
-    [lane, typeId, typePlacements, pages],
+    () => [...(lane === 'personal' ? ['Personal'] : []), ...trackerPageCrumbFolders(typeId, typePlacements, pages, { itemPlacements, item: itemLookup })],
+    [lane, typeId, typePlacements, pages, itemPlacements, itemLookup],
   );
   const parentFolderId = typePlacements.find((placement) => placement.typeId === typeId)?.parentFolderId ?? null;
   const fieldLabels = useMemo(() => typeFieldLabels(typeId), [typeId, model]);
@@ -125,12 +141,13 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
       pages,
       typeLabel: typeName,
       rootLabel: lane === 'personal' ? 'Personal' : 'Team',
+      itemTitle: (itemId) => itemLookup(itemId)?.title ?? null,
     });
     // Right after the title column (the type's title-role field): past the
     // field columns it falls off-screen at a normal width.
     const after = resolveRoleFieldName(typeId, 'title');
     return [{ id: '__where', label: 'Where', width: 220, after, value: (row) => where(row.id) }];
-  }, [itemPlacements, pages, typeName, lane, typeId, model]);
+  }, [itemPlacements, pages, typeName, lane, typeId, model, itemLookup]);
 
   return (
     <div className="type-page-tab tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="type-page-tab" data-type-id={typeId}>
@@ -180,7 +197,7 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
               <span className="-mb-px border-b-2 border-[var(--nim-primary)] px-2.5 py-[7px] text-nim">All</span>
             </div>
             <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
-              <TrackerViewEmbed view={view} variant="page" onOpenItem={onOpenItem} derivedColumns={derivedColumns} />
+              <TrackerViewEmbed view={view} variant="page" onOpenItem={onOpenItem} derivedColumns={derivedColumns} typeIds={typeIds} />
             </TrackersUIProvider>
           </div>
         </div>

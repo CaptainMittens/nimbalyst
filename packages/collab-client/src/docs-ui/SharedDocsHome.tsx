@@ -17,6 +17,7 @@ import {
 } from '@nimbalyst/collab-client/docs';
 import { getRelativeTimeString } from './time';
 import { resolveSharedDocumentTypePresentation } from './documentPresentation';
+import { confirmDestructive } from './primitives/confirmDestructive';
 import {
   useCollabDocsUI,
   type SharedDocumentCleanupProgress,
@@ -271,9 +272,8 @@ export const SharedDocsHome: React.FC<SharedDocsHomeProps> = () => {
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-[var(--nim-error)] bg-transparent text-[12px] text-[var(--nim-error)] cursor-pointer hover:bg-[color-mix(in_srgb,var(--nim-error)_10%,transparent)] disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={trashedDocs.length === 0 || teamSyncStatus !== 'connected'}
               onClick={() => {
-                if (window.confirm(`Permanently delete ${trashedDocs.length} document${trashedDocs.length === 1 ? '' : 's'}? This cannot be undone.`)) {
-                  session.emptyTrash();
-                }
+                void confirmDestructive('Empty Trash', `Permanently delete ${trashedDocs.length} document${trashedDocs.length === 1 ? '' : 's'}? This cannot be undone.`)
+                  .then((accepted) => { if (accepted) session.emptyTrash(); });
               }}
             >
               <MaterialSymbol icon="delete_forever" size={17} />
@@ -312,9 +312,8 @@ export const SharedDocsHome: React.FC<SharedDocsHomeProps> = () => {
                     title="Delete permanently"
                     aria-label={`Delete ${docName(doc)} permanently`}
                     onClick={() => {
-                      if (window.confirm(`Permanently delete "${docName(doc)}"? This cannot be undone.`)) {
-                        session.removeDocument(doc.documentId);
-                      }
+                      void confirmDestructive('Delete permanently', `Permanently delete "${docName(doc)}"? This cannot be undone.`)
+                        .then((accepted) => { if (accepted) session.removeDocument(doc.documentId); });
                     }}
                   >
                     <MaterialSymbol icon="delete_forever" size={18} />

@@ -152,6 +152,74 @@ describe('PersonalPagesService', () => {
     expect(snapshot.items.map((doc) => doc.documentId)).toEqual(['d1', 'f-arch']);
   });
 
+  it('upgrades a 0050 database to unordered page parents, and keeps it on a second launch', async () => {
+    const dbDir = path.join(tmp, 'sqlite-db');
+    const olderSchemas = path.join(tmp, 'schemas-before-0051');
+    fs.mkdirSync(dbDir, { recursive: true });
+    fs.cpSync(SCHEMA_DIR, olderSchemas, { recursive: true });
+    for (const file of fs.readdirSync(olderSchemas)) {
+      if (Number(file.slice(0, 4)) >= 51) fs.rmSync(path.join(olderSchemas, file));
+    }
+    const older = new (loadBetterSqlite())(path.join(dbDir, 'nimbalyst.sqlite'));
+    expect(() => runMigrations(older, olderSchemas)).toThrow();
+    expect(older.prepare('SELECT MAX(version) AS v FROM _migrations').get()).toEqual({ v: 50 });
+    const at = '2026-09-01T10:00:00.000Z';
+    older.exec(`
+      INSERT INTO personal_page_documents (workspace_path, document_id, title, document_type, parent_folder_id, created_at, updated_at)
+      VALUES ('${WS}', 'd1', 'Intro', 'markdown', NULL, '${at}', '${at}');
+      INSERT INTO personal_page_type_placements (workspace_path, type_id, parent_folder_id, sort_order, created_at, updated_at)
+      VALUES ('${WS}', 'decision', 'd1', 7, '${at}', '${at}');
+      INSERT INTO personal_page_item_placements (workspace_path, item_id, parent_id, sort_order, created_at, updated_at)
+      VALUES ('${WS}', 'item-1', 'd1', 8, '${at}', '${at}');
+    `);
+    older.close();
+
+    for (let launch = 0; launch < 2; launch += 1) {
+      const service = await open();
+      const snapshot = await service.snapshot(WS);
+      expect(snapshot.items).toEqual([expect.objectContaining({ documentId: 'd1', parentKind: 'page', sortOrder: null })]);
+      expect(snapshot.typePlacements).toEqual([expect.objectContaining({ typeId: 'decision', parentKind: 'page', sortOrder: 7 })]);
+      expect(snapshot.itemPlacements).toEqual([expect.objectContaining({ itemId: 'item-1', parentKind: 'page', sortOrder: 8 })]);
+      service.dispose();
+      await db.close();
+    }
+  });
+
+  it('puts pages, types and typed pages under typed pages that exist, refusing cycles, across a second launch', async () => {
+    let service = await open();
+    const at = new Date().toISOString();
+    await db.query(
+      `INSERT INTO tracker_items (id, type, data, workspace, created, updated) VALUES ($1, 'module', '{}', $2, $3, $3)`,
+      ['item-1', WS, at],
+    );
+    const register = (documentId: string, parentFolderId: string | null, extra: Record<string, unknown> = {}) =>
+      service.command(WS, { type: 'register-document', documentId, title: documentId, documentType: 'markdown', parentFolderId, ...extra });
+    await register('p', null, { sortOrder: 1024 });
+    await service.command(WS, { type: 'set-item-placement', itemId: 'item-1', parentId: 'p', sortOrder: 2048 });
+    await register('child', 'item-1', { parentKind: 'item' });
+    await expect(register('lost', 'no-such-item', { parentKind: 'item' })).rejects.toThrow(/Unknown typed page/);
+    // p -> child -> item-1 -> p
+    await expect(service.command(WS, { type: 'move-document', documentId: 'p', parentFolderId: 'child' })).rejects.toThrow(/cycle/);
+    // Unplaced, item-1 sits under its type: module -> child -> item-1 -> module.
+    await service.command(WS, { type: 'remove-item-placement', itemId: 'item-1' });
+    await service.command(WS, { type: 'set-type-placement', typeId: 'module', parentFolderId: 'item-1', parentKind: 'item', sortOrder: 0 })
+      .then(() => { throw new Error('expected a cycle'); }, (error: Error) => expect(error.message).toMatch(/cycle/));
+    await service.command(WS, { type: 'set-item-placement', itemId: 'item-1', parentId: 'p', sortOrder: 2048 });
+    await service.command(WS, { type: 'set-type-placement', typeId: 'decision', parentFolderId: 'item-1', parentKind: 'item', sortOrder: 1 });
+    // Same parent, new order: a reorder.
+    await service.command(WS, { type: 'move-document', documentId: 'child', parentFolderId: 'item-1', parentKind: 'item', sortOrder: 5 });
+    // Removing p drops item-1's placement; what sits under item-1 stays with it.
+    await service.command(WS, { type: 'remove-folder', folderId: 'p' });
+    service.dispose();
+    await db.close();
+
+    service = await open();
+    const snapshot = await service.snapshot(WS);
+    expect(snapshot.items).toEqual([expect.objectContaining({ documentId: 'child', parentFolderId: 'item-1', parentKind: 'item', sortOrder: 5 })]);
+    expect(snapshot.itemPlacements).toEqual([]);
+    expect(snapshot.typePlacements).toEqual([expect.objectContaining({ typeId: 'decision', parentFolderId: 'item-1', parentKind: 'item' })]);
+  });
+
   it('trashes and restores a document without deleting it', async () => {
     const service = await open();
     await service.command(WS, { type: 'register-document', documentId: 'd1', title: 'Doc', documentType: 'markdown', parentFolderId: null });
@@ -312,6 +380,9 @@ describe('PersonalPagesService on PGLite', () => {
     const pglite = new PGlite();
     await pglite.exec(mirrorDdl('0049'));
     await pglite.exec(mirrorDdl('0050'));
+    // The worker reruns every block on each launch.
+    await pglite.exec(mirrorDdl('0051'));
+    await pglite.exec(mirrorDdl('0051'));
     const db = {
       query: (sql: string, params?: unknown[]) => pglite.query(sql, params) as Promise<{ rows: any[] }>,
       runTransaction: async (statements: Array<{ sql: string; params?: unknown[] }>) => {
@@ -334,7 +405,9 @@ describe('PersonalPagesService on PGLite', () => {
       expect(snapshot.items[1]).toMatchObject({ documentId: 'd1', trashedAt: 1_700_000_000_000, parentFolderId: 'f1' });
       expect(typeof snapshot.items[1].createdAt).toBe('number');
       await service.command(WS, { type: 'set-item-placement', itemId: 'item-1', parentId: 'f1', sortOrder: 0.5 });
-      expect((await service.snapshot(WS)).itemPlacements).toEqual([expect.objectContaining({ itemId: 'item-1', sortOrder: 0.5 })]);
+      expect((await service.snapshot(WS)).itemPlacements).toEqual([expect.objectContaining({ itemId: 'item-1', sortOrder: 0.5, parentKind: 'page' })]);
+      await service.command(WS, { type: 'move-document', documentId: 'd1', parentFolderId: 'f1', sortOrder: 2048 });
+      expect((await service.snapshot(WS)).items[1]).toMatchObject({ documentId: 'd1', sortOrder: 2048, parentKind: 'page' });
 
       // Prose of a type placed outside the removed page survives at its type's parent (root here).
       await service.command(WS, { type: 'register-document', documentId: 'type-page:task', title: 'Tasks', documentType: 'markdown', parentFolderId: 'f1' });

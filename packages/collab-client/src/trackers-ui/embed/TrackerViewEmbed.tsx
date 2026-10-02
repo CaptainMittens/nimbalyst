@@ -52,6 +52,11 @@ export interface TrackerViewEmbedProps {
   height?: number;
   /** Read-only columns after the fields, in table mode (a type page's Where). */
   derivedColumns?: readonly TrackerGridDerivedColumn[];
+  /**
+   * Items of any of these types, instead of the view's one type: a type page
+   * lists its subtypes' items too. The view's type still picks the columns.
+   */
+  typeIds?: readonly string[];
 }
 
 /** Draws a view the caller supplies, without looking it up among the saved views. */
@@ -62,6 +67,7 @@ export function TrackerViewEmbed({
   variant = 'card',
   height,
   derivedColumns,
+  typeIds,
 }: TrackerViewEmbedProps): JSX.Element {
   const { identity, capabilities } = useTrackersUI();
   const records = useTrackerDataSelector((state) => state.records);
@@ -78,6 +84,7 @@ export function TrackerViewEmbed({
       height={height ?? DEFAULT_BODY_HEIGHT_PX}
       variant={variant}
       derivedColumns={derivedColumns}
+      typeIds={typeIds}
     />
   );
 }
@@ -93,6 +100,7 @@ function LoadedViewEmbed({
   height,
   variant,
   derivedColumns,
+  typeIds,
 }: {
   view: SavedView;
   records: TrackerRecord[];
@@ -104,11 +112,23 @@ function LoadedViewEmbed({
   height: number;
   variant: 'card' | 'page';
   derivedColumns?: readonly TrackerGridDerivedColumn[];
+  typeIds?: readonly string[];
 }): JSX.Element {
   const { definition } = view;
   // Readiness is a property of the whole dependency graph, so it reads every record.
   const readinessByItemId = useMemo(() => computeReadiness(records, getRecordStatus), [records]);
-  const { rows } = useTrackerViewRows(records, definition, { identity, readinessByItemId });
+  const typeKey = typeIds?.join('\u001f');
+  const scoped = useMemo(() => {
+    if (!typeIds) return { records, definition };
+    const wanted = new Set(typeIds);
+    return {
+      records: records.filter((record) => record.typeTags.some((tag) => wanted.has(tag))),
+      definition: { ...definition, selectedType: 'all' },
+    };
+    // typeKey stands for typeIds, which callers rebuild on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [records, definition, typeKey]);
+  const { rows } = useTrackerViewRows(scoped.records, scoped.definition, { identity, readinessByItemId });
   const { mode } = resolveViewMode(definition.viewMode, { renderableViewModes });
   const titles = useMemo(() => new Map(records.map((record) => [record.id, getRecordTitle(record).trim()])), [records]);
   const resolveRelationshipLabel = useCallback((itemId: string) => titles.get(itemId) || undefined, [titles]);

@@ -6,7 +6,7 @@
  * web console's docs-ui bundle.
  */
 import React from 'react';
-import type { CollabTreeItemNode, CollabTreeTypeNode, CollabTypeTreeResolver } from '../docs/index';
+import type { CollabTreeItemNode, CollabTreeNode, CollabTreeTypeNode, CollabTypeTreeResolver } from '../docs/index';
 export interface PlaceableType {
     typeId: string;
     name: string;
@@ -44,6 +44,10 @@ export interface CollabItemRowActions {
     onDragEnd: () => void;
     /** Rows under a type (the type and its items) as drop targets. */
     rowDrop?: (node: CollabTreeTypeNode | CollabTreeItemNode) => CollabRowDrop;
+    /** A typed page holds pages, types and typed pages; these expand it. */
+    isExpanded?: (node: CollabTreeItemNode) => boolean;
+    onToggle?: (node: CollabTreeItemNode) => void;
+    renderChildren?: (nodes: CollabTreeNode[], childIndent: number) => React.ReactNode;
 }
 /**
  * A type's item. In the page tree (`typeLabel` set) it is a page: page icon,

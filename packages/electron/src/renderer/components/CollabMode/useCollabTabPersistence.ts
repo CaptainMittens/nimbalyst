@@ -22,7 +22,8 @@ import {
 } from '../../utils/collabOpenDocsPersistence';
 import type { SharedDocument, SharedFolder } from '../../store/atoms/collabDocuments';
 import { openPageTab, toPersistedPageEntry } from './collabPageTabs';
-import { getCollabNodeName, getSharedDocumentDisplayPathWithFallback } from './collabTree';
+import { getSharedDocumentDisplayPathWithFallback } from './collabTree';
+import { pageDisplayName } from '@nimbalyst/collab-client/docs';
 import { isSharedHomeTab } from './sharedHomeTab';
 
 interface CollabTabPersistenceInput {
@@ -89,7 +90,8 @@ export function useCollabTabPersistence({
       await openCollabDocumentViaIPC({
         scope,
         documentId: entry.documentId,
-        title: entry.displayPath ? getCollabNodeName(entry.displayPath) : undefined,
+        // The tab reads like the tree row: bare name, no ".md" on a page.
+        title: entry.displayPath ? pageDisplayName(entry.displayPath, entry.documentType) : undefined,
         displayPath: entry.displayPath,
         documentType: entry.documentType,
         metadataVersion: entry.metadataVersion,

@@ -1,3 +1,8 @@
+/**
+ * A parent in the page tree is a page (a document) or a typed page (a tracker
+ * item). Absent on the wire means a page.
+ */
+export type SharedParentKind = 'page' | 'item';
 export interface SharedDocument {
     documentId: string;
     /** Owning project preserved from the team document index. */
@@ -17,6 +22,10 @@ export interface SharedDocument {
     lastWriterUserId?: string | null;
     /** First-class parent folder; null/undefined means root. */
     parentFolderId?: string | null;
+    /** What `parentFolderId` names: a page (the default) or a typed page (tracker item). */
+    parentKind?: SharedParentKind;
+    /** Order among its siblings in the page tree; null until its group is first reordered. */
+    sortOrder?: number | null;
     /** Millisecond epoch when moved to recoverable Trash. */
     trashedAt?: number | null;
     /** True when the encrypted title could not be decrypted. */
@@ -26,6 +35,8 @@ export interface SharedFolder {
     folderId: string;
     /** Null/undefined means root level. */
     parentFolderId?: string | null;
+    /** A page projected as a folder whose parent is a typed page (`parentFolderId` is an item id). */
+    parentKind?: SharedParentKind;
     name: string;
     sortOrder: number;
     createdBy: string;
@@ -44,6 +55,8 @@ export interface SharedTypePlacement {
     projectId: string | null;
     /** Null/undefined means root level. */
     parentFolderId?: string | null;
+    /** What `parentFolderId` names; absent means a page. */
+    parentKind?: SharedParentKind;
     sortOrder: number;
     createdBy: string;
     createdAt: number;
@@ -58,6 +71,8 @@ export interface SharedItemPlacement {
     projectId: string | null;
     /** Parent page (document) id; null/undefined means root level. */
     parentId?: string | null;
+    /** What `parentId` names; absent means a page. */
+    parentKind?: SharedParentKind;
     sortOrder: number;
     createdBy: string;
     createdAt: number;

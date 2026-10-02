@@ -21,6 +21,7 @@ registerElectronCollabDocumentCreation(async ({
   descriptor,
   requestedName,
   parentFolderId,
+  parentKind,
   sourceContent,
 }) => {
   await createCollaborativeDocument({
@@ -28,6 +29,7 @@ registerElectronCollabDocumentCreation(async ({
     descriptor,
     requestedName,
     parentFolderId,
+    ...(parentKind ? { parentKind } : {}),
     sourceContent,
     analyticsSource: 'new_document',
     analyticsActorType: 'user',

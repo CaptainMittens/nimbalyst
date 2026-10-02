@@ -35,7 +35,7 @@ export interface CollabTreeTypeNode {
     typeId: string;
     path: string;
     name: string;
-    /** Number of items of this type (not counting subtypes). */
+    /** Number of items of this type (in a page tree, and of every type that extends it). */
     count: number;
     placement: SharedTypePlacement;
     children: Array<CollabTreeTypeNode | CollabTreeItemNode>;
@@ -51,8 +51,10 @@ export interface CollabTreeItemNode {
     typeLabel?: string;
     /** True when the item has a tree placement of its own. */
     placed?: boolean;
-    /** A placed item's placement order among its placed siblings. */
+    /** A placed item's placement order among its siblings. */
     sortOrder?: number;
+    /** Child pages, types and typed pages; only in a page tree. */
+    children?: CollabTreeNode[];
 }
 export type CollabTreeNode = CollabTreeFolderNode | CollabTreeDocumentNode | CollabTreeTypeNode | CollabTreeItemNode;
 /**
@@ -132,6 +134,14 @@ export declare function reconcileSharedDocumentDisplayName(currentDisplayName: s
  */
 export declare function getSharedDocumentDisplayPathWithFallback(document: Pick<SharedDocument, 'documentId' | 'title' | 'parentFolderId'>, folders: SharedFolder[], fallbackPath: string | null | undefined): string;
 /** @internal Shared with `collabPageTree.ts`. */
+export declare const compareTypeNodes: (left: CollabTreeTypeNode, right: CollabTreeTypeNode) => number;
+/**
+ * Folders, then placed types (by sortOrder), then documents (by name), then
+ * placed typed pages (by sortOrder): the order of a group nobody reordered.
+ * @internal Shared with `collabPageTree.ts`.
+ */
+export declare function compareTreeNodes(left: CollabTreeNode, right: CollabTreeNode): number;
+/** @internal Shared with `collabPageTree.ts`. */
 export declare function sortTreeNodes(nodes: CollabTreeNode[]): CollabTreeNode[];
 /**
  * Build type nodes from placements and attach them under their folder (or
@@ -142,10 +152,18 @@ export type CollabTreeContainer = {
     path: string;
     children: CollabTreeNode[];
 };
+/**
+ * One node per resolvable placement, and the placed base each one nests in
+ * (null when it sits by its own placement). A corrupt `extends` cycle between
+ * placed types is broken by placing the node normally.
+ * @internal Shared with `collabPageTree.ts`.
+ */
+export declare function createTypeNodes(placements: SharedTypePlacement[], resolver: CollabTypeTreeResolver): {
+    nodes: Map<string, CollabTreeTypeNode>;
+    parentType: Map<string, string | null>;
+};
 /** @internal Shared with `collabPageTree.ts`. */
-export declare function attachTypeNodes(roots: CollabTreeNode[], folderNodeById: (folderId: string) => CollabTreeContainer | undefined, input: CollabTypePlacementInput | undefined, 
-/** Items placed elsewhere in the tree; still counted, not listed. */
-placedItemIds?: ReadonlySet<string>): void;
+export declare function attachTypeNodes(roots: CollabTreeNode[], folderNodeById: (folderId: string) => CollabTreeContainer | undefined, input: CollabTypePlacementInput | undefined): void;
 export declare function buildCollabTree(documents: SharedDocument[], customFolders: string[], typePlacements?: CollabTypePlacementInput): CollabTreeNode[];
 /**
  * Build the collab tree from FIRST-CLASS folder nodes + each document's
@@ -203,11 +221,13 @@ export declare function buildCollabTreeAdaptive(documents: SharedDocument[], fol
 export declare function pruneEmptyFolders(nodes: CollabTreeNode[]): CollabTreeNode[];
 export declare function filterCollabTree(nodes: CollabTreeNode[], query: string): CollabTreeNode[];
 /**
- * Page tree: a markdown page reads as its name, so "Architecture.md" shows as
- * "Architecture". Display only; the stored title keeps its extension, and
- * other document types keep theirs.
+ * A page's name wherever it shows (tree rows, tabs, crumbs, pickers). New
+ * pages store the bare name; an older title may still carry its folder path
+ * and, for markdown, ".md" ("Specs/Architecture.md" reads "Architecture").
+ * Display only: nothing rewrites stored titles. Other document types keep
+ * their extension.
  */
-export declare function pageDisplayName(name: string, documentType: string | undefined): string;
+export declare function pageDisplayName(title: string, documentType: string | undefined): string;
 export declare const isTypePageDocumentId: (documentId: string) => boolean;
 /**
  * Every page as a folder-shaped row, for a page tree. Paths, crumbs, pickers

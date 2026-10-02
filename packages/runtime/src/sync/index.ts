@@ -351,6 +351,7 @@ export type {
   TeamState,
   MemberInfo as TeamMemberInfo,
   DocIndexEntry as TeamDocIndexEntry,
+  DocumentPlacementOptions as TeamDocumentPlacementOptions,
   FolderNode,
 } from './teamSyncTypes';
 

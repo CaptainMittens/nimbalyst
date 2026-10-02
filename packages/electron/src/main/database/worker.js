@@ -3287,6 +3287,22 @@ class PGLiteWorker {
       throw error;
     }
 
+    // Migration: typed pages as parents and one sibling order (schema version 51).
+    // Mirror of SQLite migration 0051_personal_pages_parents_and_order.sql -- keep in sync.
+    // Columns only, each IF NOT EXISTS, so rerunning it every launch is safe.
+    try {
+      await this.db.exec(`
+        ALTER TABLE personal_page_documents ADD COLUMN IF NOT EXISTS sort_order DOUBLE PRECISION;
+        ALTER TABLE personal_page_documents ADD COLUMN IF NOT EXISTS parent_kind TEXT NOT NULL DEFAULT 'page';
+        ALTER TABLE personal_page_type_placements ADD COLUMN IF NOT EXISTS parent_kind TEXT NOT NULL DEFAULT 'page';
+        ALTER TABLE personal_page_item_placements ADD COLUMN IF NOT EXISTS parent_kind TEXT NOT NULL DEFAULT 'page';
+      `);
+      console.log('[PGLite Worker] personal pages parents-and-order migration applied');
+    } catch (error) {
+      console.error('[PGLite Worker] Failed to apply the personal pages parents-and-order migration:', error);
+      throw error;
+    }
+
     // Migration: team-shared tracker saved views (schema version 28).
     // Mirror of SQLite migration 0028_tracker_shared_saved_views.sql.
     // Payload is stored as TEXT (not JSONB) so the row round-trips byte-for-byte

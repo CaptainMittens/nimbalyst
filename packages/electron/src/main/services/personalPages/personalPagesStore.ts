@@ -1,13 +1,15 @@
 /**
- * SQL for personal pages (schemas 0049 and 0050). Every query here runs on both
+ * SQL for personal pages (schemas 0049 to 0051). Every query here runs on both
  * PGLite and better-sqlite3: whole columns only, `$N` params, Date objects bound
  * for timestamps and read back through `toMillis()`.
  *
  * Since 0050 the tree is one page tree: a document's `parent_folder_id` names
  * its parent page. `personal_page_folders` is only the record of the tree
- * before that migration and is never read or written here.
+ * before that migration and is never read or written here. Since 0051 every
+ * parent column has a `parent_kind` beside it: 'page', or 'item' when the
+ * parent is a typed page (a tracker item id); pages carry a `sort_order`.
  */
-import type { SharedDocument, SharedItemPlacement, SharedTypePlacement } from '@nimbalyst/collab-client/docs';
+import type { SharedDocument, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from '@nimbalyst/collab-client/docs';
 import { toMillis } from '../../utils/timestampUtils';
 
 export interface PersonalPagesDb {
@@ -23,6 +25,8 @@ interface DocumentRow {
   file_extension: string | null;
   metadata_version: number | string | null;
   parent_folder_id: string | null;
+  parent_kind: string | null;
+  sort_order: number | string | null;
   created_at: unknown;
   updated_at: unknown;
   trashed_at: unknown;
@@ -31,6 +35,7 @@ interface DocumentRow {
 interface PlacementRow {
   type_id: string;
   parent_folder_id: string | null;
+  parent_kind: string | null;
   sort_order: number | string;
   created_at: unknown;
   updated_at: unknown;
@@ -39,19 +44,21 @@ interface PlacementRow {
 interface ItemPlacementRow {
   item_id: string;
   parent_id: string | null;
+  parent_kind: string | null;
   sort_order: number | string;
   created_at: unknown;
   updated_at: unknown;
 }
 
 const LOCAL_AUTHOR = 'local';
+const parentKindOf = (value: string | null): SharedParentKind => (value === 'item' ? 'item' : 'page');
 /** Mirrors `TYPE_PAGE_DOCUMENT_PREFIX` in collab-client (not imported: main must not load that module graph). */
 const TYPE_PAGE_PREFIX = 'type-page:';
 
 export async function listDocuments(db: PersonalPagesDb, ws: string): Promise<SharedDocument[]> {
   const { rows } = await db.query<DocumentRow>(
     `SELECT document_id, title, document_type, editor_id, file_extension, metadata_version, parent_folder_id,
-            created_at, updated_at, trashed_at
+            parent_kind, sort_order, created_at, updated_at, trashed_at
      FROM personal_page_documents WHERE workspace_path = $1 ORDER BY created_at, document_id`,
     [ws],
   );
@@ -68,13 +75,15 @@ export async function listDocuments(db: PersonalPagesDb, ws: string): Promise<Sh
     createdAt: toMillis(row.created_at) ?? 0,
     updatedAt: toMillis(row.updated_at) ?? 0,
     parentFolderId: row.parent_folder_id ?? null,
+    parentKind: parentKindOf(row.parent_kind),
+    sortOrder: row.sort_order === null || row.sort_order === undefined ? null : Number(row.sort_order),
     trashedAt: toMillis(row.trashed_at),
   }));
 }
 
 export async function listTypePlacements(db: PersonalPagesDb, ws: string): Promise<SharedTypePlacement[]> {
   const { rows } = await db.query<PlacementRow>(
-    `SELECT type_id, parent_folder_id, sort_order, created_at, updated_at
+    `SELECT type_id, parent_folder_id, parent_kind, sort_order, created_at, updated_at
      FROM personal_page_type_placements WHERE workspace_path = $1 ORDER BY sort_order, type_id`,
     [ws],
   );
@@ -82,6 +91,7 @@ export async function listTypePlacements(db: PersonalPagesDb, ws: string): Promi
     typeId: row.type_id,
     projectId: null,
     parentFolderId: row.parent_folder_id ?? null,
+    parentKind: parentKindOf(row.parent_kind),
     sortOrder: Number(row.sort_order),
     createdBy: LOCAL_AUTHOR,
     createdAt: toMillis(row.created_at) ?? 0,
@@ -91,7 +101,7 @@ export async function listTypePlacements(db: PersonalPagesDb, ws: string): Promi
 
 export async function listItemPlacements(db: PersonalPagesDb, ws: string): Promise<SharedItemPlacement[]> {
   const { rows } = await db.query<ItemPlacementRow>(
-    `SELECT item_id, parent_id, sort_order, created_at, updated_at
+    `SELECT item_id, parent_id, parent_kind, sort_order, created_at, updated_at
      FROM personal_page_item_placements WHERE workspace_path = $1 ORDER BY sort_order, item_id`,
     [ws],
   );
@@ -99,6 +109,7 @@ export async function listItemPlacements(db: PersonalPagesDb, ws: string): Promi
     itemId: row.item_id,
     projectId: null,
     parentId: row.parent_id ?? null,
+    parentKind: parentKindOf(row.parent_kind),
     sortOrder: Number(row.sort_order),
     createdBy: LOCAL_AUTHOR,
     createdAt: toMillis(row.created_at) ?? 0,
@@ -136,6 +147,8 @@ export async function upsertDocument(
     title: string;
     documentType: string;
     parentFolderId: string | null;
+    parentKind: SharedParentKind;
+    sortOrder: number | null;
     editorId: string | null;
     fileExtension: string | null;
   },
@@ -148,8 +161,8 @@ export async function upsertDocument(
   await db.query(
     `INSERT INTO personal_page_documents
        (workspace_path, document_id, title, document_type, editor_id, file_extension,
-        metadata_version, parent_folder_id, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8, $8)
+        metadata_version, parent_folder_id, parent_kind, sort_order, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $10, $11, $8, $8)
      ON CONFLICT (workspace_path, document_id) DO UPDATE SET
        title = EXCLUDED.title,
        document_type = EXCLUDED.document_type,
@@ -157,15 +170,20 @@ export async function upsertDocument(
        file_extension = EXCLUDED.file_extension,
        metadata_version = EXCLUDED.metadata_version,
        parent_folder_id = EXCLUDED.parent_folder_id,
+       parent_kind = EXCLUDED.parent_kind,
+       sort_order = EXCLUDED.sort_order,
        updated_at = EXCLUDED.updated_at`,
-    [ws, doc.documentId, doc.title, doc.documentType, doc.editorId, doc.fileExtension, doc.parentFolderId, now, metadataVersion],
+    [
+      ws, doc.documentId, doc.title, doc.documentType, doc.editorId, doc.fileExtension, doc.parentFolderId, now,
+      metadataVersion, doc.parentKind, doc.sortOrder,
+    ],
   );
 }
 
 export async function upsertTypePlacement(
   db: PersonalPagesDb,
   ws: string,
-  placement: { typeId: string; parentFolderId: string | null; sortOrder: number },
+  placement: { typeId: string; parentFolderId: string | null; parentKind: SharedParentKind; sortOrder: number },
 ): Promise<void> {
   const now = new Date();
   // The type page's prose (`type-page:<typeId>`) belongs to the type and moves
@@ -174,18 +192,19 @@ export async function upsertTypePlacement(
   await db.runTransaction([
     {
       sql: `INSERT INTO personal_page_type_placements
-              (workspace_path, type_id, parent_folder_id, sort_order, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $5)
+              (workspace_path, type_id, parent_folder_id, parent_kind, sort_order, created_at, updated_at)
+            VALUES ($1, $2, $3, $6, $4, $5, $5)
             ON CONFLICT (workspace_path, type_id) DO UPDATE SET
               parent_folder_id = EXCLUDED.parent_folder_id,
+              parent_kind = EXCLUDED.parent_kind,
               sort_order = EXCLUDED.sort_order,
               updated_at = EXCLUDED.updated_at`,
-      params: [ws, placement.typeId, placement.parentFolderId, placement.sortOrder, now],
+      params: [ws, placement.typeId, placement.parentFolderId, placement.sortOrder, now, placement.parentKind],
     },
     {
-      sql: `UPDATE personal_page_documents SET parent_folder_id = $3, updated_at = $4
+      sql: `UPDATE personal_page_documents SET parent_folder_id = $3, parent_kind = $5, updated_at = $4
             WHERE workspace_path = $1 AND document_id = $2`,
-      params: [ws, `${TYPE_PAGE_PREFIX}${placement.typeId}`, placement.parentFolderId, now],
+      params: [ws, `${TYPE_PAGE_PREFIX}${placement.typeId}`, placement.parentFolderId, now, placement.parentKind],
     },
   ]);
 }
@@ -193,18 +212,19 @@ export async function upsertTypePlacement(
 export async function upsertItemPlacement(
   db: PersonalPagesDb,
   ws: string,
-  placement: { itemId: string; parentId: string | null; sortOrder: number },
+  placement: { itemId: string; parentId: string | null; parentKind: SharedParentKind; sortOrder: number },
 ): Promise<void> {
   const now = new Date();
   await db.query(
     `INSERT INTO personal_page_item_placements
-       (workspace_path, item_id, parent_id, sort_order, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $5)
+       (workspace_path, item_id, parent_id, parent_kind, sort_order, created_at, updated_at)
+     VALUES ($1, $2, $3, $6, $4, $5, $5)
      ON CONFLICT (workspace_path, item_id) DO UPDATE SET
        parent_id = EXCLUDED.parent_id,
+       parent_kind = EXCLUDED.parent_kind,
        sort_order = EXCLUDED.sort_order,
        updated_at = EXCLUDED.updated_at`,
-    [ws, placement.itemId, placement.parentId, placement.sortOrder, now],
+    [ws, placement.itemId, placement.parentId, placement.sortOrder, now, placement.parentKind],
   );
 }
 
@@ -239,7 +259,8 @@ export async function deleteTypePlacement(db: PersonalPagesDb, ws: string, typeI
  * statement inside the transaction, never captured beforehand: a page moved
  * out of the subtree before the transaction takes the write lock is no longer
  * a member and survives. `UNION` (not `UNION ALL`) stops the walk on a corrupt
- * parent cycle.
+ * parent cycle. Only page parents count: what sits under a typed page stays
+ * with that typed page wherever it now lives.
  */
 export async function deletePageSubtree(db: PersonalPagesDb, ws: string, rootPageId: string): Promise<void> {
   const subtree = `WITH RECURSIVE subtree(document_id) AS (
@@ -247,7 +268,7 @@ export async function deletePageSubtree(db: PersonalPagesDb, ws: string, rootPag
       UNION
       SELECT d.document_id FROM personal_page_documents d
       JOIN subtree s ON d.parent_folder_id = s.document_id
-      WHERE d.workspace_path = $1
+      WHERE d.workspace_path = $1 AND d.parent_kind = 'page'
     )`;
   const params = [ws, rootPageId];
   await db.runTransaction([
@@ -257,26 +278,32 @@ export async function deletePageSubtree(db: PersonalPagesDb, ws: string, rootPag
             SET parent_folder_id = (
               SELECT tp.parent_folder_id FROM personal_page_type_placements tp
               WHERE tp.workspace_path = $1 AND '${TYPE_PAGE_PREFIX}' || tp.type_id = personal_page_documents.document_id
-                AND tp.parent_folder_id NOT IN (SELECT document_id FROM subtree)
-            )
+                AND NOT (tp.parent_kind = 'page' AND tp.parent_folder_id IN (SELECT document_id FROM subtree))
+            ),
+            parent_kind = COALESCE((
+              SELECT tp.parent_kind FROM personal_page_type_placements tp
+              WHERE tp.workspace_path = $1 AND '${TYPE_PAGE_PREFIX}' || tp.type_id = personal_page_documents.document_id
+                AND NOT (tp.parent_kind = 'page' AND tp.parent_folder_id IN (SELECT document_id FROM subtree))
+            ), 'page')
             WHERE workspace_path = $1
               AND document_id LIKE '${TYPE_PAGE_PREFIX}%'
+              AND parent_kind = 'page'
               AND parent_folder_id IN (SELECT document_id FROM subtree)
               AND NOT EXISTS (
                 SELECT 1 FROM personal_page_type_placements tp
                 WHERE tp.workspace_path = $1 AND '${TYPE_PAGE_PREFIX}' || tp.type_id = personal_page_documents.document_id
-                  AND tp.parent_folder_id IN (SELECT document_id FROM subtree)
+                  AND tp.parent_kind = 'page' AND tp.parent_folder_id IN (SELECT document_id FROM subtree)
               )`,
       params,
     },
     {
       sql: `${subtree} DELETE FROM personal_page_type_placements
-            WHERE workspace_path = $1 AND parent_folder_id IN (SELECT document_id FROM subtree)`,
+            WHERE workspace_path = $1 AND parent_kind = 'page' AND parent_folder_id IN (SELECT document_id FROM subtree)`,
       params,
     },
     {
       sql: `${subtree} DELETE FROM personal_page_item_placements
-            WHERE workspace_path = $1 AND parent_id IN (SELECT document_id FROM subtree)`,
+            WHERE workspace_path = $1 AND parent_kind = 'page' AND parent_id IN (SELECT document_id FROM subtree)`,
       params,
     },
     {
@@ -285,6 +312,15 @@ export async function deletePageSubtree(db: PersonalPagesDb, ws: string, rootPag
       params,
     },
   ]);
+}
+
+/** Whether a tracker item (a typed page) exists in this workspace and is not deleted. */
+export async function itemType(db: PersonalPagesDb, ws: string, itemId: string): Promise<string | null> {
+  const { rows } = await db.query<{ type: string }>(
+    `SELECT type FROM tracker_items WHERE id = $1 AND workspace = $2 AND deleted_at IS NULL LIMIT 1`,
+    [itemId, ws],
+  );
+  return rows[0]?.type ?? null;
 }
 
 export async function readBody(

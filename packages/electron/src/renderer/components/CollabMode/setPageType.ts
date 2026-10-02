@@ -5,8 +5,10 @@
  * The page is the only copy of its text until the item's body has been read
  * back and matches, the item is confirmed at the page's position, and the page
  * is shown not to have changed since it was copied. Nothing touches the page
- * before all three. A half-created item is removed only when it never left this
- * machine, so no teammate can have written to it.
+ * before all three. Then the page's children (pages, placed types and placed
+ * typed pages) move under the new typed page, and only once every one of them
+ * has moved does the page go to Trash. A half-created item is removed only when
+ * it never left this machine, so no teammate can have written to it.
  *
  * The decision sequence lives here with its effects injected, so it is tested
  * without a team room; `useSetPageType` supplies the real effects.
@@ -18,9 +20,16 @@ export interface SetPageTypePage {
   documentId: string;
   title: string;
   documentType: string;
-  /** Parent page id, or null at the section root. */
+  /** Parent page or typed page id, or null at the section root. */
   parentId: string | null;
+  /** What `parentId` names; absent means a page. */
+  parentKind?: 'page' | 'item';
+  /** The page's order among its siblings, which the typed page takes over. */
+  sortOrder?: number | null;
 }
+
+/** Something directly under a page in the tree. */
+export type PageChild = { kind: 'page' | 'type' | 'item'; id: string };
 
 export interface SetPageTypeRequest {
   lane: PageTypeLane;
@@ -49,9 +58,17 @@ export type ItemBodyCheck =
 
 export type ItemPlacementResult = { ok: true } | { ok: false; error: string };
 
+/** Where the typed page goes: the page's own place. */
+export interface ItemPosition {
+  parentKind: 'page' | 'item';
+  sortOrder: number | null;
+}
+
 export interface SetPageTypeDependencies {
-  /** Pages, placed types and placed items directly under the page. */
-  childCount(pageId: string): number;
+  /** Pages, placed types and placed typed pages directly under the page. */
+  listChildren(pageId: string): PageChild[];
+  /** Resolves ok only once the child is stored under the typed page. */
+  moveChildUnderItem(child: PageChild, itemId: string): Promise<ItemPlacementResult>;
   /** Save any edit an open editor still holds for the page. Throws if it cannot. */
   flushPageEditor(pageId: string): Promise<void>;
   /** The page body as markdown. Throws when it cannot be read. */
@@ -61,7 +78,7 @@ export interface SetPageTypeDependencies {
   verifyItemBody(itemId: string, markdown: string): Promise<ItemBodyCheck>;
   removeItem(itemId: string): Promise<void>;
   /** Resolves ok only once the placement is stored where the section keeps it. */
-  setItemPlacement(itemId: string, parentId: string | null): Promise<ItemPlacementResult>;
+  setItemPlacement(itemId: string, parentId: string | null, position: ItemPosition): Promise<ItemPlacementResult>;
   /** False when the page's text or version moved on since `copy` was taken. */
   pageUnchangedSince(pageId: string, copy: PageCopy): Promise<boolean>;
   trashPage(pageId: string): Promise<void>;
@@ -116,14 +133,6 @@ export async function setPageType(
 
   if (page.documentType !== 'markdown') {
     return { status: 'refused', message: 'Only a text page can be given a type.' };
-  }
-  // Items cannot hold child pages yet, so the children would be orphaned.
-  const children = dependencies.childCount(page.documentId);
-  if (children > 0) {
-    return {
-      status: 'refused',
-      message: `This page has ${children} ${children === 1 ? 'page' : 'pages'} inside it. Move them out first; a typed page cannot hold other pages yet.`,
-    };
   }
 
   let copy: PageCopy;
@@ -185,7 +194,10 @@ export async function setPageType(
 
   let placement: ItemPlacementResult;
   try {
-    placement = await dependencies.setItemPlacement(itemId, page.parentId);
+    placement = await dependencies.setItemPlacement(itemId, page.parentId, {
+      parentKind: page.parentKind ?? 'page',
+      sortOrder: page.sortOrder ?? null,
+    });
   } catch (error) {
     placement = { ok: false, error: errorText(error) };
   }
@@ -202,6 +214,20 @@ export async function setPageType(
   if (!unchanged) {
     // Someone is still editing the page; leave its tab where it is.
     return keepBoth('The page changed while its type was being set, so it was kept beside the new typed page. Copy the latest edits across, then delete the page.');
+  }
+
+  // Read when they move, not at the start: a child added meanwhile moves too.
+  // A child that cannot move keeps the page, so nothing is left under Trash.
+  for (const child of dependencies.listChildren(page.documentId)) {
+    let moved: ItemPlacementResult;
+    try {
+      moved = await dependencies.moveChildUnderItem(child, itemId);
+    } catch (error) {
+      moved = { ok: false, error: errorText(error) };
+    }
+    if (!moved.ok) {
+      return keepBoth(`The typed page is ready, but not everything inside the page could move under it (${moved.error}), so the page was kept. Move the rest across, then delete the page.`);
+    }
   }
 
   try {

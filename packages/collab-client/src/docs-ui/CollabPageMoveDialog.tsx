@@ -1,42 +1,82 @@
 /**
- * "Move to..." for the one page tree: pick the page a page or typed page
- * should live under, root, or (typed pages only) back under its type.
+ * "Move to..." for the one page tree: pick the page or typed page a page,
+ * type or typed page should live under, root, or (typed pages only) back
+ * under its type. Destinations come from the tree as shown, and one that
+ * would put the row inside itself (also through a type) is not offered.
  * Lazy-loaded by the sidebar so it stays out of the docs-ui eager bundle.
  */
 import React, { useMemo, useState } from 'react';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
-import { flattenCollabFolderOptions, type SharedFolder } from '@nimbalyst/collab-client/docs';
-import { UNDER_TYPE, type CollabPageMoveTarget } from './CollabTypeTreeRows';
+import type { CollabTreeNode } from '@nimbalyst/collab-client/docs';
+import { treeMoveRefused, type PageTreeDestination } from '../docs/collabPageTree';
+import { UNDER_TYPE } from './CollabTypeTreeRows';
+
+/** A destination: a page or typed page row id, null for root, or `UNDER_TYPE`. */
+export type CollabMoveDestination = string | null;
 
 export interface CollabPageMoveDialogProps {
   name: string;
-  /** Pages, folder-shaped (see `projectPagesAsFolders`). */
-  pages: SharedFolder[];
-  /** Pages that cannot be the destination (the page and its subtree). */
-  excludedIds: ReadonlySet<string>;
-  current: CollabPageMoveTarget;
+  tree: CollabTreeNode[];
+  /** The row being moved (`document:`, `type:` or `item:` id). */
+  movingNodeId: string;
   rootLabel: string;
   /** Typed pages only: label for the "under its type" destination. */
   underTypeLabel?: string;
-  onConfirm: (target: CollabPageMoveTarget) => void;
+  onConfirm: (destination: PageTreeDestination) => void;
   onCancel: () => void;
+}
+
+interface Option { id: CollabMoveDestination; name: string; depth: number; icon: string; hint?: string }
+
+/** Where the row sits now, as a destination. */
+function currentDestination(tree: CollabTreeNode[], movingNodeId: string): CollabMoveDestination {
+  const find = (nodes: CollabTreeNode[], parent: CollabTreeNode | null): CollabTreeNode | null | undefined => {
+    for (const node of nodes) {
+      if (node.id === movingNodeId) return parent;
+      const found = 'children' in node && node.children ? find(node.children, node) : undefined;
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  };
+  const parent = find(tree, null) ?? null;
+  return parent?.type === 'type' ? UNDER_TYPE : parent?.id ?? null;
 }
 
 export default function CollabPageMoveDialog({
   name,
-  pages,
-  excludedIds,
-  current,
+  tree,
+  movingNodeId,
   rootLabel,
   underTypeLabel,
   onConfirm,
   onCancel,
 }: CollabPageMoveDialogProps) {
-  const [selected, setSelected] = useState<CollabPageMoveTarget>(current);
-  const options = useMemo(() => [
-    ...(underTypeLabel ? [{ folderId: UNDER_TYPE, name: underTypeLabel, depth: 0 }] : []),
-    ...flattenCollabFolderOptions(pages).filter((option) => !option.folderId || !excludedIds.has(option.folderId)),
-  ], [excludedIds, pages, underTypeLabel]);
+  const current = useMemo(() => currentDestination(tree, movingNodeId), [movingNodeId, tree]);
+  const [selected, setSelected] = useState<CollabMoveDestination>(current);
+  const options = useMemo(() => {
+    const list: Option[] = [];
+    if (underTypeLabel && !treeMoveRefused(tree, movingNodeId, { underOwnType: true })) {
+      list.push({ id: UNDER_TYPE, name: underTypeLabel, depth: 0, icon: 'table' });
+    }
+    list.push({ id: null, name: rootLabel, depth: 0, icon: 'workspaces' });
+    const walk = (nodes: CollabTreeNode[], depth: number) => {
+      for (const node of nodes) {
+        const destination = node.type === 'document' || node.type === 'item';
+        if (destination && !treeMoveRefused(tree, movingNodeId, { nodeId: node.id })) {
+          list.push({
+            id: node.id,
+            name: node.name,
+            depth,
+            icon: 'description',
+            ...(node.type === 'item' && node.typeLabel ? { hint: node.typeLabel } : {}),
+          });
+        }
+        if ('children' in node && node.children) walk(node.children, depth + 1);
+      }
+    };
+    walk(tree, 1);
+    return list;
+  }, [movingNodeId, rootLabel, tree, underTypeLabel]);
   return (
     <div
       className="collab-page-move-overlay fixed inset-0 z-[10000] flex items-center justify-center bg-black/60"
@@ -58,11 +98,11 @@ export default function CollabPageMoveDialog({
           aria-label="Destination page"
         >
           {options.map((option) => {
-            const isSelected = option.folderId === selected;
-            const icon = option.folderId === UNDER_TYPE ? 'table' : option.folderId === null ? 'workspaces' : 'description';
+            const isSelected = option.id === selected;
+            const rowId = option.id === null ? 'root' : option.id.slice(option.id.indexOf(':') + 1);
             return (
               <div
-                key={option.folderId ?? 'root'}
+                key={option.id ?? 'root'}
                 role="option"
                 aria-selected={isSelected}
                 tabIndex={0}
@@ -70,17 +110,18 @@ export default function CollabPageMoveDialog({
                   isSelected ? 'bg-[var(--nim-primary)]/20' : 'hover:bg-[var(--nim-bg-tertiary)]'
                 }`}
                 style={{ paddingLeft: 8 + option.depth * 18 }}
-                data-page-option={option.folderId ?? 'root'}
-                onClick={() => setSelected(option.folderId)}
+                data-page-option={rowId}
+                onClick={() => setSelected(option.id)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' || event.key === ' ') {
                     event.preventDefault();
-                    setSelected(option.folderId);
+                    setSelected(option.id);
                   }
                 }}
               >
-                <MaterialSymbol icon={icon} size={18} className={isSelected ? 'text-[var(--nim-primary)]' : 'text-[var(--nim-text-muted)]'} />
-                <span className="flex-1 truncate">{option.folderId === null ? rootLabel : option.name}</span>
+                <MaterialSymbol icon={option.icon} size={18} className={isSelected ? 'text-[var(--nim-primary)]' : 'text-[var(--nim-text-muted)]'} />
+                <span className="flex-1 truncate">{option.name}</span>
+                {option.hint ? <span className="shrink-0 text-[11px] text-[var(--nim-text-faint)]">{option.hint}</span> : null}
               </div>
             );
           })}
@@ -97,7 +138,12 @@ export default function CollabPageMoveDialog({
             type="button"
             className="collab-page-move-confirm px-3.5 py-1.5 rounded-md text-[13px] font-medium bg-[var(--nim-primary)] text-[#0f1115] disabled:opacity-50 disabled:cursor-not-allowed"
             disabled={selected === current}
-            onClick={() => onConfirm(selected)}
+            onClick={() => onConfirm(selected === UNDER_TYPE
+              ? { underType: true }
+              : {
+                parentId: selected === null ? null : selected.slice(selected.indexOf(':') + 1),
+                parentKind: selected?.startsWith('item:') ? 'item' : 'page',
+              })}
           >
             Move
           </button>

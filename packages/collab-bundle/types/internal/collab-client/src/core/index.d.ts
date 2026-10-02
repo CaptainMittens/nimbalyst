@@ -182,6 +182,8 @@ export interface CollabDocsCreateInput {
     descriptor: CollabDocumentTypeDescriptor;
     requestedName: string;
     parentFolderId: string | null;
+    /** What `parentFolderId` names: a page (default) or a typed page (tracker item id). */
+    parentKind?: 'page' | 'item';
     sourceContent: string | Uint8Array;
 }
 export interface CollabDocsCapability<TItem = unknown, TContainer = unknown, TCommand extends CollabCommand = CollabCommand, TResult extends CollabCommandResult = CollabCommandResult> {

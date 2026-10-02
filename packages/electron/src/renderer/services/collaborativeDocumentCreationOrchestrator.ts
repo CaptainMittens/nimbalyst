@@ -4,7 +4,7 @@ import {
   workspacePathFromPersonalScopeKey,
   type CollabScope,
 } from '@nimbalyst/collab-client/core';
-import { TYPE_PAGE_DOCUMENT_PREFIX } from '@nimbalyst/collab-client/docs';
+import { pageDisplayName, TYPE_PAGE_DOCUMENT_PREFIX, type SharedParentKind } from '@nimbalyst/collab-client/docs';
 import type { CollabDocumentConfig } from '../utils/collabDocumentOpener';
 import {
   removeCollabConfigsForDocument,
@@ -55,6 +55,8 @@ export interface CreateCollaborativeDocumentInput {
   descriptor: CollaborativeDocumentTypeDescriptor;
   requestedName: string;
   parentFolderId: string | null;
+  /** What `parentFolderId` names: a page (default) or a typed page (tracker item id). */
+  parentKind?: SharedParentKind;
   sourceContent?: string | Uint8Array;
   localOrigin?: string | CollaborativeDocumentLocalOrigin;
   /** Optional stable retry key. Defaults to the generated document id. */
@@ -144,6 +146,7 @@ export interface CollaborativeDocumentCreationDependencies {
     documentType: string,
     parentFolderId: string | null,
     metadata: { metadataVersion: 2; fileExtension: string; editorId: string },
+    placement: { parentKind: SharedParentKind },
   ): Promise<boolean>;
   /** Undo an announced registration when the seed that follows it fails. */
   rollbackRegistration(scope: CollabScope, documentId: string): void;
@@ -257,6 +260,7 @@ function operationFingerprint(input: CreateCollaborativeDocumentInput): string {
     input.descriptor.editor.componentName ?? '',
     input.requestedName.trim(),
     input.parentFolderId,
+    input.parentFolderId ? input.parentKind ?? 'page' : 'page',
     fingerprintContent(input.sourceContent),
     localPath,
     fingerprintContent(localContent),
@@ -429,7 +433,9 @@ export class CollaborativeDocumentCreationOrchestrator {
 
       const documents = this.dependencies.getDocuments(scope);
       const folders = this.dependencies.getFolders(scope);
-      const parentPath = folderPathForId(folders, input.parentFolderId);
+      const parentKind: SharedParentKind = input.parentFolderId ? input.parentKind ?? 'page' : 'page';
+      // A typed page is not in the folder list; main (Personal) or the tree checks it.
+      const parentPath = parentKind === 'item' ? '' : folderPathForId(folders, input.parentFolderId);
       if (parentPath === null) {
         throw new CollaborativeDocumentCreationError(
           'invalid-parent-folder',
@@ -439,12 +445,16 @@ export class CollaborativeDocumentCreationOrchestrator {
           false,
         );
       }
-      const title = joinCollabPath(parentPath, name);
+      // A page stores its bare name: no parent path, and no ".md" on markdown.
+      const title = descriptor.documentType === 'markdown'
+        ? name.slice(0, name.length - metadata.fileExtension.length)
+        : name;
       const existingById = documents.find(document => document.documentId === documentId);
       if (existingById) {
         const sameDocument = existingById.title === title
           && existingById.documentType === descriptor.documentType
           && (existingById.parentFolderId ?? null) === input.parentFolderId
+          && (existingById.parentKind ?? 'page') === parentKind
           && existingById.metadataVersion === 2
           && existingById.fileExtension === metadata.fileExtension
           && existingById.editorId === metadata.editorId;
@@ -459,18 +469,28 @@ export class CollaborativeDocumentCreationOrchestrator {
         }
         announced = true;
       } else {
-        const targetPath = normalizeCollabPath(title);
-        const documentCollision = documents.some(document => (
-          normalizeCollabPath(getSharedDocumentDisplayPath(document, folders)) === targetPath
-        ));
-        const folderCollision = folders.some(folder => (
+        // Names compare as the tree shows them, so an older "Child.md" (or a
+        // full-path title) and a new bare "Child" collide.
+        const shownName = pageDisplayName(title, descriptor.documentType);
+        const shownPath = (document: SharedDocument): string => {
+          const path = normalizeCollabPath(getSharedDocumentDisplayPath(document, folders));
+          const leaf = getCollabNodeName(path);
+          return joinCollabPath(path.slice(0, Math.max(0, path.length - leaf.length - 1)), pageDisplayName(leaf, document.documentType));
+        };
+        const documentCollision = parentKind === 'item'
+          ? documents.some(document => document.parentKind === 'item'
+            && document.parentFolderId === input.parentFolderId
+            && pageDisplayName(document.title, document.documentType) === shownName)
+          : documents.some(document => (document.parentKind ?? 'page') === 'page'
+            && normalizeCollabPath(shownPath(document)) === normalizeCollabPath(joinCollabPath(parentPath, shownName)));
+        const folderCollision = parentKind === 'page' && folders.some(folder => (
           (folder.parentFolderId ?? null) === input.parentFolderId
-          && folder.name.trim() === name
+          && pageDisplayName(folder.name.trim(), 'markdown') === shownName
         ));
         if (documentCollision || folderCollision) {
           throw new CollaborativeDocumentCreationError(
             'name-collision',
-            `A shared document or folder named "${title}" already exists.`,
+            `A shared document or folder named "${shownName}" already exists.`,
             operationId,
             documentId,
             false,
@@ -519,6 +539,7 @@ export class CollaborativeDocumentCreationOrchestrator {
             descriptor.documentType,
             input.parentFolderId,
             metadata,
+            { parentKind },
           );
           announced = true;
         } catch (cause) {
@@ -583,6 +604,7 @@ export class CollaborativeDocumentCreationOrchestrator {
         createdAt: now,
         updatedAt: now,
         parentFolderId: input.parentFolderId,
+        ...(parentKind === 'item' ? { parentKind } : {}),
       };
 
       if (input.localOrigin) {
@@ -753,6 +775,7 @@ export class CollaborativeDocumentCreationOrchestrator {
         descriptor.documentType,
         input.parentFolderId,
         metadata,
+        { parentKind: input.parentFolderId ? input.parentKind ?? 'page' : 'page' },
       );
     } catch (cause) {
       failure = cause;
@@ -780,6 +803,7 @@ export class CollaborativeDocumentCreationOrchestrator {
       createdAt: now,
       updatedAt: now,
       parentFolderId: input.parentFolderId,
+      ...(input.parentFolderId && input.parentKind === 'item' ? { parentKind: 'item' as const } : {}),
     };
     if (input.openAfterCreate !== false) this.dependencies.openPersonal(input.scope, document);
     return document;

@@ -472,6 +472,37 @@ describe('CollabDocsSession', () => {
     expect(harness.session.isPageTree()).toBe(true);
   });
 
+  it('carries typed-page parents and sibling order through page writes', async () => {
+    const ordered = (documentId: string, sortOrder: number | null) => ({ ...document(documentId, documentId), sortOrder });
+    const harness = createHarness(SCOPE);
+    (harness.dataSource.snapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [ordered('arch', 1024), ordered('zeta', 2048)],
+      containers: [],
+      itemPlacements: [{ itemId: 'i1', projectId: 'p1', parentId: 'arch', sortOrder: 1, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+      pageTree: true,
+    });
+    await harness.session.start();
+
+    // A new page goes at the end of a reordered group; under a typed page it names the item as its parent.
+    await harness.session.registerDocument({ documentId: 'new', title: 'New', documentType: 'markdown', parentFolderId: null });
+    expect(harness.commands).toContainEqual(expect.objectContaining({ type: 'register-document', documentId: 'new', sortOrder: 3072 }));
+    await harness.session.registerDocument({ documentId: 'child', title: 'Child', documentType: 'markdown', parentFolderId: 'i1', parentKind: 'item' });
+    const register = harness.commands.find((command) => command.type === 'register-document' && command.documentId === 'child');
+    expect(register).toMatchObject({ parentFolderId: 'i1', parentKind: 'item' });
+    expect(register).not.toHaveProperty('sortOrder');
+    expect(harness.session.getDocuments().find((doc) => doc.documentId === 'child')).toMatchObject({ parentKind: 'item' });
+
+    harness.session.moveDocument('zeta', 'i1', { parentKind: 'item', sortOrder: 5 });
+    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'zeta', parentFolderId: 'i1', parentKind: 'item', sortOrder: 5 });
+    // arch -> i1 -> child would close a loop through the typed page.
+    expect(harness.session.movePage('arch', 'child')).toBe(false);
+
+    // Removing arch drops the typed page's placement; its child stays with it.
+    harness.session.removePage('arch');
+    expect(harness.session.getItemPlacements()).toEqual([]);
+    expect(harness.session.getDocuments().map((doc) => doc.documentId)).toEqual(expect.arrayContaining(['child', 'zeta']));
+  });
+
   it('keeps a type page\'s prose with its type when the type moves or a page subtree is removed', async () => {
     const at = (documentId: string, parentFolderId: string | null) => ({ ...document(documentId, documentId), parentFolderId });
     const typeAt = (typeId: string, parentFolderId: string | null): SharedTypePlacement => ({

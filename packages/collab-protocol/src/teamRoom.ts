@@ -91,6 +91,13 @@ export interface TeamDocIndexRegisterMessage {
    * path into `encryptedTitle` so un-upgraded clients still render the tree.
    */
   parentFolderId?: string | null;
+  /** What `parentFolderId` names. Absent = `'page'`, so older clients are unchanged. */
+  parentKind?: PageParentKind;
+  /**
+   * Position among siblings. A number sets it; absent or null leaves a stored
+   * row's order alone and gives a new row none.
+   */
+  sortOrder?: number | null;
 }
 
 /** Update a document's encrypted title. */
@@ -125,11 +132,18 @@ export interface TeamDocRestoreMessage {
  * Reparent a document into a different folder (first-class folders). Null
  * `newParentFolderId` = move to root. Touches only the doc's `parent_folder_id`,
  * never its content, so local-to-shared links stay intact.
+ *
+ * The same parent (and kind) with a new `sortOrder` is a reorder. Absent
+ * `sortOrder` keeps the order when the parent is unchanged and clears it on a
+ * move to a new parent; null always clears it.
  */
 export interface TeamDocMoveMessage {
   type: 'docMove';
   documentId: string;
   newParentFolderId: string | null;
+  /** What `newParentFolderId` names. Absent = `'page'`. */
+  parentKind?: PageParentKind;
+  sortOrder?: number | null;
 }
 
 /** Request the full folder list (first-class folders). */
@@ -198,6 +212,8 @@ export interface TeamTypePlacementSetMessage {
   typeId: string;
   projectId?: string | null;
   parentFolderId: string | null;
+  /** What `parentFolderId` names. Absent = `'page'`. */
+  parentKind?: PageParentKind;
   sortOrder: number;
 }
 
@@ -216,8 +232,9 @@ export interface TeamItemPlacementIndexSyncRequestMessage {
 /**
  * Place a tracker item in the page tree, or move it. One placement per item per
  * project, so a second set for the same item replaces the first. `parentId` is
- * a page (document) id, or null for root; a missing or trashed page is refused
- * with `folder_not_found`. `projectId` omitted = the org's primary project. An
+ * a page (document) id, a tracker item id (`parentKind: 'item'`), or null for
+ * root; a missing or trashed page is refused with `folder_not_found`, and a
+ * parent inside the item's own subtree with `folder_cycle`. `projectId` omitted = the org's primary project. An
  * item with no placement sits under its type.
  */
 export interface TeamItemPlacementSetMessage {
@@ -225,6 +242,8 @@ export interface TeamItemPlacementSetMessage {
   itemId: string;
   projectId?: string | null;
   parentId: string | null;
+  /** What `parentId` names. Absent = `'page'`. */
+  parentKind?: PageParentKind;
   sortOrder: number;
 }
 
@@ -482,6 +501,13 @@ export interface TeamErrorMessage {
 // Data Types
 // ============================================================================
 
+/**
+ * What a page-tree parent id names: a page (document), or a tracker item. The
+ * TeamRoom cannot see tracker items, so it never checks that an item parent
+ * exists; it only refuses cycles it can see.
+ */
+export type PageParentKind = 'page' | 'item';
+
 /** Encrypted document index entry as stored/transmitted */
 export interface EncryptedDocIndexEntry {
   documentId: string;
@@ -515,6 +541,10 @@ export interface EncryptedDocIndexEntry {
    * during the dual-write transition).
    */
   parentFolderId?: string | null;
+  /** What `parentFolderId` names. Absent from older servers = `'page'`. */
+  parentKind?: PageParentKind;
+  /** Position among siblings; null = never reordered. Absent from older servers. */
+  sortOrder?: number | null;
   /** Millisecond epoch when moved to Trash; null/undefined means active. */
   trashedAt?: number | null;
 }
@@ -550,6 +580,8 @@ export interface TypePlacementNode {
   projectId: string;
   /** Null = root level. */
   parentFolderId: string | null;
+  /** What `parentFolderId` names. Absent from older servers = `'page'`. */
+  parentKind?: PageParentKind;
   sortOrder: number;
   createdBy: string;
   createdAt: number;
@@ -564,8 +596,10 @@ export interface TypePlacementNode {
 export interface ItemPlacementNode {
   itemId: string;
   projectId: string | null;
-  /** Page (document) id; null = root level. */
+  /** Page (document) or tracker item id, per `parentKind`; null = root level. */
   parentId: string | null;
+  /** What `parentId` names. Absent from older servers = `'page'`. */
+  parentKind?: PageParentKind;
   sortOrder: number;
   createdBy: string;
   createdAt: number;

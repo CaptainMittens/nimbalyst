@@ -9,6 +9,12 @@
  * stable ids so a later promotion to the team can follow
  * `publishTrackerCreation.ts`; `publication_status` stays 'local' until then.
  *
+ * Since 0051 a parent can also be a typed page (a tracker item, `parentKind:
+ * 'item'`), and pages carry a sibling order. Validation follows the team
+ * store, and goes further where only a local store can: a typed-page parent
+ * must exist in this workspace, and the cycle check walks through typed pages
+ * and, for an unplaced one, through its type.
+ *
  * Rows are only deleted by `remove-document` and `remove-folder` (a page and
  * its subtree); trash is the default path for a document.
  */
@@ -19,6 +25,7 @@ import type {
   SharedDocument,
   SharedFolder,
   SharedItemPlacement,
+  SharedParentKind,
   SharedTypePlacement,
 } from '@nimbalyst/collab-client/docs';
 import { getDatabase } from '../database/initialize';
@@ -68,6 +75,12 @@ function requireId(value: unknown, name: string): string {
 
 const OK: CollabDocsCommandResult = { ok: true };
 
+const kindOf = (value: unknown): SharedParentKind => (value === 'item' ? 'item' : 'page');
+const orderOf = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) ? value : null);
+
+/** A node in the tree, for the cycle walk. */
+type TreeRef = { kind: SharedParentKind | 'type'; id: string };
+
 export class PersonalPagesService {
   private readonly getDb: () => store.PersonalPagesDb | null;
   private readonly history: Pick<HistoryManager, 'createSnapshot'>;
@@ -113,12 +126,14 @@ export class PersonalPagesService {
       case 'reconnect':
         return OK;
       case 'register-document':
-        await this.assertPage(db, ws, command.parentFolderId ?? null);
+        await this.assertParent(db, ws, command.parentFolderId ?? null, kindOf(command.parentKind));
         await store.upsertDocument(db, ws, {
           documentId: requireId(command.documentId, 'documentId'),
           title: command.title ?? '',
           documentType: requireId(command.documentType, 'documentType'),
           parentFolderId: command.parentFolderId ?? null,
+          parentKind: command.parentFolderId ? kindOf(command.parentKind) : 'page',
+          sortOrder: orderOf(command.sortOrder),
           editorId: command.metadata?.editorId ?? null,
           fileExtension: command.metadata?.fileExtension ?? null,
         });
@@ -135,7 +150,10 @@ export class PersonalPagesService {
         await this.mustUpdateDocument(db, ws, command.documentId, { trashed_at: null });
         break;
       case 'move-document':
-        await this.movePage(db, ws, requireId(command.documentId, 'documentId'), command.parentFolderId ?? null);
+        await this.movePage(
+          db, ws, requireId(command.documentId, 'documentId'), command.parentFolderId ?? null,
+          kindOf(command.parentKind), orderOf(command.sortOrder),
+        );
         break;
       case 'remove-document':
         await store.deleteDocument(db, ws, requireId(command.documentId, 'documentId'));
@@ -144,12 +162,14 @@ export class PersonalPagesService {
       // is a page with an empty body.
       case 'register-folder': {
         const pageId = requireId(command.folderId, 'folderId');
-        await this.assertPage(db, ws, command.parentFolderId ?? null);
+        await this.assertParent(db, ws, command.parentFolderId ?? null, 'page');
         await store.upsertDocument(db, ws, {
           documentId: pageId,
           title: (command.name ?? '').trim().slice(0, 120),
           documentType: 'markdown',
           parentFolderId: command.parentFolderId ?? null,
+          parentKind: 'page',
+          sortOrder: null,
           editorId: null,
           fileExtension: null,
         });
@@ -159,30 +179,40 @@ export class PersonalPagesService {
         await this.mustUpdateDocument(db, ws, command.folderId, { title: (command.name ?? '').trim().slice(0, 120) });
         break;
       case 'move-folder':
-        await this.movePage(db, ws, requireId(command.folderId, 'folderId'), command.parentFolderId ?? null);
+        await this.movePage(db, ws, requireId(command.folderId, 'folderId'), command.parentFolderId ?? null, 'page', null);
         break;
       case 'remove-folder':
         await store.deletePageSubtree(db, ws, requireId(command.folderId, 'folderId'));
         break;
-      case 'set-type-placement':
-        await this.assertPage(db, ws, command.parentFolderId ?? null);
+      case 'set-type-placement': {
+        const typeId = requireId(command.typeId, 'typeId');
+        const parentKind = command.parentFolderId ? kindOf(command.parentKind) : 'page';
+        await this.assertParent(db, ws, command.parentFolderId ?? null, parentKind);
+        await this.assertNoCycle(db, ws, { kind: 'type', id: typeId }, command.parentFolderId ?? null, parentKind);
         await store.upsertTypePlacement(db, ws, {
-          typeId: requireId(command.typeId, 'typeId'),
+          typeId,
           parentFolderId: command.parentFolderId ?? null,
+          parentKind,
           sortOrder: Number.isFinite(command.sortOrder) ? command.sortOrder : 0,
         });
         break;
+      }
       case 'remove-type-placement':
         await store.deleteTypePlacement(db, ws, requireId(command.typeId, 'typeId'));
         break;
-      case 'set-item-placement':
-        await this.assertPage(db, ws, command.parentId ?? null);
+      case 'set-item-placement': {
+        const itemId = requireId(command.itemId, 'itemId');
+        const parentKind = command.parentId ? kindOf(command.parentKind) : 'page';
+        await this.assertParent(db, ws, command.parentId ?? null, parentKind);
+        await this.assertNoCycle(db, ws, { kind: 'item', id: itemId }, command.parentId ?? null, parentKind);
         await store.upsertItemPlacement(db, ws, {
-          itemId: requireId(command.itemId, 'itemId'),
+          itemId,
           parentId: command.parentId ?? null,
+          parentKind,
           sortOrder: Number.isFinite(command.sortOrder) ? command.sortOrder : 0,
         });
         break;
+      }
       case 'remove-item-placement':
         await store.deleteItemPlacement(db, ws, requireId(command.itemId, 'itemId'));
         break;
@@ -230,26 +260,86 @@ export class PersonalPagesService {
     }
   }
 
-  /** A parent must be a page (a non-trashed document) in this workspace, or null for root. */
-  private async assertPage(db: store.PersonalPagesDb, ws: string, pageId: string | null): Promise<SharedDocument[]> {
-    const documents = await store.listDocuments(db, ws);
-    if (pageId !== null && !documents.some((document) => document.documentId === pageId && document.trashedAt == null)) {
-      throw new Error(`Unknown personal page '${pageId}'`);
+  /**
+   * A parent is a page (a non-trashed document in this workspace), a typed page
+   * (a tracker item of this workspace that is not deleted), or null for root.
+   */
+  private async assertParent(db: store.PersonalPagesDb, ws: string, parentId: string | null, kind: SharedParentKind): Promise<void> {
+    if (parentId === null) return;
+    if (kind === 'item') {
+      if (!(await store.itemType(db, ws, parentId))) throw new Error(`Unknown typed page '${parentId}'`);
+      return;
     }
-    return documents;
+    const documents = await store.listDocuments(db, ws);
+    if (!documents.some((document) => document.documentId === parentId && document.trashedAt == null)) {
+      throw new Error(`Unknown personal page '${parentId}'`);
+    }
   }
 
-  /** Reparent a page; the new parent must not be the page or one of its descendants. */
-  private async movePage(db: store.PersonalPagesDb, ws: string, pageId: string, parentId: string | null): Promise<void> {
-    const documents = await this.assertPage(db, ws, parentId);
-    const pages = documents.map((document) => ({
-      folderId: document.documentId,
-      parentFolderId: document.parentFolderId ?? null,
-    })) as SharedFolder[];
-    if (parentId !== null && subtreeFolderIds(pages, pageId).includes(parentId)) {
-      throw new Error(`Refusing to move page '${pageId}' into its own descendant (cycle)`);
+  /**
+   * Refuse a parent whose way up reaches `moving`: through page parents, typed
+   * page placements and, for a typed page with no placement, its type's
+   * placement (where the tree shows it).
+   */
+  private async assertNoCycle(
+    db: store.PersonalPagesDb,
+    ws: string,
+    moving: TreeRef,
+    parentId: string | null,
+    parentKind: SharedParentKind,
+  ): Promise<void> {
+    if (parentId === null) return;
+    const [documents, typePlacements, itemPlacements] = await Promise.all([
+      store.listDocuments(db, ws),
+      store.listTypePlacements(db, ws),
+      store.listItemPlacements(db, ws),
+    ]);
+    const documentById = new Map(documents.map((document) => [document.documentId, document]));
+    const typeById = new Map(typePlacements.map((placement) => [placement.typeId, placement]));
+    const itemById = new Map(itemPlacements.map((placement) => [placement.itemId, placement]));
+    const up = (id: string | null | undefined, kind: SharedParentKind | undefined): TreeRef | null =>
+      id ? { id, kind: kind ?? 'page' } : null;
+    const seen = new Set<string>();
+    let ref: TreeRef | null = { id: parentId, kind: parentKind };
+    while (ref && !seen.has(`${ref.kind}:${ref.id}`)) {
+      if (ref.kind === moving.kind && ref.id === moving.id) {
+        throw new Error(`Refusing to put '${moving.id}' under its own descendant (cycle)`);
+      }
+      seen.add(`${ref.kind}:${ref.id}`);
+      if (ref.kind === 'page') {
+        const document = documentById.get(ref.id);
+        ref = up(document?.parentFolderId, document?.parentKind);
+      } else if (ref.kind === 'type') {
+        const placement = typeById.get(ref.id);
+        ref = up(placement?.parentFolderId, placement?.parentKind);
+      } else {
+        const placement = itemById.get(ref.id);
+        if (placement) {
+          ref = up(placement.parentId, placement.parentKind);
+        } else {
+          const typeId = await store.itemType(db, ws, ref.id);
+          ref = typeId ? { id: typeId, kind: 'type' } : null;
+        }
+      }
     }
-    await this.mustUpdateDocument(db, ws, pageId, { parent_folder_id: parentId });
+  }
+
+  /**
+   * Reparent or reorder a page. The new parent must exist and must not be the
+   * page or below it; an order absent on the move leaves the page unordered.
+   */
+  private async movePage(
+    db: store.PersonalPagesDb,
+    ws: string,
+    pageId: string,
+    parentId: string | null,
+    parentKind: SharedParentKind,
+    sortOrder: number | null,
+  ): Promise<void> {
+    const kind = parentId ? parentKind : 'page';
+    await this.assertParent(db, ws, parentId, kind);
+    await this.assertNoCycle(db, ws, { kind: 'page', id: pageId }, parentId, kind);
+    await this.mustUpdateDocument(db, ws, pageId, { parent_folder_id: parentId, parent_kind: kind, sort_order: sortOrder });
   }
 
   private async mustUpdateDocument(db: store.PersonalPagesDb, ws: string, documentId: string, values: Record<string, unknown>) {
@@ -257,27 +347,6 @@ export class PersonalPagesService {
       throw new Error(`Unknown personal document '${documentId}'`);
     }
   }
-}
-
-/** The folder (or page) and all its descendants, root first. */
-export function subtreeFolderIds(folders: SharedFolder[], rootId: string): string[] {
-  const children = new Map<string, string[]>();
-  for (const folder of folders) {
-    const parent = folder.parentFolderId ?? null;
-    if (parent === null) continue;
-    children.set(parent, [...(children.get(parent) ?? []), folder.folderId]);
-  }
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const queue = [rootId];
-  while (queue.length > 0) {
-    const id = queue.shift()!;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-    queue.push(...(children.get(id) ?? []));
-  }
-  return out;
 }
 
 let service: PersonalPagesService | null = null;

@@ -32,6 +32,9 @@ describe('ElectronCollabDocumentsDataSource', () => {
         createdBy: 'member-one',
         createdAt: 1,
         updatedAt: 2,
+        parentFolderId: 'item-9',
+        parentKind: 'item',
+        sortOrder: 1024,
       }]),
       getFolders: vi.fn(() => [{
         folderId: 'folder-1',
@@ -55,6 +58,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
         itemId: 'item-1',
         projectId: 'project-one',
         parentId: 'doc-1',
+        parentKind: 'page',
         sortOrder: 2,
         createdBy: 'member-one',
         createdAt: 1,
@@ -64,6 +68,8 @@ describe('ElectronCollabDocumentsDataSource', () => {
       setItemPlacement: vi.fn(),
       removeItemPlacement: vi.fn(),
       refreshItemPlacements: vi.fn(async () => null),
+      registerDocument: vi.fn(async () => true),
+      moveDocument: vi.fn(),
       getTeamState: vi.fn(() => ({ members: [] })),
       updateDocumentTitle: vi.fn(async () => undefined),
       refreshFolders: vi.fn(async () => []),
@@ -89,10 +95,14 @@ describe('ElectronCollabDocumentsDataSource', () => {
         documentId: 'doc-1',
         title: 'One',
         teamProjectId: 'project-owned',
+        parentFolderId: 'item-9',
+        parentKind: 'item',
+        sortOrder: 1024,
       })],
       containers: [expect.objectContaining({ folderId: 'folder-1', name: 'Folder' })],
-      typePlacements: [expect.objectContaining({ typeId: 'module', parentFolderId: 'folder-1' })],
-      itemPlacements: [expect.objectContaining({ itemId: 'item-1', parentId: 'doc-1', sortOrder: 2 })],
+      // Rows from an older server carry no parent kind: a page.
+      typePlacements: [expect.objectContaining({ typeId: 'module', parentFolderId: 'folder-1', parentKind: 'page' })],
+      itemPlacements: [expect.objectContaining({ itemId: 'item-1', parentId: 'doc-1', parentKind: 'page', sortOrder: 2 })],
       pageTree: true,
     });
     config.onDocumentChanged?.({
@@ -112,7 +122,16 @@ describe('ElectronCollabDocumentsDataSource', () => {
     config.onDocumentFeedbackIndex?.(inventory);
     expect(onDocumentFeedbackIndex).toHaveBeenCalledWith(inventory);
     await source.command({ type: 'update-document-title', documentId: 'doc-1', title: 'Renamed' });
-    await source.command({ type: 'set-type-placement', typeId: 'module', parentFolderId: null, sortOrder: 4 });
+    await source.command({ type: 'set-type-placement', typeId: 'module', parentFolderId: 'item-9', parentKind: 'item', sortOrder: 4 });
+    await source.command({
+      type: 'register-document', documentId: 'doc-3', title: 'Three', documentType: 'markdown',
+      parentFolderId: 'item-9', parentKind: 'item', sortOrder: 2048,
+    });
+    await source.command({ type: 'move-document', documentId: 'doc-3', parentFolderId: null, sortOrder: 5 });
+    expect(provider.registerDocument).toHaveBeenCalledWith(
+      'doc-3', 'Three', 'markdown', 'item-9', undefined, undefined, { parentKind: 'item', sortOrder: 2048 },
+    );
+    expect(provider.moveDocument).toHaveBeenCalledWith('doc-3', null, { sortOrder: 5 });
     await source.command({ type: 'remove-type-placement', typeId: 'module' });
     await expect(source.command({ type: 'refresh-type-placements' }))
       .resolves.toEqual({ ok: true, typePlacements: null });
@@ -120,7 +139,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
       .resolves.toEqual({ ok: true, itemPlacements: null });
 
     expect(changes).toEqual(['items-upserted', 'containers-removed', 'snapshot', 'status']);
-    expect(provider.setTypePlacement).toHaveBeenCalledWith('module', null, 4);
+    expect(provider.setTypePlacement).toHaveBeenCalledWith('module', 'item-9', 4, 'item');
     expect(provider.removeTypePlacement).toHaveBeenCalledWith('module');
     // No server list yet (older server): the snapshot must not claim an empty one.
     provider.getTypePlacements.mockReturnValueOnce(null as never);
@@ -169,7 +188,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
       // Confirmed by the broadcast for this item, not by an unrelated one.
       const set = settled(source.command({ type: 'set-item-placement', itemId: 'i1', parentId: 'page-1', sortOrder: 0 }));
       await vi.advanceTimersByTimeAsync(0);
-      expect(provider.setItemPlacement).toHaveBeenCalledWith('i1', 'page-1', 0);
+      expect(provider.setItemPlacement).toHaveBeenCalledWith('i1', 'page-1', 0, undefined);
       config.onItemPlacementChanged?.(placement('other', 'page-1') as never);
       config.onItemPlacementChanged?.(placement('i1', 'page-1') as never);
       expect(await set).toBe('ok');
@@ -190,6 +209,68 @@ describe('ElectronCollabDocumentsDataSource', () => {
       const silent = settled(source.command({ type: 'remove-item-placement', itemId: 'i3' }));
       await vi.advanceTimersByTimeAsync(6000);
       expect(await silent).toMatch(/did not confirm/);
+      source.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('settles a confirmed page move or type placement on the server\'s echo, a refusal, or a timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      let config!: TeamSyncConfig;
+      const provider = {
+        connect: vi.fn(async () => undefined),
+        getStatus: vi.fn(() => 'connected' as const),
+        getDocuments: vi.fn(() => []),
+        getFolders: vi.fn(() => []),
+        getTypePlacements: vi.fn(() => null),
+        getItemPlacements: vi.fn(() => null),
+        isPageTree: vi.fn(() => true),
+        moveDocument: vi.fn(),
+        setTypePlacement: vi.fn(),
+        destroy: vi.fn(),
+      };
+      const source = new ElectronCollabDocumentsDataSource({
+        scope,
+        getJwt: async () => asTeamJwt('team-jwt'),
+        createProvider: (nextConfig) => {
+          config = nextConfig;
+          return provider as any;
+        },
+      });
+      const settled = (promise: Promise<unknown>) => promise.then(() => 'ok', (error: Error) => error.message);
+      const doc = (parentFolderId: string | null, parentKind: 'page' | 'item') => ({
+        documentId: 'page-1', projectId: 'p', title: 't', documentType: 'markdown', createdBy: 'm', createdAt: 1, updatedAt: 1,
+        parentFolderId, parentKind, sortOrder: null,
+      });
+      const typeRow = (parentFolderId: string | null, parentKind?: 'item') => ({
+        typeId: 'decision', projectId: 'p', parentFolderId, sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1,
+        ...(parentKind ? { parentKind } : {}),
+      });
+
+      // Confirmed by the echo of this page under the typed page, not by an older server's echo without the kind.
+      const moved = settled(source.command({ type: 'move-document', documentId: 'page-1', parentFolderId: 'mod_1', parentKind: 'item', confirm: true }));
+      await vi.advanceTimersByTimeAsync(0);
+      config.onDocumentChanged?.(doc('mod_1', 'page') as never);
+      config.onDocumentChanged?.(doc('mod_1', 'item') as never);
+      expect(await moved).toBe('ok');
+
+      // No echo (an older server refused the parent): a failure, never a success.
+      const silent = settled(source.command({ type: 'move-document', documentId: 'page-1', parentFolderId: 'mod_2', parentKind: 'item', confirm: true }));
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(await silent).toMatch(/did not confirm/);
+
+      const placed = settled(source.command({ type: 'set-type-placement', typeId: 'decision', parentFolderId: 'mod_1', parentKind: 'item', sortOrder: 0, confirm: true }));
+      await vi.advanceTimersByTimeAsync(0);
+      config.onTypePlacementChanged?.(typeRow('mod_1', 'item') as never);
+      expect(await placed).toBe('ok');
+
+      // A refusal: TeamSync re-reads the list after a server error.
+      const refused = settled(source.command({ type: 'set-type-placement', typeId: 'decision', parentFolderId: 'mod_2', parentKind: 'item', sortOrder: 0, confirm: true }));
+      await vi.advanceTimersByTimeAsync(0);
+      config.onTypePlacementsLoaded?.([typeRow('mod_1', 'item')] as never);
+      expect(await refused).toMatch(/refused/);
       source.dispose();
     } finally {
       vi.useRealTimers();

@@ -7,3 +7,6 @@ export type { TrackerViewEmbedProps } from './TrackerViewEmbed';
 export { createTypePageView } from './typePageView';
 export { createItemWhereResolver, type ItemWhereInput } from './typePageWhere';
 export type { TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
+export { pageTreeAncestors, type PageTreeAncestorsInput, type PageTreeNodeRef } from './pageTreeAncestors';
+// The type page lists what the tree row counts: a type and its subtypes.
+export { typeWithSubtypes } from '../../docs/collabPageTree';

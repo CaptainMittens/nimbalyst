@@ -54,7 +54,10 @@ export const COLLAB_BUNDLE_EAGER_GZIP_BUDGET_BYTES = {
   // sit under any page; the page menu, move dialog and tree builder are lazy,
   // and what remains is the sidebar's page-row and drag handling. Reset with
   // ~3.5% headroom.
-  'docs-ui': 84_000,
+  // 2026-10-02: 83,980 bytes after typed pages became parents, plain pages got
+  // a sort order and the native confirms became an in-app dialog (lazy, own
+  // root). Reset with ~5% headroom so small Pages changes need no shuffling.
+  'docs-ui': 88_000,
   // Sep 5 privacy-aware document transport graph measured 35,049 bytes.
   // Keep a narrow allowance for the supported response/refresh contract.
   'feedback-ui': 35_500,

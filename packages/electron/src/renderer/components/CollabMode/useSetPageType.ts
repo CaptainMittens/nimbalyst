@@ -26,11 +26,13 @@ import { errorNotificationService } from '../../services/ErrorNotificationServic
 import { getCollabConfig } from '../../utils/collabDocumentOpener';
 import { openPageTab } from './collabPageTabs';
 import { flushPersonalPageBody } from './usePersonalPageBody';
+import { listPageChildren, movePageChild } from './setPageTypeChildren';
 import {
   setPageType,
   type CreatedPageItem,
   type ItemBodyCheck,
   type ItemPlacementResult,
+  type ItemPosition,
   type PageCopy,
   type PageTypeLane,
   type SetPageTypeDependencies,
@@ -68,13 +70,6 @@ function openItemInPlace(context: SetPageTypeContext, itemId: string, pageId: st
   const itemIndex = itemTabId ? tabsActions.getSnapshot().tabOrder.indexOf(itemTabId) : -1;
   if (itemIndex >= 0 && pageIndex >= 0) tabsActions.reorderTabs(itemIndex, pageIndex);
   tabsActions.removeTab(pageTab.id);
-}
-
-function countChildren(session: CollabDocsSession, pageId: string): number {
-  const pages = session.getDocuments().filter((document) => document.parentFolderId === pageId).length;
-  const types = store.get(session.atoms.typePlacements).filter((placement) => placement.parentFolderId === pageId).length;
-  const items = session.getItemPlacements().filter((placement) => placement.parentId === pageId).length;
-  return pages + types + items;
 }
 
 const OPEN_EDITOR_FLUSH_TIMEOUT_MS = 8_000;
@@ -138,8 +133,19 @@ async function pageUnchangedSince(context: SetPageTypeContext, pageId: string, c
  * The session resolves `{ ok }` once the placement is stored (3b-T). Anything
  * else is unconfirmed, and an unconfirmed placement never lets the page go.
  */
-async function placeItem(session: CollabDocsSession, itemId: string, parentId: string | null): Promise<ItemPlacementResult> {
-  const result: unknown = await session.setItemPlacement(itemId, parentId);
+async function placeItem(
+  session: CollabDocsSession,
+  itemId: string,
+  parentId: string | null,
+  position: ItemPosition,
+): Promise<ItemPlacementResult> {
+  const existing = session.getItemPlacements().find((placement) => placement.itemId === itemId);
+  const result: unknown = await session.setItemPlacement(
+    itemId,
+    parentId,
+    position.sortOrder ?? existing?.sortOrder ?? undefined,
+    parentId ? position.parentKind : undefined,
+  );
   if (result && typeof result === 'object' && 'ok' in result) {
     const placed = result as { ok: boolean; error?: string };
     return placed.ok ? { ok: true } : { ok: false, error: placed.error || 'the placement was refused' };
@@ -179,7 +185,8 @@ async function createItem(
 export function buildSetPageTypeDependencies(context: SetPageTypeContext, title: string): SetPageTypeDependencies {
   const { session, workspacePath, lane } = context;
   return {
-    childCount: (pageId) => countChildren(session, pageId),
+    listChildren: (pageId) => listPageChildren(session, store.get(session.atoms.typePlacements), pageId),
+    moveChildUnderItem: (child, itemId) => movePageChild(session, store.get(session.atoms.typePlacements), child, itemId),
     flushPageEditor: (pageId) => flushPageEditor(context, pageId),
     readPageMarkdown: (pageId) => readPageMarkdown(context, pageId),
     createItem: (input) => createItem(context, input),
@@ -193,7 +200,7 @@ export function buildSetPageTypeDependencies(context: SetPageTypeContext, title:
       const result = await window.electronAPI.documentService.deleteTrackerItem({ itemId });
       if (!result.success) throw new Error(result.error || 'Delete failed');
     },
-    setItemPlacement: (itemId, parentId) => placeItem(session, itemId, parentId),
+    setItemPlacement: (itemId, parentId, position) => placeItem(session, itemId, parentId, position),
     pageUnchangedSince: (pageId, copy) => pageUnchangedSince(context, pageId, copy),
     trashPage: async (pageId) => session.trashDocument(pageId),
     openItem: (itemId, pageId) => openItemInPlace(context, itemId, pageId, title),
@@ -224,6 +231,8 @@ export function useSetPageType(workspacePath: string, teamScope: CollabScope | n
             title,
             documentType: page.documentType,
             parentId: page.parentFolderId ?? null,
+            parentKind: page.parentKind ?? 'page',
+            sortOrder: page.sortOrder ?? null,
           },
         },
         buildSetPageTypeDependencies({ lane, workspacePath, session, teamScope, tabsActions }, title),

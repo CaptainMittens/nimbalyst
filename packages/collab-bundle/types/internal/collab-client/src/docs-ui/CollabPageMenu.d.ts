@@ -2,7 +2,7 @@
  * Context menu entries for the one page tree (documents nest in documents):
  * the page head block (New page inside, Set type, Rename, Move to..., Copy
  * link), the page delete entry with its child count, and the typed-page
- * entries. The sidebar keeps its per-document extras (favorite, history, local
+ * entries (New page inside, Place type..., Move to..., Back under its type). The sidebar keeps its per-document extras (favorite, history, local
  * source) between the head and the delete entry. Lazy-loaded (and preloaded
  * once a tree is a page tree) to keep it out of the docs-ui eager bundle.
  */
@@ -33,9 +33,12 @@ export declare const CollabPageDeleteEntry: React.FC<{
     childCount: number;
     onDelete: () => void;
 }>;
-/** A typed page's row: move it anywhere, or back under its type. */
+/** A typed page's row: pages and types inside it, move it anywhere, or back under its type. */
 export declare const CollabItemMenu: React.FC<{
     placed: boolean;
+    onNewPageInside: () => void;
+    /** Absent without tracker data (no types to place). */
+    onPlaceType?: () => void;
     onMoveTo: () => void;
     onBackUnderType: () => void;
 }>;

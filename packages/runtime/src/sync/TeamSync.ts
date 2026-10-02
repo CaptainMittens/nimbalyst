@@ -38,7 +38,10 @@ import type {
   SharedDocumentTypeMetadataV2,
   TypePlacementNode,
   ItemPlacementNode,
+  DocumentPlacementOptions,
 } from './teamSyncTypes';
+import type { PageParentKind } from '@nimbalyst/collab-protocol';
+import { decodeDocEntry, lockedDocEntry } from './teamDocEntries';
 import { asTeamMemberId } from '../auth/jwtScopes';
 import type { BoundedPreview } from '@nimbalyst/collab-protocol';
 import { appendSyncClientParams } from './syncClientInfo';
@@ -240,6 +243,9 @@ export class TeamSyncProvider {
    * the message was queued offline. The registration itself is unaffected
    * (the mutation is idempotent and the offline queue still carries it); the
    * caller decides whether to proceed optimistically.
+   *
+   * `placement.parentKind` says whether `parentFolderId` is a page or a tracker
+   * item; `placement.sortOrder` positions the document among its siblings.
    */
   async registerDocument(
     documentId: string,
@@ -248,6 +254,7 @@ export class TeamSyncProvider {
     parentFolderId: string | null = null,
     metadata?: SharedDocumentTypeMetadataV2,
     ackTimeoutMs = 6000,
+    placement: DocumentPlacementOptions = {},
   ): Promise<boolean> {
     const { encryptedTitle, titleIv } = await this.encodeTitleForWire(title);
     // Register the waiter BEFORE sending: the ack can land in the same tick the
@@ -260,6 +267,7 @@ export class TeamSyncProvider {
       // project-partitioned doc index (and a future move) can scope it.
       projectId: this.config.teamProjectId ?? null,
       parentFolderId,
+      ...placementFields(placement),
     });
     return acked;
   }
@@ -330,14 +338,23 @@ export class TeamSyncProvider {
     });
   }
 
-  /** Reparent a document into a folder (null = root). Content untouched. */
-  moveDocument(documentId: string, newParentFolderId: string | null): void {
+  /**
+   * Reparent a document (null = root) under a page or, with `parentKind:
+   * 'item'`, a tracker item. The same parent with a new `sortOrder` is a
+   * reorder. Content untouched.
+   */
+  moveDocument(documentId: string, newParentFolderId: string | null, placement: DocumentPlacementOptions = {}): void {
     const existing = this.localEntries.get(documentId);
     if (existing) {
-      this.localEntries.set(documentId, { ...existing, parentFolderId: newParentFolderId });
+      const parentKind = newParentFolderId ? placement.parentKind ?? 'page' : 'page';
+      const sameParent = (existing.parentFolderId ?? null) === newParentFolderId
+        && (existing.parentKind ?? 'page') === parentKind;
+      const sortOrder = placement.sortOrder !== undefined ? placement.sortOrder
+        : sameParent ? existing.sortOrder ?? null : null;
+      this.localEntries.set(documentId, { ...existing, parentFolderId: newParentFolderId, parentKind, sortOrder });
     }
     this.send({
-      type: 'docMove', documentId, newParentFolderId,
+      type: 'docMove', documentId, newParentFolderId, ...placementFields(placement),
     });
   }
 
@@ -445,10 +462,11 @@ export class TeamSyncProvider {
   // Public API: Tracker-type placements in the page tree
   // --------------------------------------------------------------------------
 
-  /** Place a type (or move its placement). `parentFolderId` null = root level. */
-  setTypePlacement(typeId: string, parentFolderId: string | null, sortOrder = 0): void {
+  /** Place a type (or move its placement) under a page or an item. `parentFolderId` null = root level. */
+  setTypePlacement(typeId: string, parentFolderId: string | null, sortOrder = 0, parentKind?: PageParentKind): void {
     this.send({
       type: 'typePlacementSet', typeId, parentFolderId, sortOrder,
+      ...(parentKind ? { parentKind } : {}),
       projectId: this.config.teamProjectId ?? null,
     });
   }
@@ -483,9 +501,17 @@ export class TeamSyncProvider {
     return this.pageTree;
   }
 
-  /** Place an item (or move its placement). `parentId` is a page id; null = root level. */
-  setItemPlacement(itemId: string, parentId: string | null, sortOrder = 0): void {
-    this.send({ type: 'itemPlacementSet', itemId, parentId, sortOrder, projectId: this.config.teamProjectId ?? null });
+  /**
+   * Place an item (or move its placement). `parentId` is a page id, or an item
+   * id with `parentKind: 'item'`; null = root level. The server refuses a
+   * parent inside the item's own subtree.
+   */
+  setItemPlacement(itemId: string, parentId: string | null, sortOrder = 0, parentKind?: PageParentKind): void {
+    this.send({
+      type: 'itemPlacementSet', itemId, parentId, sortOrder,
+      ...(parentKind ? { parentKind } : {}),
+      projectId: this.config.teamProjectId ?? null,
+    });
   }
 
   /** Put an item back under its type. */
@@ -725,29 +751,14 @@ export class TeamSyncProvider {
   private async handleDocIndexBroadcast(msg: TeamDocIndexBroadcastMessage): Promise<void> {
     let entry: DocIndexEntry;
     try {
-      entry = await this.decryptEntry(msg.document);
+      entry = decodeDocEntry(msg.document);
     } catch (err) {
       console.warn(
-        '[TeamSync] Title decrypt failed on broadcast; surfacing as locked entry:',
+        '[TeamSync] Title decrypt failed on broadcast; keeping a known title or surfacing as locked:',
         msg.document.documentId,
         err,
       );
-      entry = {
-        documentId: msg.document.documentId,
-        projectId: msg.document.projectId ?? null,
-        title: '',
-        documentType: msg.document.documentType,
-        metadataVersion: msg.document.metadataVersion,
-        fileExtension: msg.document.fileExtension,
-        editorId: msg.document.editorId,
-        createdBy: msg.document.createdBy,
-        createdAt: msg.document.createdAt,
-        updatedAt: msg.document.updatedAt,
-        lastWriterUserId: msg.document.lastWriterUserId ?? null,
-        parentFolderId: msg.document.parentFolderId ?? null,
-        trashedAt: msg.document.trashedAt ?? null,
-        decryptFailed: true,
-      };
+      entry = lockedDocEntry(msg.document, this.localEntries.get(msg.document.documentId));
     }
     this.localEntries.set(entry.documentId, entry);
     if (this.teamState) {
@@ -879,7 +890,7 @@ export class TeamSyncProvider {
     let quietLockedCount = 0;
     for (const e of encrypted) {
       try {
-        results.push(await this.decryptEntry(e));
+        results.push(decodeDocEntry(e));
       } catch (err) {
         // Preserve the entry as a locked placeholder so the user can see
         // that a doc exists and take action (refresh keys, ask admin to
@@ -893,22 +904,7 @@ export class TeamSyncProvider {
             err,
           );
         }
-        results.push({
-          documentId: e.documentId,
-          projectId: e.projectId ?? null,
-          title: '',
-          documentType: e.documentType,
-          metadataVersion: e.metadataVersion,
-          fileExtension: e.fileExtension,
-          editorId: e.editorId,
-          createdBy: e.createdBy,
-          createdAt: e.createdAt,
-          updatedAt: e.updatedAt,
-          lastWriterUserId: e.lastWriterUserId ?? null,
-          parentFolderId: e.parentFolderId ?? null,
-          trashedAt: e.trashedAt ?? null,
-          decryptFailed: true,
-        });
+        results.push(lockedDocEntry(e));
       }
     }
     if (quietLockedCount > 0) {
@@ -917,47 +913,6 @@ export class TeamSyncProvider {
       );
     }
     return results;
-  }
-
-  private async decryptEntry(encrypted: EncryptedDocIndexEntry): Promise<DocIndexEntry> {
-    const title = await this.decryptTitleFromWire(
-      encrypted.documentId,
-      encrypted.encryptedTitle,
-      encrypted.titleIv,
-    );
-    return {
-      documentId: encrypted.documentId,
-      projectId: encrypted.projectId ?? null,
-      title,
-      documentType: encrypted.documentType,
-      metadataVersion: encrypted.metadataVersion,
-      fileExtension: encrypted.fileExtension,
-      editorId: encrypted.editorId,
-      createdBy: encrypted.createdBy,
-      createdAt: encrypted.createdAt,
-      updatedAt: encrypted.updatedAt,
-      lastWriterUserId: encrypted.lastWriterUserId ?? null,
-      parentFolderId: encrypted.parentFolderId ?? null,
-      trashedAt: encrypted.trashedAt ?? null,
-    };
-  }
-
-  /**
-   * Resolve a wire doc-index title to plaintext. The server decrypts titles it
-   * owns and sends them with the empty-iv sentinel (''). A NON-EMPTY iv is a
-   * pre-cutover row from the retired client-managed lane: no supported client
-   * holds that key, so THROW and let the caller mark the entry `decryptFailed`
-   * (locked) rather than rendering raw base64 as a title.
-   */
-  private async decryptTitleFromWire(
-    _documentId: string,
-    encryptedTitle: string,
-    titleIv: string,
-  ): Promise<string> {
-    if (titleIv) {
-      throw new Error('doc-index title is pre-cutover client-encrypted content and can no longer be read');
-    }
-    return encryptedTitle;
   }
 
   /**
@@ -1120,4 +1075,12 @@ export class TeamSyncProvider {
       this.scheduleReconnect();
     });
   }
+}
+
+/** Wire fields for a document placement; absent options stay off the wire for older servers. */
+function placementFields(placement: DocumentPlacementOptions): DocumentPlacementOptions {
+  return {
+    ...(placement.parentKind ? { parentKind: placement.parentKind } : {}),
+    ...(placement.sortOrder !== undefined ? { sortOrder: placement.sortOrder } : {}),
+  };
 }

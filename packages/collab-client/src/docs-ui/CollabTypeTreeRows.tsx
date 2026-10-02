@@ -9,6 +9,7 @@ import React, { useMemo } from 'react';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import type {
   CollabTreeItemNode,
+  CollabTreeNode,
   CollabTreeTypeNode,
   CollabTypeTreeResolver,
 } from '@nimbalyst/collab-client/docs';
@@ -43,6 +44,20 @@ export interface CollabRowDrop {
 const dropHandlers = (drop: CollabRowDrop | undefined) =>
   drop ? { onDragOver: drop.onDragOver, onDragLeave: drop.onDragLeave, onDrop: drop.onDrop } : {};
 
+const RowChevron: React.FC<{ expanded: boolean; onToggle: () => void }> = ({ expanded, onToggle }) => (
+  <span
+    className="file-tree-chevron"
+    role="button"
+    aria-label={expanded ? 'Collapse' : 'Expand'}
+    onClick={(event) => {
+      event.stopPropagation();
+      onToggle();
+    }}
+  >
+    <MaterialSymbol icon={expanded ? 'keyboard_arrow_down' : 'keyboard_arrow_right'} size={16} />
+  </span>
+);
+
 export const CollabTypeNodeRow: React.FC<{
   node: CollabTreeTypeNode;
   indent: number;
@@ -68,17 +83,7 @@ export const CollabTypeNodeRow: React.FC<{
     onContextMenu={onContextMenu}
     title={node.path}
   >
-    <span
-      className="file-tree-chevron"
-      role="button"
-      aria-label={expanded ? 'Collapse' : 'Expand'}
-      onClick={(event) => {
-        event.stopPropagation();
-        onToggle();
-      }}
-    >
-      <MaterialSymbol icon={expanded ? 'keyboard_arrow_down' : 'keyboard_arrow_right'} size={16} />
-    </span>
+    <RowChevron expanded={expanded} onToggle={onToggle} />
     <span className="file-tree-icon text-[var(--nim-purple)]">
       <MaterialSymbol icon="table" size={16} />
     </span>
@@ -103,6 +108,10 @@ export interface CollabItemRowActions {
   onDragEnd: () => void;
   /** Rows under a type (the type and its items) as drop targets. */
   rowDrop?: (node: CollabTreeTypeNode | CollabTreeItemNode) => CollabRowDrop;
+  /** A typed page holds pages, types and typed pages; these expand it. */
+  isExpanded?: (node: CollabTreeItemNode) => boolean;
+  onToggle?: (node: CollabTreeItemNode) => void;
+  renderChildren?: (nodes: CollabTreeNode[], childIndent: number) => React.ReactNode;
 }
 
 /**
@@ -117,7 +126,9 @@ export const CollabTypeItemRow: React.FC<{
   actions?: CollabItemRowActions;
 }> = ({ node, position, indent, onOpen, actions }) => {
   const drop = actions?.rowDrop?.(node);
-  return (
+  const hasChildren = (node.children?.length ?? 0) > 0 && !!actions?.renderChildren;
+  const expanded = hasChildren && (actions?.isExpanded?.(node) ?? false);
+  const row = (
   <button
     type="button"
     className={`collab-tree-item-row w-full flex items-center text-left file-tree-file${drop?.className ?? ''}`}
@@ -139,7 +150,7 @@ export const CollabTypeItemRow: React.FC<{
   >
     {node.typeLabel ? (
       <>
-        <span className="file-tree-spacer" />
+        {hasChildren ? <RowChevron expanded={expanded} onToggle={() => actions?.onToggle?.(node)} /> : <span className="file-tree-spacer" />}
         <span className="file-tree-icon"><MaterialSymbol icon="description" size={16} /></span>
         <span className="file-tree-name">{node.name}</span>
         <span className="collab-tree-item-type ml-auto mr-1 pl-1.5 shrink-0 text-[11px] text-[var(--nim-text-faint)]">
@@ -155,6 +166,13 @@ export const CollabTypeItemRow: React.FC<{
       </>
     )}
   </button>
+  );
+  if (!hasChildren) return row;
+  return (
+    <div>
+      {row}
+      {expanded ? actions!.renderChildren!(node.children!, indent + 16) : null}
+    </div>
   );
 };
 

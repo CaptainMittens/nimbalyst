@@ -7,6 +7,8 @@
 export interface WherePage {
   folderId: string;
   parentFolderId?: string | null;
+  /** What `parentFolderId` names; absent means a page. */
+  parentKind?: 'page' | 'item';
   name: string;
 }
 
@@ -14,6 +16,8 @@ export interface WherePlacement {
   itemId: string;
   /** Null means the root of the section. */
   parentId?: string | null;
+  /** What `parentId` names; absent means a page. */
+  parentKind?: 'page' | 'item';
 }
 
 export interface ItemWhereInput {
@@ -24,23 +28,42 @@ export interface ItemWhereInput {
   typeLabel: string;
   /** Shown for an item placed at the root of its section. */
   rootLabel: string;
+  /** A typed page's title, for one that is a parent; null when unknown here. */
+  itemTitle?: (itemId: string) => string | null;
 }
 
-export function createItemWhereResolver({ placements, pages, typeLabel, rootLabel }: ItemWhereInput): (itemId: string) => string {
-  const parentByItem = new Map(placements.map((placement) => [placement.itemId, placement.parentId ?? null]));
+/**
+ * Walks up through pages and typed pages, root first. A typed page with no
+ * placement of its own sits under its type, so the walk stops at it.
+ */
+export function createItemWhereResolver({ placements, pages, typeLabel, rootLabel, itemTitle }: ItemWhereInput): (itemId: string) => string {
+  const placementByItem = new Map(placements.map((placement) => [placement.itemId, placement]));
   const pagesById = new Map(pages.map((page) => [page.folderId, page]));
   return (itemId) => {
-    if (!parentByItem.has(itemId)) return typeLabel;
-    let pageId = parentByItem.get(itemId) ?? null;
-    if (pageId === null) return rootLabel;
+    const placement = placementByItem.get(itemId);
+    if (!placement) return typeLabel;
+    let parentId = placement.parentId ?? null;
+    let parentKind = placement.parentKind ?? 'page';
+    if (parentId === null) return rootLabel;
     const names: string[] = [];
     const seen = new Set<string>();
-    while (pageId !== null && !seen.has(pageId)) {
-      seen.add(pageId);
-      const page = pagesById.get(pageId);
-      if (!page) break;
-      names.unshift(page.name);
-      pageId = page.parentFolderId ?? null;
+    while (parentId !== null && !seen.has(`${parentKind}:${parentId}`)) {
+      seen.add(`${parentKind}:${parentId}`);
+      if (parentKind === 'item') {
+        const title = itemTitle?.(parentId);
+        if (!title) break;
+        names.unshift(title);
+        const next = placementByItem.get(parentId);
+        if (!next) break;
+        parentId = next.parentId ?? null;
+        parentKind = next.parentKind ?? 'page';
+      } else {
+        const page = pagesById.get(parentId);
+        if (!page) break;
+        names.unshift(page.name);
+        parentId = page.parentFolderId ?? null;
+        parentKind = page.parentKind ?? 'page';
+      }
     }
     return names.length > 0 ? names.join(' / ') : typeLabel;
   };

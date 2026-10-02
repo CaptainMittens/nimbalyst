@@ -108,7 +108,10 @@ function renderDocsUIWithHost(
     placeType: vi.fn(async () => undefined),
     moveTypePlacement: vi.fn(async () => undefined),
     movePage: vi.fn(() => true),
+    setItemPlacement: vi.fn(async () => ({ ok: true })),
+    removeItemPlacement: vi.fn(async () => ({ ok: true })),
     updateDocumentTitle: vi.fn(async () => undefined),
+    removePage: vi.fn(),
   } as unknown as CollabDocsSession;
 
   const result = render(
@@ -258,7 +261,11 @@ describe('one page tree', () => {
       <CollabSidebar typeResolver={typeResolver} />,
       [{ typeId: 'module', projectId: null, parentFolderId: 'arch', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
       {
-        documents: [page('arch', 'Architecture', null), page('overview', 'Overview', 'arch')],
+        documents: [
+          page('arch', 'Architecture', null),
+          page('overview', 'Overview', 'arch'),
+          { ...page('notes', 'Notes', 'mod-1'), parentKind: 'item' as const },
+        ],
         itemPlacements: [{ itemId: 'mod-1', projectId: null, parentId: 'overview', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
       },
     );
@@ -274,6 +281,14 @@ describe('one page tree', () => {
     // The placed Module sits under Overview with its type shown faintly; it is
     // no longer listed under its type (the count still includes it).
     expect(rowText()).toEqual(['Architecture', 'Modules2', 'Overview', 'Sync engineModule']);
+    // A typed page holds pages too.
+    const placed = container.querySelector<HTMLElement>('.collab-tree-item-row[data-item-id="mod-1"]')!;
+    fireEvent.click(placed.querySelector('.file-tree-chevron')!);
+    expect(rowText()).toEqual(['Architecture', 'Modules2', 'Overview', 'Sync engineModule', 'Notes']);
+    fireEvent.contextMenu(placed);
+    await waitFor(() => expect(document.querySelector('.collab-item-new-inside')).not.toBeNull());
+    expect(document.querySelector('.collab-item-place-type')).not.toBeNull();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
 
     const architecture = [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture')!;
     fireEvent.contextMenu(architecture);
@@ -283,7 +298,39 @@ describe('one page tree', () => {
     expect(document.querySelector<HTMLButtonElement>('.collab-page-set-type')!.disabled).toBe(true);
   });
 
-  it('shows markdown pages without ".md" while rename and move keep the stored title', async () => {
+  it('moves a page under a typed page from the dialog, never offering a destination inside itself', async () => {
+    const typeResolver = {
+      typeName: (typeId: string) => (typeId === 'module' ? 'Modules' : null),
+      typeLabel: (typeId: string) => (typeId === 'module' ? 'Module' : null),
+      itemsOfType: () => [{ itemId: 'mod-1', title: 'Sync engine' }],
+      item: (itemId: string) => (itemId === 'mod-1' ? { itemId, title: 'Sync engine', typeId: 'module' } : null),
+    };
+    const { container, session } = renderDocsUIWithHost(<CollabSidebar typeResolver={typeResolver} />, [], {
+      documents: [page('arch', 'Architecture', null), page('zeta', 'Zeta', null), { ...page('notes', 'Notes', 'mod-1'), parentKind: 'item' as const }],
+      itemPlacements: [{ itemId: 'mod-1', projectId: null, parentId: 'arch', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+    });
+    const zeta = await found(() => [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Zeta'));
+    fireEvent.contextMenu(zeta);
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-page-move-to')));
+    let dialog = await found(() => document.querySelector<HTMLElement>('.collab-page-move-dialog'));
+    fireEvent.click(dialog.querySelector('[data-page-option="mod-1"]')!);
+    fireEvent.click(dialog.querySelector('.collab-page-move-confirm')!);
+    await waitFor(() => expect(session.movePage).toHaveBeenCalledWith('zeta', 'mod-1', { parentKind: 'item' }));
+
+    // The typed page itself: its own child is not offered.
+    const arch = [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture')!;
+    if (!container.querySelector('.collab-tree-item-row[data-item-id="mod-1"]')) fireEvent.click(arch.querySelector('.file-tree-chevron')!);
+    const typed = await found(() => container.querySelector<HTMLElement>('.collab-tree-item-row[data-item-id="mod-1"]'));
+    fireEvent.contextMenu(typed);
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-item-move-to')));
+    dialog = await found(() => document.querySelector<HTMLElement>('.collab-page-move-dialog'));
+    expect(dialog.querySelector('[data-page-option="notes"]')).toBeNull();
+    fireEvent.click(dialog.querySelector('[data-page-option="zeta"]')!);
+    fireEvent.click(dialog.querySelector('.collab-page-move-confirm')!);
+    await waitFor(() => expect(session.setItemPlacement).toHaveBeenCalledWith('mod-1', 'zeta', undefined, 'page'));
+  });
+
+  it('shows markdown pages without ".md"; a move changes only the parent and a rename stores the bare name', async () => {
     const board = { ...page('board', 'Board.canvas', null), documentType: 'canvas' };
     const { container, session } = renderDocsUIWithHost(<CollabSidebar />, [], {
       documents: [page('arch', 'Architecture.md', null), page('overview', 'Overview.md', 'arch'), board],
@@ -300,10 +347,10 @@ describe('one page tree', () => {
     expect(dialog.querySelector('[data-page-option="arch"]')!.textContent).toBe('Architecture');
     fireEvent.click(dialog.querySelector('[data-page-option="root"]')!);
     fireEvent.click(dialog.querySelector('.collab-page-move-confirm')!);
-    // The stored leaf keeps its extension.
-    await waitFor(() => expect(session.updateDocumentTitle).toHaveBeenCalledWith('overview', 'Overview.md'));
+    await waitFor(() => expect(session.movePage).toHaveBeenCalledWith('overview', null, { parentKind: 'page' }));
+    expect(session.updateDocumentTitle).not.toHaveBeenCalled();
 
-    // Rename edits the bare name and saves it with ".md" exactly once.
+    // Rename edits the bare name and stores it bare.
     const architecture = [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture')!;
     fireEvent.contextMenu(architecture);
     fireEvent.click(await found(() => [...document.querySelectorAll<HTMLElement>('button')].find((button) => button.textContent === 'Rename')));
@@ -312,7 +359,33 @@ describe('one page tree', () => {
     expect(document.querySelector('.input-modal-suffix')).toBeNull();
     fireEvent.change(input, { target: { value: 'System.md' } });
     fireEvent.click(document.querySelector<HTMLElement>('.input-modal-confirm')!);
-    await waitFor(() => expect(session.updateDocumentTitle).toHaveBeenLastCalledWith('arch', 'System.md'));
+    await waitFor(() => expect(session.updateDocumentTitle).toHaveBeenLastCalledWith('arch', 'System'));
+  });
+
+  // A native confirm blocks the renderer and any E2E run driving it.
+  it('deletes a page with children only after the in-app confirm is accepted', async () => {
+    const confirmSpy = vi.spyOn(window, 'confirm');
+    const { container, session } = renderDocsUIWithHost(<CollabSidebar />, [], {
+      documents: [page('arch', 'Architecture', null), page('overview', 'Overview', 'arch')],
+      itemPlacements: [],
+    });
+    const arch = await found(() => [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture'));
+    const openDialog = async () => {
+      fireEvent.contextMenu(arch);
+      fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-page-delete')));
+      return found(() => document.querySelector<HTMLElement>('[data-testid="collab-confirm-dialog"]'));
+    };
+
+    fireEvent.click((await openDialog()).querySelector('.collab-confirm-cancel')!);
+    await waitFor(() => expect(document.querySelector('[data-testid="collab-confirm-dialog"]')).toBeNull());
+    expect(session.removePage).not.toHaveBeenCalled();
+
+    const dialog = await openDialog();
+    expect(dialog.textContent).toContain('1 child page');
+    fireEvent.click(dialog.querySelector('.collab-confirm-accept')!);
+    await waitFor(() => expect(session.removePage).toHaveBeenCalledWith('arch'));
+    expect(confirmSpy).not.toHaveBeenCalled();
+    confirmSpy.mockRestore();
   });
 
   it('places a type under a page, moves a type from its menu, and reorders types by edge drop', async () => {
@@ -335,14 +408,14 @@ describe('one page tree', () => {
     fireEvent.contextMenu(pageRow);
     fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-place-type-action')));
     fireEvent.click([...document.querySelectorAll<HTMLElement>('.collab-place-type-option')].find((option) => option.textContent === 'Competitors')!);
-    expect(session.placeType).toHaveBeenCalledWith('competitor', 'arch');
+    expect(session.placeType).toHaveBeenCalledWith('competitor', 'arch', undefined);
 
     const typeRow = (typeId: string) => container.querySelector<HTMLElement>(`.collab-tree-type-row[data-type-id="${typeId}"]`)!;
     fireEvent.contextMenu(typeRow('person'));
     fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-type-move-to')));
     fireEvent.click(await found(() => document.querySelector<HTMLElement>('[data-page-option="arch"]')));
     fireEvent.click(document.querySelector<HTMLElement>('.collab-page-move-confirm')!);
-    expect(session.moveTypePlacement).toHaveBeenLastCalledWith('person', 'arch');
+    expect(session.moveTypePlacement).toHaveBeenLastCalledWith('person', 'arch', undefined, 'page');
 
     // People dragged onto the upper edge of Modules lands before it.
     const target = typeRow('module');
@@ -353,6 +426,6 @@ describe('one page tree', () => {
     fireEvent(target, at(createEvent.dragOver(target, { dataTransfer: {} })));
     expect(target.className).toContain('collab-tree-drop-before');
     fireEvent(target, at(createEvent.drop(target, { dataTransfer: {} })));
-    expect(session.moveTypePlacement).toHaveBeenLastCalledWith('person', null, 9);
+    expect(session.moveTypePlacement).toHaveBeenLastCalledWith('person', null, 9, 'page');
   });
 });

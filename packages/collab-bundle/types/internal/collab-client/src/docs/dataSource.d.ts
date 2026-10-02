@@ -1,12 +1,16 @@
 import type { CollabCommandResult, CollabDataChange, CollabDataSnapshot, CollabDataSource, Unsubscribe } from '../core/index';
-import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedTypePlacement } from './types';
-export type { SharedItemPlacement, SharedTypePlacement } from './types';
+import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
+export type { SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 export type CollabDocsCommand = {
     type: 'register-document';
     documentId: string;
     title: string;
     documentType: string;
     parentFolderId: string | null;
+    /** What `parentFolderId` names; absent means a page. */
+    parentKind?: SharedParentKind;
+    /** Order among its siblings; absent leaves it unordered (null). */
+    sortOrder?: number | null;
     metadata?: {
         metadataVersion: 2;
         fileExtension: string;
@@ -30,6 +34,11 @@ export type CollabDocsCommand = {
     type: 'move-document';
     documentId: string;
     parentFolderId: string | null;
+    parentKind?: SharedParentKind;
+    /** Same parent and a new order is a reorder; absent on a move to a new parent means null. */
+    sortOrder?: number | null;
+    /** Resolve only once the store confirmed the move; reject on a refusal or timeout. */
+    confirm?: boolean;
 } | {
     type: 'register-folder';
     folderId: string;
@@ -54,6 +63,9 @@ export type CollabDocsCommand = {
     typeId: string;
     parentFolderId: string | null;
     sortOrder: number;
+    parentKind?: SharedParentKind;
+    /** As on `move-document`. */
+    confirm?: boolean;
 } | {
     type: 'remove-type-placement';
     typeId: string;
@@ -64,6 +76,7 @@ export type CollabDocsCommand = {
     itemId: string;
     parentId: string | null;
     sortOrder: number;
+    parentKind?: SharedParentKind;
 } | {
     type: 'remove-item-placement';
     itemId: string;

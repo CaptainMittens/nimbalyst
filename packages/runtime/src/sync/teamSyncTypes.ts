@@ -16,6 +16,7 @@ import type {
   TeamState as ProtocolTeamState,
   EncryptedDocIndexEntry as ProtocolEncryptedDocIndexEntry,
   EncryptedFolderNode as ProtocolEncryptedFolderNode,
+  PageParentKind,
 } from '@nimbalyst/collab-protocol';
 import type { TeamJwt, TeamMemberId } from '../auth/jwtScopes';
 import type { TypePlacementCallbacks } from './teamTypePlacements';
@@ -48,7 +49,20 @@ export type {
   TeamErrorMessage,
   FeedbackIndexSyncResponseMessage,
   FeedbackIndexBroadcastMessage,
+  PageParentKind,
 } from '@nimbalyst/collab-protocol';
+
+/**
+ * Where a registered or moved document sits among the page tree. `parentKind`
+ * names what the parent id is (absent = a page); a number `sortOrder` positions
+ * it among its siblings. On a move, absent `sortOrder` keeps the order when the
+ * parent is unchanged and clears it on a new parent; on a register it leaves a
+ * stored row's order alone.
+ */
+export interface DocumentPlacementOptions {
+  parentKind?: PageParentKind;
+  sortOrder?: number | null;
+}
 
 /** Re-export wire types under client-side names. */
 export type MemberInfo = ProtocolMemberInfo;
@@ -222,6 +236,10 @@ export interface DocIndexEntry {
    * root level (also legacy rows, whose path still lives in the title).
    */
   parentFolderId?: string | null;
+  /** What `parentFolderId` names. TeamSync always fills it (`'page'` from older servers). */
+  parentKind?: PageParentKind;
+  /** Position among siblings; null = never reordered. TeamSync always fills it. */
+  sortOrder?: number | null;
   /** Millisecond epoch when moved to Trash; null/undefined means active. */
   trashedAt?: number | null;
   /**

@@ -583,11 +583,14 @@ test("one page tree: conversion, nesting, item placement, subtree delete and set
       await expect(pageRow(pageB, DOOMED_CHILD)).toBeVisible({ timeout: 20_000 });
       log("step 5 doomed page and its child exist on both");
 
-      pageA.once("dialog", (dialog) => void dialog.accept());
       await pageRow(pageA, DOOMED_PAGE).click({ button: "right" });
       const del = pageA.locator(".collab-page-delete");
       await expect(del).toContainText("1 child page");
       await del.click();
+      const confirmDialog = pageA.getByTestId("collab-confirm-dialog");
+      await expect(confirmDialog).toContainText(`Delete "${DOOMED_PAGE}" and its 1 child page?`);
+      await confirmDialog.locator(".collab-confirm-accept").click();
+      await expect(confirmDialog).toHaveCount(0);
 
       const isGone = (doc: ServerDoc | undefined) => !doc || doc.trashedAt !== null;
       await expect

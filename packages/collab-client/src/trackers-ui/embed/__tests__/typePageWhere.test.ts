@@ -35,4 +35,20 @@ describe('createItemWhereResolver', () => {
   it('stops at a parent cycle', () => {
     expect(where('looped')).toBe('B / A');
   });
+
+  it('walks up through typed pages, naming each by its title', () => {
+    const nested = createItemWhereResolver({
+      placements: [
+        { itemId: 'child', parentId: 'sync', parentKind: 'item' },
+        { itemId: 'sync', parentId: 'overview' },
+        { itemId: 'under-unplaced', parentId: 'loose', parentKind: 'item' },
+      ],
+      pages: [...pages, { folderId: 'notes', parentFolderId: 'sync', parentKind: 'item', name: 'Notes' }],
+      typeLabel: 'Modules',
+      rootLabel: 'Team',
+      itemTitle: (itemId) => ({ sync: 'Sync engine', loose: 'Loose' } as Record<string, string>)[itemId] ?? null,
+    });
+    expect(nested('child')).toBe('Architecture / Overview / Sync engine');
+    expect(nested('under-unplaced')).toBe('Loose');
+  });
 });

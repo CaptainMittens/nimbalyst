@@ -12,7 +12,7 @@ import React, { useCallback, useState, useEffect, useRef, useMemo, forwardRef, u
 import { useAtomValue, useSetAtom } from 'jotai';
 import { setTitleBarCreateMenuAtom } from '../../store/atoms/titleBarCreate';
 import { CollabScopeResolutionError, type CollabScope } from '@nimbalyst/collab-client/core';
-import { createCollabDocsScopeLifecycle } from '@nimbalyst/collab-client/docs';
+import { createCollabDocsScopeLifecycle, pageDisplayName } from '@nimbalyst/collab-client/docs';
 import { store } from '@nimbalyst/runtime/store';
 import type { CollabSidebarCreateMenu } from '@nimbalyst/collab-client/docs-ui';
 import { useDocUnread } from '../../hooks/useDocUnread';
@@ -521,7 +521,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
         initialContent,
         addTab: tabsActions.addTab,
       });
-      const nextName = getSharedDocumentDisplayName(doc.title, doc.documentId);
+      const nextName = pageDisplayName(getSharedDocumentDisplayName(doc.title, doc.documentId), doc.documentType);
       if (tabsActions.getTabState(tabId)?.fileName !== nextName) {
         tabsActions.updateTab(tabId, { fileName: nextName });
       }
@@ -581,7 +581,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
   useEffect(() => {
     const titleById = new Map(personalDocuments.map((document) => [
       document.documentId,
-      getSharedDocumentDisplayName(document.title, document.documentId),
+      pageDisplayName(getSharedDocumentDisplayName(document.title, document.documentId), document.documentType),
     ]));
     for (const tab of tabs) {
       if (!isPersonalPageTabPath(tab.filePath)) continue;

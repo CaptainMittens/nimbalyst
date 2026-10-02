@@ -3,4 +3,4 @@ export * from './collabTree';
 export * from './dataSource';
 export * from './session';
 export * from './sharedHomeTab';
-export type { SharedDocument, SharedFolder } from './types';
+export type { SharedDocument, SharedFolder, SharedParentKind } from './types';

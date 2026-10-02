@@ -265,6 +265,8 @@ export async function registerDocumentInIndex(
   documentType = 'markdown',
   parentFolderId: string | null = null,
   metadata?: { metadataVersion: 2; fileExtension: string; editorId: string },
+  /** A typed-page parent (`parentKind: 'item'`) and an order; absent = a page, ordered by the session. */
+  placement: { parentKind?: 'page' | 'item'; sortOrder?: number | null } = {},
 ): Promise<boolean> {
   try {
     return await getElectronCollabDocsSession(scope).registerDocument({
@@ -272,6 +274,7 @@ export async function registerDocumentInIndex(
       title,
       documentType,
       parentFolderId,
+      ...placement,
       metadata,
     });
   } catch (error) {
@@ -285,6 +288,7 @@ export async function registerDocumentInIndex(
       documentType,
       parentFolderId,
       ...metadata,
+      ...placement,
     });
     return false;
   }

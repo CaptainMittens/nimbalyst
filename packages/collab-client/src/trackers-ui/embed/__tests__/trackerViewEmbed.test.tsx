@@ -103,4 +103,13 @@ describe('TrackerViewEmbed', () => {
     expect(embed.dataset.viewMode).toBe('table');
     await screen.findByText('1 item');
   });
+
+  it('lists the items of every type a type page names (its subtypes)', async () => {
+    render(
+      <TrackersUIProvider dataSource={fakeSource()} identity={null}>
+        <TrackerViewEmbed view={createTypePageView('ev-target')} variant="page" typeIds={['ev-target', 'ev-cap']} />
+      </TrackersUIProvider>,
+    );
+    await screen.findByText('2 items');
+  });
 });

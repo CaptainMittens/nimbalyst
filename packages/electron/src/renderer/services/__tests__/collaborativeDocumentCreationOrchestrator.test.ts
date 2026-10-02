@@ -134,7 +134,7 @@ function makeHarness(options: {
         ? { ok: false, error: 'ack timed out' }
         : { ok: true };
     },
-    register: async (_scope, documentId, title, documentType, parentFolderId, metadata) => {
+    register: async (_scope, documentId, title, documentType, parentFolderId, metadata, placement) => {
       events.push('register');
       documents.push({
         documentId,
@@ -143,6 +143,7 @@ function makeHarness(options: {
         documentType,
         ...metadata,
         parentFolderId,
+        ...(placement?.parentKind === 'item' ? { parentKind: 'item' as const } : {}),
         createdBy: '',
         createdAt: 100,
         updatedAt: 100,
@@ -201,7 +202,7 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
 
     expect(harness.events).toEqual(['register', 'open-personal']);
     expect(document).toMatchObject({
-      title: 'Reading list.md',
+      title: 'Reading list',
       teamProjectId: null,
       metadataVersion: 2,
       editorId: 'builtin.lexical',
@@ -266,7 +267,7 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
 
     expect(harness.events).toEqual(['resolve-config', 'register', 'seed', 'cleanup', 'publish']);
     expect(document).toMatchObject({
-      title: 'Architecture.md',
+      title: 'Architecture',
       documentType: 'markdown',
       metadataVersion: 2,
       fileExtension: '.md',
@@ -275,10 +276,11 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
     expect(register).toHaveBeenCalledWith(
       TEST_SCOPE,
       'doc-1',
-      'Architecture.md',
+      'Architecture',
       'markdown',
       null,
       { metadataVersion: 2, fileExtension: '.md', editorId: 'builtin.lexical' },
+      { parentKind: 'page' },
     );
     expect(trackTeamAnalyticsEvent).toHaveBeenCalledWith('collab_document_created', expect.objectContaining({
       source: 'new_document',
@@ -335,7 +337,7 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
     const [first, concurrent] = await Promise.all([harness.orchestrator.ensureTypePage(input), harness.orchestrator.ensureTypePage(input)]);
     const again = await harness.orchestrator.ensureTypePage(input);
 
-    expect(first).toMatchObject({ documentId: 'type-page:module', title: 'Architecture/Modules.md', parentFolderId: 'arch', documentType: 'markdown' });
+    expect(first).toMatchObject({ documentId: 'type-page:module', title: 'Modules', parentFolderId: 'arch', documentType: 'markdown' });
     expect(concurrent.documentId).toBe('type-page:module');
     expect(again.documentId).toBe('type-page:module');
     expect(harness.events).toEqual(['resolve-config', 'register', 'cleanup']);
@@ -345,7 +347,7 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
     const crowded = makeHarness({
       documents: [{ documentId: 'p', teamProjectId: null, title: 'Modules.md', documentType: 'markdown', createdBy: '', createdAt: 1, updatedAt: 1 }],
     });
-    expect(await crowded.orchestrator.ensureTypePage({ ...input, parentFolderId: null })).toMatchObject({ documentId: 'type-page:module', title: 'Modules (type).md' });
+    expect(await crowded.orchestrator.ensureTypePage({ ...input, parentFolderId: null })).toMatchObject({ documentId: 'type-page:module', title: 'Modules (type)' });
     const orphaned = makeHarness();
     expect(await orphaned.orchestrator.ensureTypePage(input)).toMatchObject({ documentId: 'type-page:module', parentFolderId: null });
 
@@ -464,7 +466,8 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
       });
 
       expect(document).toMatchObject({
-        title: `Untitled${suffix}`,
+        // A markdown page stores its bare name; other types keep their suffix.
+        title: documentType === 'markdown' ? 'Untitled' : `Untitled${suffix}`,
         documentType,
         metadataVersion: 2,
         fileExtension: suffix,
@@ -494,6 +497,39 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
       sourceContent: '',
     })).rejects.toMatchObject({ code: 'name-collision' });
     expect(harness.events).toEqual([]);
+  });
+
+  it('stores a bare page name that collides with an older ".md" or full-path sibling title', async () => {
+    const existing = (documentId: string, title: string, parentFolderId: string | null = null) => ({
+      documentId, teamProjectId: null, title, documentType: 'markdown', createdBy: '', createdAt: 1, updatedAt: 1, parentFolderId,
+    });
+    const harness = makeHarness({ documents: [existing('old', 'Specs.md')] });
+    await expect(harness.orchestrator.create({
+      scope: TEST_SCOPE, descriptor: markdownDescriptor, requestedName: 'Specs', parentFolderId: null, sourceContent: '',
+    })).rejects.toMatchObject({ code: 'name-collision' });
+    const document = await harness.orchestrator.create({
+      scope: TEST_SCOPE, descriptor: markdownDescriptor, requestedName: 'Folder/Child.md', parentFolderId: null, sourceContent: '',
+    });
+    expect(document.title).toBe('Child');
+  });
+
+  it('creates a page under a typed page, colliding only with that typed page\'s children', async () => {
+    const existing = (documentId: string, title: string, parentFolderId: string | null, parentKind?: 'item') => ({
+      documentId, teamProjectId: null, title, documentType: 'markdown', createdBy: '', createdAt: 1, updatedAt: 1, parentFolderId,
+      ...(parentKind ? { parentKind } : {}),
+    });
+    const harness = makeHarness({ documents: [existing('root-notes', 'Notes', null), existing('item-notes', 'Plan', 'mod_1', 'item')] });
+    const register = vi.spyOn(harness.deps, 'register');
+    const document = await harness.orchestrator.create({
+      scope: TEST_SCOPE, descriptor: markdownDescriptor, requestedName: 'Notes', parentFolderId: 'mod_1', parentKind: 'item', sourceContent: '',
+    });
+    expect(document).toMatchObject({ title: 'Notes', parentFolderId: 'mod_1', parentKind: 'item' });
+    expect(register).toHaveBeenCalledWith(
+      TEST_SCOPE, 'doc-1', 'Notes', 'markdown', 'mod_1', expect.anything(), { parentKind: 'item' },
+    );
+    await expect(harness.orchestrator.create({
+      scope: TEST_SCOPE, descriptor: markdownDescriptor, requestedName: 'Plan', parentFolderId: 'mod_1', parentKind: 'item', sourceContent: '',
+    })).rejects.toMatchObject({ code: 'name-collision' });
   });
 
   it('saves the local-origin binding after registration and before publish', async () => {

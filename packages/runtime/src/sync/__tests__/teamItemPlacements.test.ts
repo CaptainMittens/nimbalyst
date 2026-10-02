@@ -78,6 +78,8 @@ describe('TeamSyncProvider tracker-item placements', () => {
 
     provider.setItemPlacement('NIM-1', 'kb', 2);
     expect(socketSends.at(-1)).toEqual({ type: 'itemPlacementSet', itemId: 'NIM-1', parentId: 'kb', sortOrder: 2, projectId: 'p1' });
+    provider.setItemPlacement('NIM-2', 'NIM-1', 0, 'item');
+    expect(socketSends.at(-1)).toEqual({ type: 'itemPlacementSet', itemId: 'NIM-2', parentId: 'NIM-1', sortOrder: 0, parentKind: 'item', projectId: 'p1' });
     await receive(provider, { type: 'error', code: 'folder_not_found', message: 'Page kb not found' });
     expect(socketSends.at(-1)).toEqual({ type: 'itemPlacementIndexSync' });
 

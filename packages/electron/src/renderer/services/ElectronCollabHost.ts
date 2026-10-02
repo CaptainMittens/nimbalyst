@@ -256,6 +256,7 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
   private scopePromise: Promise<CollabScope> | null = null;
   private dataSource: ElectronCollabDocumentsDataSource | null = null;
   private dataSourcePromise: Promise<ElectronCollabDocumentsDataSource> | null = null;
+  private dataSourceGeneration = 0;
   private readonly scopeListeners = new Set<(scope: CollabScope | null) => void>();
   private openArtifactImpl?: ElectronCollabHostOptions['openArtifact'];
   readonly personalState = {
@@ -458,11 +459,21 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
    * The listener contract is identical to a project change.
    */
   invalidateScope(): void {
-    this.dataSource?.dispose();
     this.scopePromise = null;
+    this.releaseDataSource();
+    for (const listener of this.scopeListeners) listener(null);
+  }
+
+  /**
+   * Dispose the current source and forget it, so the next use builds a fresh
+   * one. The host outlives any one docs session; a session disposing the source
+   * must not leave the disposed instance for the next session to reuse.
+   */
+  private releaseDataSource(): void {
+    this.dataSourceGeneration += 1;
+    this.dataSource?.dispose();
     this.dataSource = null;
     this.dataSourcePromise = null;
-    for (const listener of this.scopeListeners) listener(null);
   }
 
   private async resolveCurrentScope(): Promise<CollabScope> {
@@ -548,7 +559,14 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
   }
 
   private async ensureDataSource(): Promise<ElectronCollabDocumentsDataSource> {
-    this.dataSourcePromise ??= this.resolveScope().then((scope) => {
+    if (this.dataSourcePromise) return this.dataSourcePromise;
+    const generation = this.dataSourceGeneration;
+    this.dataSourcePromise = this.resolveScope().then((scope) => {
+      // Released while the scope resolved: the session that asked is gone.
+      // Retrying would build and connect a source nobody owns.
+      if (generation !== this.dataSourceGeneration) {
+        throw new Error('Data source was disposed while its scope resolved');
+      }
       const source = new ElectronCollabDocumentsDataSource({
         scope,
         getJwt: () => this.getTeamJwt(scope.orgId),
@@ -574,6 +592,8 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
         let cancelled = false;
         void this.ensureDataSource().then((source) => {
           if (!cancelled) unsubscribe = source.subscribe(cb);
+        }, () => {
+          // Released before the source existed; that session is gone.
         });
         return () => {
           cancelled = true;
@@ -583,7 +603,7 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
       command: async (command) => (await this.ensureDataSource()).command(command),
       status: () => this.dataSource?.status() ?? 'disconnected',
       dispose: () => {
-        this.dataSource?.dispose();
+        this.releaseDataSource();
       },
     };
   }

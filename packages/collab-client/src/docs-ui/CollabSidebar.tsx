@@ -6,6 +6,7 @@ import { store } from '@nimbalyst/runtime/store';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import './collabSidebarTree.css';
 import { InputModal } from './primitives/InputModal';
+import { confirmDestructive } from './primitives/confirmDestructive';
 import { ScopeSummaryHeader } from './primitives/ScopeSummaryHeader';
 import { CollabCreateItemDialog } from './CollabCreateItemDialog';
 import {
@@ -32,8 +33,10 @@ import {
   type CollabTreeItemNode,
   type CollabTreeNode,
   type CollabTreeTypeNode,
+  type CollabPageMoveOptions,
   type CollabTypeTreeResolver,
 } from '@nimbalyst/collab-client/docs';
+import type { PageTreeDestination, PageTreeDropPlan, PageTreeWrite } from '../docs/collabPageTree';
 import {
   CollabPlaceTypeMenu,
   CollabTypeItemRow,
@@ -44,6 +47,10 @@ import {
   type CollabRowDrop,
 } from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from './primitives/useFloatingMenu';
+
+const CYCLE_WARNING = 'A page cannot move inside one of its own child pages.';
+
+const NO_ROW_DROP: CollabRowDrop = { onDragOver: () => undefined, onDragLeave: () => undefined, onDrop: () => undefined, className: '' };
 
 // For sessions built without the page-tree atoms (test doubles, older hosts).
 const NO_ITEM_PLACEMENTS = atom([]);
@@ -223,7 +230,12 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     x: number;
     y: number;
     parentFolderId: string | null;
+    /** 'item' when the type goes under a typed page. */
+    parentKind?: 'page' | 'item';
   } | null>(null);
+  // "New page inside" a typed page: it is not in the folder list the create
+  // dialog picks from, so it is offered there as one extra location.
+  const [createInsideItem, setCreateInsideItem] = useState<{ itemId: string; name: string } | null>(null);
   const [draggedType, setDraggedType] = useState<string | null>(null);
   const [draggedItem, setDraggedItem] = useState<CollabTreeItemNode | null>(null);
   const [moveTarget, setMoveTarget] = useState<
@@ -349,12 +361,17 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     return ids;
   }, [tree]);
 
-  // Move dialog destinations, named the way the tree shows them.
-  const movePageOptions = useMemo(() => {
-    if (!pageTree) return sharedFolders;
-    const typeById = new Map(sharedDocuments.map((document) => [document.documentId, document.documentType]));
-    return sharedFolders.map((page) => ({ ...page, name: pageDisplayName(page.name, typeById.get(page.folderId)) }));
-  }, [pageTree, sharedDocuments, sharedFolders]);
+  const createFolderOptions = useMemo(() => (createInsideItem
+    ? [...sharedFolders, {
+      folderId: createInsideItem.itemId,
+      parentFolderId: null,
+      name: createInsideItem.name,
+      sortOrder: 0,
+      createdBy: '',
+      createdAt: 0,
+      updatedAt: 0,
+    }]
+    : sharedFolders), [createInsideItem, sharedFolders]);
 
   // Docs visible under the active segmented filter (All / Favorites / Updated).
   const visibleDocuments = useMemo(() => {
@@ -437,12 +454,22 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
   // The breadcrumb path a document's row sits at, which is also the expansion
   // key of each ancestor row.
+  // The expansion key of a document's ancestors. A folder tree keeps reading
+  // the title, so first-class folders start collapsed as they always have.
   const treePathOf = useCallback(
     (document: SharedDocument) => (pageTree
       ? getSharedDocumentDisplayPath(document, sharedFolders)
       : getCollabDocumentPath(document)),
     [pageTree, sharedFolders],
   );
+  // Where a document sits, for rename and move comparisons: from its parents,
+  // since a bare title names only the leaf.
+  const locationOf = useCallback(
+    (document: SharedDocument) => getSharedDocumentDisplayPath(document, sharedFolders),
+    [sharedFolders],
+  );
+
+
 
   const canMutateMetadata = useCallback((actionLabel: string) => {
     if (teamSyncStatus === 'connected') {
@@ -642,7 +669,9 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         if (!canMutateMetadata('delete this page')) return;
         const pages = `${childCount} child page${childCount === 1 ? '' : 's'}`;
         // Counts the prose of types placed inside it, which goes too.
-        if (window.confirm(`Delete "${pageDisplayName(contextMenu.node.name, document.documentType)}" and its ${pages}? Types and typed pages inside move back to their usual place. This cannot be undone.`)) {
+        setContextMenu(null);
+        void confirmDestructive('Delete page', `Delete "${pageDisplayName(contextMenu.node.name, document.documentType)}" and its ${pages}? Types and typed pages inside move back to their usual place. This cannot be undone.`).then((accepted) => {
+          if (!accepted) return;
           session.removePage(document.documentId);
           host.trackEvent?.('collab_folder_deleted', {
             actorType: 'user',
@@ -650,8 +679,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             documentCountBucket: bucketItemCount(childCount),
             subfolderCountBucket: bucketItemCount(0),
           });
-        }
-        setContextMenu(null);
+        });
         return;
       }
       if (!canMutateMetadata('move this document to Trash')) return;
@@ -683,7 +711,9 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     if (docCount > 0) parts.push(`${docCount} document${docCount === 1 ? '' : 's'}`);
     if (folderCount > 0) parts.push(`${folderCount} subfolder${folderCount === 1 ? '' : 's'}`);
     const detail = parts.length > 0 ? ` and its ${parts.join(' and ')}` : '';
-    if (window.confirm(`Delete shared folder "${contextMenu.node.name}"${detail}? This cannot be undone.`)) {
+    setContextMenu(null);
+    void confirmDestructive('Delete shared folder', `Delete shared folder "${contextMenu.node.name}"${detail}? This cannot be undone.`).then((accepted) => {
+      if (!accepted) return;
       session.removeFolder(folderId);
       host.trackEvent?.('collab_folder_deleted', {
         actorType: 'user',
@@ -695,8 +725,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         setSelectedFolderId(null);
         setSelectedFolderPath(null);
       }
-    }
-    setContextMenu(null);
+    });
   }, [allSharedDocuments, canMutateMetadata, contextMenu, host, pageTree, selectedFolderId, session, sharedFolders, typePlacements]);
 
   const handleCopyFolderLink = useCallback(async (folderId: string) => {
@@ -941,13 +970,15 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     const descriptor = createDocumentDescriptor;
     if (!descriptor) return;
     const parentId = createTargetFolderId;
-    const parentPath = parentId ? (folderPathById.get(parentId) ?? '') : '';
+    const insideItem = parentId !== null && createInsideItem?.itemId === parentId;
+    const parentPath = insideItem ? `item:${parentId}` : parentId ? (folderPathById.get(parentId) ?? '') : '';
     try {
       await session.createDocument({
         scope,
         descriptor,
         requestedName: documentName,
         parentFolderId: parentId,
+        ...(insideItem ? { parentKind: 'item' as const } : {}),
         sourceContent: descriptor.creation?.defaultContent ?? '',
       });
     } catch (error) {
@@ -963,11 +994,12 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       });
     }
 
-    setSelectedFolderPath(parentPath || null);
-    setSelectedFolderId(parentId);
+    setSelectedFolderPath(insideItem ? null : parentPath || null);
+    setSelectedFolderId(insideItem ? null : parentId);
     setCreateDocumentDescriptor(null);
+    setCreateInsideItem(null);
     setContextMenu(null);
-  }, [canMutateMetadata, createDocumentDescriptor, createTargetFolderId, folderPathById, host, scope, session]);
+  }, [canMutateMetadata, createDocumentDescriptor, createInsideItem, createTargetFolderId, folderPathById, host, scope, session]);
 
   const handleRenameDocument = useCallback(async (documentName: string) => {
     if (!documentToRename) return;
@@ -977,12 +1009,31 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     const name = applySharedDocumentRenameSuffix(requestedName, documentRenameParts.suffix);
     if (!name) { setDocumentToRename(null); setContextMenu(null); return; }
 
+    if (pageTree) {
+      // A page stores its bare name; a markdown page has no ".md".
+      const bare = pageDisplayName(name, documentToRename.documentType);
+      if (bare === documentToRename.title) {
+        setDocumentToRename(null);
+        setContextMenu(null);
+        return;
+      }
+      if (pageTreeBuilder?.pageNameConflict(tree, documentToRename, documentToRename.parentFolderId ?? null, documentToRename.parentKind, bare)) {
+        showWarning('Name already in use', `A page named "${bare}" already exists here.`);
+        return;
+      }
+      await session.updateDocumentTitle(documentToRename.documentId, bare);
+      trackDocumentAction(host, { action: 'renamed', documentType: documentToRename.documentType, entryPoint: 'sidebar' });
+      setDocumentToRename(null);
+      setContextMenu(null);
+      return;
+    }
+
     // Dual-write: rebuild the full-path title from the doc's parent folder so
     // un-upgraded clients keep the doc under the right folder.
     const parentId = documentToRename.parentFolderId ?? null;
     const parentPath = parentId ? (folderPathById.get(parentId) ?? '') : '';
     const nextPath = joinCollabPath(parentPath, name);
-    const currentPath = getCollabDocumentPath(documentToRename);
+    const currentPath = locationOf(documentToRename);
     if (!nextPath || nextPath === currentPath) {
       setDocumentToRename(null);
       setContextMenu(null);
@@ -1001,32 +1052,37 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     });
     setDocumentToRename(null);
     setContextMenu(null);
-  }, [canMutateMetadata, documentRenameParts.suffix, documentToRename, existingPaths, folderPathById, host, session, showWarning]);
+  }, [canMutateMetadata, documentRenameParts.suffix, documentToRename, existingPaths, folderPathById, host, pageTree, pageTreeBuilder, session, showWarning, locationOf, tree]);
 
-  // Reparent a document (a page, in a page tree) and dual-write its title as
-  // the full path so clients that predate first-class folders keep the tree.
+  // Reparent a document. In a page tree only the parent and order change; in
+  // a folder tree the title is dual-written as the full path so clients that
+  // predate first-class folders keep the tree.
   const relocateDocument = useCallback(async (
     moved: { documentId: string; sourcePath: string; name: string },
     targetFolderId: string | null,
     targetFolderPath: string | null,
+    options: CollabPageMoveOptions = {},
   ) => {
     if (!canMutateMetadata('move this document')) return;
+    const movedDocument = allSharedDocuments.find((document) => document.documentId === moved.documentId);
+    if (pageTree && movedDocument && pageTreeBuilder) {
+      // Pages store bare names: a move changes the parent and order, nothing else.
+      const result = pageTreeBuilder.movePageInTree(session, tree, movedDocument, targetFolderId, options);
+      if (result === 'taken') showWarning('Name already in use', `A page named "${pageDisplayName(movedDocument.title, movedDocument.documentType)}" already exists there.`);
+      if (result === 'cycle') showWarning('Cannot move page', CYCLE_WARNING);
+      if (result !== 'moved') return;
+      trackDocumentAction(host, { action: 'moved', documentType: movedDocument.documentType, entryPoint: 'sidebar' });
+      if (targetFolderPath) setExpandedFolders((currentFolders) => new Set(currentFolders).add(targetFolderPath));
+      return;
+    }
     const nextPath = joinCollabPath(targetFolderPath, moved.name);
     if (!nextPath || nextPath === moved.sourcePath) return;
     if (existingPaths.has(nextPath)) {
       showWarning('Name already in use', `A document or folder named "${nextPath}" already exists.`);
       return;
     }
-    if (pageTree) {
-      if (!session.movePage(moved.documentId, targetFolderId)) {
-        showWarning('Cannot move page', 'A page cannot move inside one of its own child pages.');
-        return;
-      }
-    } else {
-      session.moveDocument(moved.documentId, targetFolderId);
-    }
+    session.moveDocument(moved.documentId, targetFolderId);
     await session.updateDocumentTitle(moved.documentId, nextPath);
-    const movedDocument = allSharedDocuments.find((document) => document.documentId === moved.documentId);
     trackDocumentAction(host, {
       action: 'moved',
       documentType: movedDocument?.documentType,
@@ -1045,7 +1101,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       setSelectedFolderPath(null);
       setSelectedFolderId(null);
     }
-  }, [allSharedDocuments, canMutateMetadata, existingPaths, host, pageTree, session, showWarning]);
+  }, [allSharedDocuments, canMutateMetadata, existingPaths, host, pageTree, pageTreeBuilder, session, showWarning, tree]);
 
   const moveDraggedDocument = useCallback(async (targetFolderId: string | null, targetFolderPath: string | null) => {
     const moved = draggedDocument;
@@ -1125,10 +1181,14 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
   const handlePlaceType = useCallback((typeId: string) => {
     const parentFolderId = placeTypeMenu?.parentFolderId ?? null;
+    const parentKind = placeTypeMenu?.parentKind;
     setPlaceTypeMenu(null);
     if (!canMutateMetadata('place this type')) return;
-    session.placeType(typeId, parentFolderId).catch(reportTypePlacementError);
-    const parentPath = parentFolderId ? folderPathById.get(parentFolderId) : null;
+    session.placeType(typeId, parentFolderId, parentKind).catch(reportTypePlacementError);
+    // Pages expand by path, typed pages by row id.
+    const parentPath = parentFolderId
+      ? (parentKind === 'item' ? `item:${parentFolderId}` : folderPathById.get(parentFolderId))
+      : null;
     setUserTouchedExpansion(true);
     setExpandedFolders((currentFolders) => {
       const next = new Set(currentFolders).add(`type:${typeId}`);
@@ -1137,16 +1197,16 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     });
   }, [canMutateMetadata, folderPathById, placeTypeMenu, reportTypePlacementError, session]);
 
-  // Page tree: a typed page goes under any page, at root, or back under its type.
-  const moveItemTo = useCallback((itemId: string, target: CollabPageMoveTarget) => {
+  // Page tree: a typed page goes under a page or typed page, at root, or back
+  // under its type -- never inside itself (checked on every path).
+  const moveItemTo = useCallback((itemId: string, destination: PageTreeDestination) => {
     if (!canMutateMetadata('move this page')) return;
-    const write = target === UNDER_TYPE
-      ? session.removeItemPlacement(itemId)
-      : session.setItemPlacement(itemId, target);
-    void write.then((result) => {
+    const outcome = pageTreeBuilder?.moveItemInTree(session, tree, itemId, destination);
+    if (outcome === 'cycle') showWarning('Cannot move page', CYCLE_WARNING);
+    else void outcome?.then((result) => {
       if (!result.ok) reportTypePlacementError(new Error(result.error));
     });
-  }, [canMutateMetadata, reportTypePlacementError, session]);
+  }, [canMutateMetadata, pageTreeBuilder, reportTypePlacementError, session, showWarning, tree]);
 
   const itemPlacementParent = useCallback((itemId: string): CollabPageMoveTarget => {
     const placement = itemPlacements.find((candidate) => candidate.itemId === itemId);
@@ -1171,28 +1231,16 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     setDraggedItem(null);
     setDropTargetPath(null);
     if (item) {
-      moveItemTo(item.itemId, pageId);
+      moveItemTo(item.itemId, { parentId: pageId, parentKind: 'page' });
       if (pagePath) setExpandedFolders((currentFolders) => new Set(currentFolders).add(pagePath));
       return;
     }
     void moveDraggedDocument(pageId, pagePath);
   }, [draggedItem, draggedType, moveDraggedDocument, moveDraggedType, moveItemTo]);
 
-  // Page tree rows: an edge drop inserts beside the row, the middle drops inside.
-  const planRowDrop = useCallback((nodeId: string, event: React.DragEvent) => {
-    if (!pageTreeBuilder) return null;
-    const dragged = draggedType ? { kind: 'type' as const, typeId: draggedType }
-      : draggedItem ? { kind: 'item' as const, itemId: draggedItem.itemId, typeId: draggedItem.typeId }
-        : draggedDocument ? { kind: 'page' as const, documentId: draggedDocument.documentId }
-          : null;
-    if (!dragged) return null;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const zone = pageTreeBuilder.pageTreeDropZone(event.clientY - rect.top, rect.height);
-    const plan = pageTreeBuilder.planPageTreeDrop(tree, dragged, nodeId, zone);
-    // A page drop also needs a free name at its destination.
-    if (plan?.kind === 'page' && !canDropOnPage(plan.parentId, plan.parentId ? folderPathById.get(plan.parentId) ?? null : null)) return null;
-    return plan ? { plan, zone } : null;
-  }, [canDropOnPage, draggedDocument, draggedItem, draggedType, folderPathById, pageTreeBuilder, tree]);
+  const applyTreeWrite = useCallback((write: PageTreeWrite) => {
+    pageTreeBuilder?.applyPageTreeWrite(session, write, reportTypePlacementError);
+  }, [pageTreeBuilder, reportTypePlacementError, session]);
 
   const clearRowDrag = useCallback(() => {
     setDraggedType(null);
@@ -1202,77 +1250,59 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     setDropIndicator(null);
   }, []);
 
-  const rowDrop = useCallback((node: CollabTreeNode): CollabRowDrop => ({
-    onDragOver: (event) => {
-      const planned = planRowDrop(node.id, event);
-      if (!planned) {
-        if (dropIndicator?.nodeId === node.id) setDropIndicator(null);
-        if (dropTargetPath === node.path) setDropTargetPath(null);
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      event.dataTransfer.dropEffect = 'move';
-      if (planned.zone === 'inside') {
-        if (dropIndicator) setDropIndicator(null);
-        if (dropTargetPath !== node.path) setDropTargetPath(node.path);
-      } else {
-        if (dropTargetPath) setDropTargetPath(null);
-        if (dropIndicator?.nodeId !== node.id || dropIndicator.zone !== planned.zone) {
-          setDropIndicator({ nodeId: node.id, zone: planned.zone });
-        }
-      }
-    },
-    onDragLeave: (event) => {
-      event.stopPropagation();
-      const relatedTarget = event.relatedTarget as Node | null;
-      if (relatedTarget && event.currentTarget.contains(relatedTarget)) return;
-      if (dropTargetPath === node.path) setDropTargetPath(null);
-      if (dropIndicator?.nodeId === node.id) setDropIndicator(null);
-    },
-    onDrop: (event) => {
-      const planned = planRowDrop(node.id, event);
-      if (!planned) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const { plan } = planned;
-      if (plan.kind === 'page') {
-        const path = plan.parentId ? folderPathById.get(plan.parentId) ?? null : null;
-        setDropIndicator(null);
-        dropOnPage(plan.parentId, path);
-        return;
-      }
-      clearRowDrag();
-      if (plan.kind === 'unplace-item') {
-        moveItemTo(plan.itemId, UNDER_TYPE);
-      } else if (plan.kind === 'item') {
-        if (!canMutateMetadata('move this page')) return;
-        // Re-spaced siblings first, so the moved row never shares a key with one.
-        for (const write of [...(plan.renumber ?? []), plan]) {
-          void session.setItemPlacement(write.itemId, write.parentId, write.sortOrder).then((result) => {
-            if (!result.ok) reportTypePlacementError(new Error(result.error));
-          });
-        }
-      } else if (canMutateMetadata('move this type')) {
-        for (const write of [...(plan.renumber ?? []), plan]) {
-          session.moveTypePlacement(write.typeId, write.parentFolderId, write.sortOrder).catch(reportTypePlacementError);
-        }
-      }
-      const parentId = plan.kind === 'type' ? plan.parentFolderId : plan.kind === 'item' ? plan.parentId : null;
-      const parentPath = parentId ? folderPathById.get(parentId) : null;
-      if (parentPath && planned.zone === 'inside') setExpandedFolders((current) => new Set(current).add(parentPath));
-    },
-    className: dropIndicator?.nodeId === node.id
-      ? ` collab-tree-drop-${dropIndicator.zone}`
-      : dropTargetPath === node.path ? ' drag-over' : '',
-  }), [canMutateMetadata, clearRowDrag, dropIndicator, dropOnPage, dropTargetPath, folderPathById, moveItemTo, planRowDrop, reportTypePlacementError, session]);
+  const onDropPlan = useCallback((plan: PageTreeDropPlan, zone: string, node: CollabTreeNode) => {
+    clearRowDrag();
+    if (plan.kind === 'unplace-item') {
+      moveItemTo(plan.itemId, { underType: true });
+      return;
+    }
+    if (!canMutateMetadata(plan.kind === 'type' ? 'move this type' : 'move this page')) return;
+    // Re-spaced siblings first, so the moved row never shares a key with one.
+    for (const write of plan.renumber ?? []) applyTreeWrite(write);
+    if (plan.kind === 'page') {
+      const moved = allSharedDocuments.find((document) => document.documentId === plan.documentId);
+      void relocateDocument(
+        { documentId: plan.documentId, sourcePath: moved ? locationOf(moved) : '', name: moved?.title ?? '' },
+        plan.parentId,
+        null,
+        { parentKind: plan.parentKind, sortOrder: plan.sortOrder },
+      );
+    } else {
+      applyTreeWrite(plan);
+    }
+    // Rows expand by path; typed pages by row id.
+    if (zone === 'inside') setExpandedFolders((current) => new Set(current).add(node.type === 'item' ? node.id : node.path));
+  }, [allSharedDocuments, applyTreeWrite, canMutateMetadata, clearRowDrag, moveItemTo, locationOf, relocateDocument]);
 
+  // Page tree rows as drop targets; the handlers load with the page tree.
+  const rowDrop = useCallback((node: CollabTreeNode): CollabRowDrop => (pageTreeBuilder
+    ? pageTreeBuilder.pageTreeRowDrop({
+      tree,
+      dragged: draggedType ? { kind: 'type', typeId: draggedType }
+        : draggedItem ? { kind: 'item', itemId: draggedItem.itemId, typeId: draggedItem.typeId }
+          : draggedDocument ? { kind: 'page', documentId: draggedDocument.documentId }
+            : null,
+      documents: allSharedDocuments,
+      dropIndicator,
+      dropTargetPath,
+      setDropIndicator,
+      setDropTargetPath,
+      onDropPlan,
+    }, node)
+    : NO_ROW_DROP), [allSharedDocuments, draggedDocument, draggedItem, draggedType, dropIndicator, dropTargetPath, onDropPlan, pageTreeBuilder, tree]);
+
+  // Typed pages hold children too; they render through `renderTree` (via the
+  // ref, which is defined below and depends on these actions).
+  const renderTreeRef = useRef<(nodes: CollabTreeNode[], depth?: number) => React.ReactNode>(() => null);
   const itemRowActions = useMemo(() => (pageTree ? {
     onContextMenu: (event: React.MouseEvent, node: CollabTreeItemNode) => handleContextMenu(event, node),
     onDragStart: setDraggedItem,
     onDragEnd: clearRowDrag,
     rowDrop,
-  } : undefined), [clearRowDrag, handleContextMenu, pageTree, rowDrop]);
+    isExpanded: (node: CollabTreeItemNode) => hasActiveSearch || expandedFolders.has(node.id),
+    onToggle: (node: CollabTreeItemNode) => { if (!hasActiveSearch) toggleFolder(node.id); },
+    renderChildren: (nodes: CollabTreeNode[], childIndent: number) => renderTreeRef.current(nodes, (childIndent - 8) / 16),
+  } : undefined), [clearRowDrag, expandedFolders, handleContextMenu, hasActiveSearch, pageTree, rowDrop, toggleFolder]);
 
   const renderTree = useCallback((nodes: CollabTreeNode[], depth = 0): React.ReactNode => {
     return nodes.map((node) => {
@@ -1566,6 +1596,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     session,
     scope,
   ]);
+  renderTreeRef.current = renderTree;
 
   const selectedFolderLabel = selectedFolderPath ? getCollabNodeName(selectedFolderPath) : 'Pages';
   const contextDocument = contextMenu?.node.type === 'document' ? contextMenu.node.document : null;
@@ -2030,13 +2061,26 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             </>
           ) : contextMenu.node.type === 'item' ? (
             <CollabItemMenu
+              onNewPageInside={() => {
+                if (contextMenu.node.type !== 'item') return;
+                const markdown = sharedNewDocumentMenuItems.find(({ descriptor }) => descriptor.documentType === 'markdown');
+                setCreateInsideItem({ itemId: contextMenu.node.itemId, name: contextMenu.node.name });
+                setCreateTargetFolderId(contextMenu.node.itemId);
+                if (markdown) setCreateDocumentDescriptor(markdown.descriptor);
+                setContextMenu(null);
+              }}
+              onPlaceType={typeResolver ? () => {
+                if (contextMenu.node.type !== 'item') return;
+                setPlaceTypeMenu({ x: contextMenu.x, y: contextMenu.y, parentFolderId: contextMenu.node.itemId, parentKind: 'item' });
+                setContextMenu(null);
+              } : undefined}
               placed={contextMenu.node.placed === true}
               onMoveTo={() => {
                 if (contextMenu.node.type === 'item') setMoveTarget({ kind: 'item', node: contextMenu.node });
                 setContextMenu(null);
               }}
               onBackUnderType={() => {
-                if (contextMenu.node.type === 'item') moveItemTo(contextMenu.node.itemId, UNDER_TYPE);
+                if (contextMenu.node.type === 'item') moveItemTo(contextMenu.node.itemId, { underType: true });
                 setContextMenu(null);
               }}
             />
@@ -2254,44 +2298,33 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         <React.Suspense fallback={null}>
           <CollabPageMoveDialog
             name={moveTarget.kind === 'page'
-              ? pageDisplayName(getCollabNodeName(moveTarget.document.title) || moveTarget.document.title, moveTarget.document.documentType)
+              ? pageDisplayName(moveTarget.document.title, moveTarget.document.documentType)
               : moveTarget.node.name}
-            pages={movePageOptions}
-            excludedIds={new Set(moveTarget.kind === 'page'
-              ? collectPageSubtree(sharedDocuments, moveTarget.document.documentId)
-              : [])}
-            current={moveTarget.kind === 'page'
-              ? (moveTarget.document.parentFolderId ?? null)
-              : moveTarget.kind === 'type'
-                ? (moveTarget.node.placement.parentFolderId ?? null)
-                : itemPlacementParent(moveTarget.node.itemId)}
+            tree={tree}
+            movingNodeId={moveTarget.kind === 'page' ? `document:${moveTarget.document.documentId}` : moveTarget.node.id}
             rootLabel={personal ? 'Personal' : 'Team'}
             underTypeLabel={moveTarget.kind === 'item'
               ? `Under ${typeResolver?.typeName(moveTarget.node.typeId) ?? 'its type'}`
               : undefined}
-            onConfirm={(target) => {
+            onConfirm={(destination) => {
               const current = moveTarget;
               setMoveTarget(null);
               if (current.kind === 'item') {
-                moveItemTo(current.node.itemId, target);
+                moveItemTo(current.node.itemId, destination);
                 return;
               }
+              if ('underType' in destination) return;
+              const { parentId, parentKind } = destination;
               if (current.kind === 'type') {
-                if (target === UNDER_TYPE || !canMutateMetadata('move this type')) return;
-                session.moveTypePlacement(current.node.typeId, target).catch(reportTypePlacementError);
-                const parentPath = target ? folderPathById.get(target) : null;
-                if (parentPath) setExpandedFolders((folders) => new Set(folders).add(parentPath));
+                if (canMutateMetadata('move this type')) session.moveTypePlacement(current.node.typeId, parentId, undefined, parentKind).catch(reportTypePlacementError);
                 return;
               }
               const { document } = current;
               void relocateDocument(
-                {
-                  documentId: document.documentId,
-                  sourcePath: treePathOf(document),
-                  name: getCollabNodeName(document.title) || document.title,
-                },
-                target,
-                target ? (folderPathById.get(target) ?? null) : null,
+                { documentId: document.documentId, sourcePath: locationOf(document), name: document.title },
+                parentId,
+                null,
+                { parentKind },
               );
             }}
             onCancel={() => setMoveTarget(null)}
@@ -2313,12 +2346,13 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         isOpen={createDocumentDescriptor !== null}
         kind="document"
         documentDescriptor={createDocumentDescriptor ?? undefined}
-        folders={sharedFolders}
+        folders={createFolderOptions}
         targetFolderId={createTargetFolderId}
         onTargetFolderChange={setCreateTargetFolderId}
         onConfirm={handleCreateDocument}
         onCancel={() => {
           setCreateDocumentDescriptor(null);
+          setCreateInsideItem(null);
           setContextMenu(null);
         }}
       />

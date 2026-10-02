@@ -45,7 +45,7 @@ export interface CollabTreeTypeNode {
   typeId: string;
   path: string;
   name: string;
-  /** Number of items of this type (not counting subtypes). */
+  /** Number of items of this type (in a page tree, and of every type that extends it). */
   count: number;
   placement: SharedTypePlacement;
   children: Array<CollabTreeTypeNode | CollabTreeItemNode>;
@@ -62,8 +62,10 @@ export interface CollabTreeItemNode {
   typeLabel?: string;
   /** True when the item has a tree placement of its own. */
   placed?: boolean;
-  /** A placed item's placement order among its placed siblings. */
+  /** A placed item's placement order among its siblings. */
   sortOrder?: number;
+  /** Child pages, types and typed pages; only in a page tree. */
+  children?: CollabTreeNode[];
 }
 
 export type CollabTreeNode =
@@ -349,17 +351,18 @@ const TREE_NODE_RANK: Record<CollabTreeNode['type'], number> = {
 
 const treeNodeRank = (node: CollabTreeNode): number => TREE_NODE_RANK[node.type];
 
-const compareTypeNodes = (left: CollabTreeTypeNode, right: CollabTreeTypeNode): number =>
+/** @internal Shared with `collabPageTree.ts`. */
+export const compareTypeNodes = (left: CollabTreeTypeNode, right: CollabTreeTypeNode): number =>
   (left.placement.sortOrder - right.placement.sortOrder)
   || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
   || left.typeId.localeCompare(right.typeId);
 
 /**
  * Folders, then placed types (by sortOrder), then documents (by name), then
- * placed typed pages (by sortOrder). Documents carry no server order, so typed
- * pages keep their own block where a drag can reorder them.
+ * placed typed pages (by sortOrder): the order of a group nobody reordered.
+ * @internal Shared with `collabPageTree.ts`.
  */
-function compareTreeNodes(left: CollabTreeNode, right: CollabTreeNode): number {
+export function compareTreeNodes(left: CollabTreeNode, right: CollabTreeNode): number {
   const rank = treeNodeRank(left) - treeNodeRank(right);
   if (rank !== 0) return rank;
   if (left.type === 'type' && right.type === 'type') return compareTypeNodes(left, right);
@@ -392,20 +395,18 @@ export function sortTreeNodes(nodes: CollabTreeNode[]): CollabTreeNode[] {
  */
 export type CollabTreeContainer = { path: string; children: CollabTreeNode[] };
 
-/** @internal Shared with `collabPageTree.ts`. */
-export function attachTypeNodes(
-  roots: CollabTreeNode[],
-  folderNodeById: (folderId: string) => CollabTreeContainer | undefined,
-  input: CollabTypePlacementInput | undefined,
-  /** Items placed elsewhere in the tree; still counted, not listed. */
-  placedItemIds?: ReadonlySet<string>,
-): void {
-  if (!input || input.placements.length === 0) return;
-  const { resolver } = input;
-  const typeLabel = (typeId: string) => resolver.typeLabel?.(typeId) ?? resolver.typeName(typeId) ?? undefined;
-
+/**
+ * One node per resolvable placement, and the placed base each one nests in
+ * (null when it sits by its own placement). A corrupt `extends` cycle between
+ * placed types is broken by placing the node normally.
+ * @internal Shared with `collabPageTree.ts`.
+ */
+export function createTypeNodes(
+  placements: SharedTypePlacement[],
+  resolver: CollabTypeTreeResolver,
+): { nodes: Map<string, CollabTreeTypeNode>; parentType: Map<string, string | null> } {
   const nodes = new Map<string, CollabTreeTypeNode>();
-  for (const placement of input.placements) {
+  for (const placement of placements) {
     if (nodes.has(placement.typeId)) continue;
     const name = resolver.typeName(placement.typeId);
     if (!name) continue;
@@ -415,7 +416,7 @@ export function attachTypeNodes(
       typeId: placement.typeId,
       path: '',
       name,
-      count: 0,
+      count: resolver.itemsOfType(placement.typeId).length,
       placement,
       children: [],
     });
@@ -447,6 +448,18 @@ export function attachTypeNodes(
       current = parentType.get(current) ?? null;
     }
   }
+  return { nodes, parentType };
+}
+
+/** @internal Shared with `collabPageTree.ts`. */
+export function attachTypeNodes(
+  roots: CollabTreeNode[],
+  folderNodeById: (folderId: string) => CollabTreeContainer | undefined,
+  input: CollabTypePlacementInput | undefined,
+): void {
+  if (!input || input.placements.length === 0) return;
+  const { resolver } = input;
+  const { nodes, parentType } = createTypeNodes(input.placements, resolver);
 
   const subtypes = new Map<string, CollabTreeTypeNode[]>();
   for (const node of nodes.values()) {
@@ -467,23 +480,17 @@ export function attachTypeNodes(
     node.path = joinCollabPath(parentPath, node.name);
     const nested = (subtypes.get(node.typeId) ?? []).sort(compareTypeNodes);
     for (const child of nested) finalize(child, node.path);
-    const allItems = resolver.itemsOfType(node.typeId);
-    const label = placedItemIds ? typeLabel(node.typeId) : undefined;
-    const items: CollabTreeItemNode[] = allItems
-      .filter((item) => !placedItemIds?.has(item.itemId))
-      .map((item) => {
-        const name = item.title || item.itemId;
-        return {
-          id: `item:${item.itemId}`,
-          type: 'item',
-          itemId: item.itemId,
-          typeId: node.typeId,
-          path: joinCollabPath(node.path, name),
-          name,
-          ...(label ? { typeLabel: label } : {}),
-        };
-      });
-    node.count = allItems.length;
+    const items: CollabTreeItemNode[] = resolver.itemsOfType(node.typeId).map((item) => {
+      const name = item.title || item.itemId;
+      return {
+        id: `item:${item.itemId}`,
+        type: 'item',
+        itemId: item.itemId,
+        typeId: node.typeId,
+        path: joinCollabPath(node.path, name),
+        name,
+      };
+    });
     node.children = [...nested, ...items];
   };
   for (const node of nodes.values()) {
@@ -748,7 +755,7 @@ export function filterCollabTree(nodes: CollabTreeNode[], query: string): Collab
   };
 
   const filterNode = (node: CollabTreeNode): CollabTreeNode | null => {
-    if (node.type === 'item' || (node.type === 'document' && !node.children?.length)) {
+    if ((node.type === 'item' || node.type === 'document') && !node.children?.length) {
       return nodeMatchesQuery(node) ? node : null;
     }
 
@@ -784,11 +791,14 @@ export function filterCollabTree(nodes: CollabTreeNode[], query: string): Collab
 }
 
 /**
- * Page tree: a markdown page reads as its name, so "Architecture.md" shows as
- * "Architecture". Display only; the stored title keeps its extension, and
- * other document types keep theirs.
+ * A page's name wherever it shows (tree rows, tabs, crumbs, pickers). New
+ * pages store the bare name; an older title may still carry its folder path
+ * and, for markdown, ".md" ("Specs/Architecture.md" reads "Architecture").
+ * Display only: nothing rewrites stored titles. Other document types keep
+ * their extension.
  */
-export function pageDisplayName(name: string, documentType: string | undefined): string {
+export function pageDisplayName(title: string, documentType: string | undefined): string {
+  const name = getCollabNodeName(title) || title;
   return documentType === 'markdown' && /.\.md$/i.test(name) ? name.slice(0, -3) : name;
 }
 
@@ -807,7 +817,8 @@ export function projectPagesAsFolders(documents: SharedDocument[]): SharedFolder
     .map((document) => ({
       folderId: document.documentId,
       parentFolderId: document.parentFolderId ?? null,
-      name: getCollabNodeName(document.title) || document.title || UNRESOLVED_SHARED_DOCUMENT_NAME,
+      ...(document.parentKind === 'item' ? { parentKind: 'item' as const } : {}),
+      name: pageDisplayName(document.title, document.documentType) || UNRESOLVED_SHARED_DOCUMENT_NAME,
       sortOrder: 0,
       createdBy: document.createdBy,
       createdAt: document.createdAt,

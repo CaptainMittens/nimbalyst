@@ -88,7 +88,7 @@ export class PersonalCollabHost implements CollabHost<PersonalDocsCapability> {
   constructor(readonly workspacePath: string) {
     this.scope = createPersonalCollabScope(workspacePath);
     this.documents = {
-      dataSource: new PersonalPagesDataSource(workspacePath),
+      dataSource: this.createDataSource(),
       // Kept beside the team's settings in the same workspace state, under
       // their own keys, so the two sections never overwrite each other.
       loadViewPreferences: async () => {
@@ -121,6 +121,26 @@ export class PersonalCollabHost implements CollabHost<PersonalDocsCapability> {
       // the page locally and never seeds a room.
       createDocument: electronCollabDocumentAdapters.createDocument,
       readReceipts: { status: 'unavailable' },
+    };
+  }
+
+  /**
+   * The host outlives any one docs session, but a session disposes its source
+   * on unmount and a disposed `PersonalPagesDataSource` never watches again.
+   * Each dispose drops the instance so the next session gets a fresh one.
+   */
+  private createDataSource(): PersonalDocsCapability['dataSource'] {
+    let current: PersonalPagesDataSource | null = null;
+    const source = () => (current ??= new PersonalPagesDataSource(this.workspacePath));
+    return {
+      snapshot: () => source().snapshot(),
+      subscribe: (cb) => source().subscribe(cb),
+      command: (command) => source().command(command),
+      status: () => 'connected',
+      dispose: () => {
+        current?.dispose();
+        current = null;
+      },
     };
   }
 

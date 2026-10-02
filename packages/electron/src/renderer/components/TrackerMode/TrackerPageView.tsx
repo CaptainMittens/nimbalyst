@@ -11,6 +11,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { atom, useAtomValue, type Atom } from 'jotai';
+import { selectAtom } from 'jotai/utils';
 import { NimbalystEditor } from '@nimbalyst/runtime/editor';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import type { CollabScope } from '@nimbalyst/collab-client/core';
@@ -23,9 +24,10 @@ import { TrackerFieldPills } from '@nimbalyst/runtime/plugins/TrackerPlugin/comp
 import { getTrackerTagsField, useTrackerChipFieldSections } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerChipFields';
 import { isTrackerFieldEmpty } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerFieldLayout';
 import { labelFieldHints, unwrapLabelFieldValues, useTrackerLabelFields, wrapLabelFieldValue } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerLabelFields';
-import { trackerItemByIdAtom, trackerDataLoadedAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
+import { trackerItemByIdAtom, trackerDataLoadedAtom, trackerItemsMapAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
 import { getElectronCollabDocsSession, getPersonalCollabDocsSession, resolveDesktopCollabScope } from '../../store/atoms/collabDocuments';
-import { getSharedDocumentDisplayName } from '../CollabMode/collabTree';
+import { pageTreeAncestors } from '@nimbalyst/collab-client/trackers-ui/embed';
+import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
 import { useMarkTrackerViewed } from '../../hooks/useTrackerUnread';
 import { useRecordTrackerOpened } from '../../hooks/useRecordTrackerOpened';
 import { isNativeItem } from './trackerContentMode';
@@ -38,42 +40,17 @@ import { TrackerPageAddField } from './TrackerPageAddField';
 import { createCollectionItem } from './createCollectionItem';
 import './TrackerPageView.css';
 
-interface CrumbPlacement { typeId: string; parentFolderId?: string | null }
-interface CrumbItemPlacement { itemId: string; parentId?: string | null }
-interface CrumbFolder { folderId: string; parentFolderId?: string | null; name: string }
-interface CrumbDocument { documentId: string; parentFolderId?: string | null; title: string }
-
-/**
- * The page titles above `parentId`, root first. In the one page tree every
- * page can be a parent (a document's parent is `parentFolderId`); legacy
- * folders still resolve for a tree that has not been converted. A cycle or a
- * missing parent stops the walk.
- */
-function ancestorNames(
-  parentId: string | null | undefined,
-  documents: readonly CrumbDocument[],
-  folders: readonly CrumbFolder[],
-): string[] {
-  const docsById = new Map(documents.map((doc) => [doc.documentId, doc]));
-  const foldersById = new Map(folders.map((folder) => [folder.folderId, folder]));
-  const names: string[] = [];
-  const seen = new Set<string>();
-  let id = parentId ?? null;
-  while (id && !seen.has(id)) {
-    seen.add(id);
-    const doc = docsById.get(id);
-    if (doc) {
-      names.unshift(getSharedDocumentDisplayName(doc.title, doc.documentId));
-      id = doc.parentFolderId ?? null;
-      continue;
-    }
-    const folder = foldersById.get(id);
-    if (!folder) break;
-    names.unshift(folder.name);
-    id = folder.parentFolderId ?? null;
-  }
-  return names;
-}
+type CrumbParentKind = 'page' | 'item';
+interface CrumbPlacement { typeId: string; parentFolderId?: string | null; parentKind?: CrumbParentKind }
+interface CrumbItemPlacement { itemId: string; parentId?: string | null; parentKind?: CrumbParentKind }
+interface CrumbFolder { folderId: string; parentFolderId?: string | null; parentKind?: CrumbParentKind; name: string }
+interface CrumbDocument { documentId: string; parentFolderId?: string | null; parentKind?: CrumbParentKind; title: string; documentType?: string }
+type CrumbItemLookup = (itemId: string) => { title: string; typeId: string } | null;
+const NO_ITEMS: CrumbItemLookup = () => null;
+const crumbTypeName = (typeId: string): string | null => {
+  const model = globalRegistry.get(typeId);
+  return model ? model.displayNamePlural || model.displayName || typeId : null;
+};
 
 export interface TrackerPageCrumb {
   /** Ancestor page names, root first. */
@@ -84,8 +61,8 @@ export interface TrackerPageCrumb {
 
 /**
  * Where a typed page sits in the Pages tree. A placed item reads its own
- * parent pages; an unplaced one sits under its type page, so it reads the
- * type's placement and then the type.
+ * parents (pages and typed pages); an unplaced one sits under its type page,
+ * so it reads the type's placement and then the type.
  */
 export function trackerPageCrumb(
   itemId: string,
@@ -95,28 +72,49 @@ export function trackerPageCrumb(
     typePlacements: readonly CrumbPlacement[];
     documents: readonly CrumbDocument[];
     folders: readonly CrumbFolder[];
+    item?: CrumbItemLookup;
   },
 ): TrackerPageCrumb {
+  const walk = { ...tree, item: tree.item ?? NO_ITEMS, typeName: crumbTypeName };
   const itemPlacement = tree.itemPlacements.find((candidate) => candidate.itemId === itemId);
   if (itemPlacement) {
-    return { ancestors: ancestorNames(itemPlacement.parentId, tree.documents, tree.folders), underType: false };
+    const parent = itemPlacement.parentId ? { id: itemPlacement.parentId, kind: itemPlacement.parentKind ?? 'page' } : null;
+    return { ancestors: pageTreeAncestors(parent, walk), underType: false };
   }
   const typePlacement = tree.typePlacements.find((candidate) => candidate.typeId === typeId);
-  return { ancestors: ancestorNames(typePlacement?.parentFolderId, tree.documents, tree.folders), underType: true };
+  const parent = typePlacement?.parentFolderId ? { id: typePlacement.parentFolderId, kind: typePlacement.parentKind ?? 'page' } : null;
+  return { ancestors: pageTreeAncestors(parent, walk), underType: true };
 }
 
 /**
- * The folder-shaped ancestors of a type's placement, root first (the type
- * page's crumb). `folders` may be the session's folder list, which in a page
- * tree is the pages projected as folders.
+ * The ancestors of a type's placement, root first (the type page's crumb).
+ * `folders` may be the session's folder list, which in a page tree is the
+ * pages projected as folders.
  */
 export function trackerPageCrumbFolders(
   typeId: string,
   placements: readonly CrumbPlacement[],
   folders: readonly CrumbFolder[],
+  tree: { itemPlacements?: readonly CrumbItemPlacement[]; item?: CrumbItemLookup } = {},
 ): string[] {
   const placement = placements.find((candidate) => candidate.typeId === typeId);
-  return ancestorNames(placement?.parentFolderId, [], folders);
+  const parent = placement?.parentFolderId ? { id: placement.parentFolderId, kind: placement.parentKind ?? 'page' } : null;
+  return pageTreeAncestors(parent, {
+    documents: [],
+    folders,
+    itemPlacements: tree.itemPlacements ?? [],
+    typePlacements: placements,
+    item: tree.item ?? NO_ITEMS,
+    typeName: crumbTypeName,
+  });
+}
+
+/** A typed page's title and type, for a crumb walking up through typed pages. */
+export function crumbItemLookup(records: ReadonlyMap<string, TrackerRecord>): CrumbItemLookup {
+  return (itemId) => {
+    const record = records.get(itemId);
+    return record ? { title: getRecordTitle(record).trim(), typeId: record.primaryType } : null;
+  };
 }
 
 /**
@@ -175,14 +173,22 @@ function useTrackerPageCrumb(
     () => (personal ? getPersonalCollabDocsSession(workspacePath) : teamScope ? getElectronCollabDocsSession(teamScope) : null),
     [personal, workspacePath, teamScope],
   );
-  const itemPlacements = useAtomValue<readonly CrumbItemPlacement[]>(session?.atoms.itemPlacements ?? NO_ITEM_PLACEMENTS);
-  const typePlacements = useAtomValue<readonly CrumbPlacement[]>(session?.atoms.typePlacements ?? NO_PLACEMENTS);
-  const documents = useAtomValue<readonly CrumbDocument[]>(session?.atoms.sharedDocuments ?? NO_DOCUMENTS);
-  const folders = useAtomValue<readonly CrumbFolder[]>(session?.atoms.sharedFolders ?? NO_FOLDERS);
-  const crumb = useMemo(
-    () => trackerPageCrumb(itemId, typeId, { itemPlacements, typePlacements, documents, folders }),
-    [itemId, typeId, itemPlacements, typePlacements, documents, folders],
-  );
+  // One derived atom: the crumb re-renders the page only when its names change,
+  // not on every tracker item edit it reads titles from.
+  const crumbAtom = useMemo(() => selectAtom(
+    atom((get) => trackerPageCrumb(itemId, typeId, {
+      itemPlacements: get<readonly CrumbItemPlacement[]>(session?.atoms.itemPlacements ?? NO_ITEM_PLACEMENTS),
+      typePlacements: get<readonly CrumbPlacement[]>(session?.atoms.typePlacements ?? NO_PLACEMENTS),
+      documents: get<readonly CrumbDocument[]>(session?.atoms.sharedDocuments ?? NO_DOCUMENTS),
+      folders: get<readonly CrumbFolder[]>(session?.atoms.sharedFolders ?? NO_FOLDERS),
+      item: crumbItemLookup(get(trackerItemsMapAtom)),
+    })),
+    (value) => value,
+    (left, right) => left.underType === right.underType
+      && left.ancestors.length === right.ancestors.length
+      && left.ancestors.every((name, index) => name === right.ancestors[index]),
+  ), [itemId, typeId, session]);
+  const crumb = useAtomValue(crumbAtom);
   return { ...crumb, section: personal ? 'Personal' : null };
 }
 

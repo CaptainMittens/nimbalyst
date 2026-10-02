@@ -24,6 +24,7 @@ import {
 import { asTeamMemberId } from '@nimbalyst/runtime/auth/jwtScopes';
 import { appendCollabUrlQuery, createProxiedWebSocket } from '../utils/proxiedWebSocket';
 import { teamMemberDisplayName } from '../utils/teamMemberDisplayName';
+import { CollabWriteConfirmations } from './collabWriteConfirmations';
 import { ItemPlacementConfirmations } from './itemPlacementConfirmations';
 
 export interface ElectronCollabDocumentsDataSourceEvents {
@@ -67,6 +68,8 @@ function mapDocument(document: TeamDocIndexEntry): SharedDocument {
     updatedAt: document.updatedAt,
     lastWriterUserId: document.lastWriterUserId,
     parentFolderId: document.parentFolderId,
+    parentKind: document.parentKind ?? 'page',
+    sortOrder: document.sortOrder ?? null,
     trashedAt: document.trashedAt,
     decryptFailed: document.decryptFailed,
   };
@@ -90,6 +93,7 @@ function mapTypePlacement(placement: TypePlacementNode): SharedTypePlacement {
     typeId: placement.typeId,
     projectId: placement.projectId,
     parentFolderId: placement.parentFolderId,
+    parentKind: placement.parentKind ?? 'page',
     sortOrder: placement.sortOrder,
     createdBy: placement.createdBy,
     createdAt: placement.createdAt,
@@ -102,6 +106,7 @@ function mapItemPlacement(placement: ItemPlacementNode): SharedItemPlacement {
     itemId: placement.itemId,
     projectId: placement.projectId,
     parentId: placement.parentId,
+    parentKind: placement.parentKind ?? 'page',
     sortOrder: placement.sortOrder,
     createdBy: placement.createdBy,
     createdAt: placement.createdAt,
@@ -124,6 +129,9 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
   private readonly memberListeners = new Set<() => void>();
   private readonly provider: TeamSyncProvider;
   private readonly placementConfirmations: ItemPlacementConfirmations;
+  /** Confirmed page moves and type placements (Set type moves a page's children). */
+  private readonly documentConfirmations: CollabWriteConfirmations<TeamDocIndexEntry>;
+  private readonly typeConfirmations: CollabWriteConfirmations<TypePlacementNode>;
   private readonly observeStatus?: ElectronCollabDocumentsDataSourceEvents['observeStatus'];
   private connectPromise: Promise<void> | null = null;
   private disposed = false;
@@ -134,6 +142,10 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     this.observeStatus = observeStatus;
     const confirmations = new ItemPlacementConfirmations(options.placementConfirmTimeoutMs);
     this.placementConfirmations = confirmations;
+    const documentConfirmations = new CollabWriteConfirmations<TeamDocIndexEntry>(options.placementConfirmTimeoutMs);
+    const typeConfirmations = new CollabWriteConfirmations<TypePlacementNode>(options.placementConfirmTimeoutMs);
+    this.documentConfirmations = documentConfirmations;
+    this.typeConfirmations = typeConfirmations;
     const emitSnapshot = () => this.emit({
       type: 'snapshot',
       snapshot: this.currentSnapshot(),
@@ -146,10 +158,10 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       getJwt: options.getJwt,
       onTeamStateLoaded: emitSnapshot,
       onDocumentsLoaded: emitSnapshot,
-      onDocumentChanged: (document) => this.emit({
-        type: 'items-upserted',
-        items: [mapDocument(document)],
-      }),
+      onDocumentChanged: (document) => {
+        documentConfirmations.changed(document.documentId, document);
+        this.emit({ type: 'items-upserted', items: [mapDocument(document)] });
+      },
       onDocumentRemoved: (documentId) => this.emit({
         type: 'items-removed',
         itemIds: [documentId],
@@ -165,8 +177,14 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
         itemIds: documentIds,
       }),
       // Placement changes ride the snapshot change; see CollabDocsSnapshot.
-      onTypePlacementsLoaded: emitSnapshot,
-      onTypePlacementChanged: emitSnapshot,
+      onTypePlacementsLoaded: (placements) => {
+        typeConfirmations.loaded(new Map(placements.map((placement) => [placement.typeId, placement])));
+        emitSnapshot();
+      },
+      onTypePlacementChanged: (placement) => {
+        typeConfirmations.changed(placement.typeId, placement);
+        emitSnapshot();
+      },
       onTypePlacementsRemoved: emitSnapshot,
       // Each also settles the author's pending write; see itemPlacementConfirmations.
       onItemPlacementsLoaded: (placements) => {
@@ -183,6 +201,8 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       },
       onStatusChange: (status) => {
         confirmations.connectionChanged(status === 'connected');
+        documentConfirmations.connectionChanged(status === 'connected');
+        typeConfirmations.connectionChanged(status === 'connected');
         this.emit({ type: 'status', status });
         observeStatus?.(status);
       },
@@ -266,6 +286,11 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
           command.documentType,
           command.parentFolderId,
           command.metadata,
+          undefined,
+          {
+            ...(command.parentKind ? { parentKind: command.parentKind } : {}),
+            ...(command.sortOrder !== undefined ? { sortOrder: command.sortOrder } : {}),
+          },
         );
         return { ok: true, registrationAcked };
       }
@@ -281,9 +306,19 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       case 'restore-document':
         this.provider.restoreDocument(command.documentId);
         return { ok: true };
-      case 'move-document':
-        this.provider.moveDocument(command.documentId, command.parentFolderId);
+      case 'move-document': {
+        const parentKind = command.parentFolderId ? command.parentKind ?? 'page' : 'page';
+        const confirmed = command.confirm
+          ? this.documentConfirmations.expect(command.documentId, (row) =>
+            (row.parentFolderId ?? null) === command.parentFolderId && (row.parentKind ?? 'page') === parentKind)
+          : null;
+        this.provider.moveDocument(command.documentId, command.parentFolderId, {
+          ...(command.parentKind ? { parentKind: command.parentKind } : {}),
+          ...(command.sortOrder !== undefined ? { sortOrder: command.sortOrder } : {}),
+        });
+        await confirmed;
         return { ok: true };
+      }
       case 'register-folder':
         await this.provider.registerFolder(
           command.folderId,
@@ -303,9 +338,16 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
         return { ok: true };
       case 'refresh-folders':
         return { ok: true, folders: (await this.provider.refreshFolders())?.map(mapFolder) ?? null };
-      case 'set-type-placement':
-        this.provider.setTypePlacement(command.typeId, command.parentFolderId, command.sortOrder);
+      case 'set-type-placement': {
+        const parentKind = command.parentFolderId ? command.parentKind ?? 'page' : 'page';
+        const confirmed = command.confirm
+          ? this.typeConfirmations.expect(command.typeId, (row) =>
+            (row.parentFolderId ?? null) === command.parentFolderId && (row.parentKind ?? 'page') === parentKind)
+          : null;
+        this.provider.setTypePlacement(command.typeId, command.parentFolderId, command.sortOrder, command.parentKind);
+        await confirmed;
         return { ok: true };
+      }
       case 'remove-type-placement':
         this.provider.removeTypePlacement(command.typeId);
         return { ok: true };
@@ -317,7 +359,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       // Resolve only once the server confirmed; reject on a refusal or timeout.
       case 'set-item-placement': {
         const confirmed = this.placementConfirmations.expect(command.itemId, { parentId: command.parentId });
-        this.provider.setItemPlacement(command.itemId, command.parentId, command.sortOrder);
+        this.provider.setItemPlacement(command.itemId, command.parentId, command.sortOrder, command.parentKind);
         await confirmed;
         return { ok: true };
       }
@@ -343,6 +385,8 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     this.disposed = true;
     this.listeners.clear();
     this.placementConfirmations.dispose();
+    this.documentConfirmations.dispose();
+    this.typeConfirmations.dispose();
     this.provider.destroy();
   }
 
