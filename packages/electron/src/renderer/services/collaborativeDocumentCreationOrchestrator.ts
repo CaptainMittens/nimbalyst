@@ -1,5 +1,9 @@
 import { store } from '@nimbalyst/runtime/store';
-import type { CollabScope } from '@nimbalyst/collab-client/core';
+import {
+  isPersonalCollabScope,
+  workspacePathFromPersonalScopeKey,
+  type CollabScope,
+} from '@nimbalyst/collab-client/core';
 import type { CollabDocumentConfig } from '../utils/collabDocumentOpener';
 import {
   removeCollabConfigsForDocument,
@@ -14,6 +18,8 @@ import {
 } from '../components/CollabMode/collabTree';
 import {
   pendingCollabDocumentAtom,
+  getElectronCollabDocsSession,
+  getPersonalCollabHost,
   getSharedDocumentsForScope,
   getSharedFoldersForScope,
   registerDocumentInIndex,
@@ -155,6 +161,10 @@ export interface CollaborativeDocumentCreationDependencies {
     source?: CollabDocumentOpenSource,
   ): void;
   cleanup(scope: CollabScope, documentId: string): Promise<void>;
+  /** Open a Personal page in Pages mode; it has no room and no pending-share path. */
+  openPersonal(scope: CollabScope, document: SharedDocument): void;
+  /** Drop the optimistic tree row of a Personal page main refused to save. */
+  discardPersonal(scope: CollabScope, documentId: string): void;
   generateId(): string;
   now(): number;
   hashContent(content: string | Uint8Array): Promise<string>;
@@ -303,6 +313,20 @@ function defaultDependencies(): CollaborativeDocumentCreationDependencies {
     cleanup: async (scope, documentId) => {
       removeCollabConfigsForDocument(scope, documentId);
       await window.electronAPI?.documentSync?.closeDoc?.(documentId).catch(() => undefined);
+    },
+    openPersonal: (scope, document) => {
+      store.set(setWindowModeAtom, 'collab');
+      getPersonalCollabHost(workspacePathFromPersonalScopeKey(scope.scopeKey)).openArtifact({
+        kind: 'document',
+        scope,
+        documentId: document.documentId,
+        teamProjectId: null,
+      }, 'sidebar');
+    },
+    discardPersonal: (scope, documentId) => {
+      // Local only: main never stored the row, so there is nothing to delete.
+      store.set(getElectronCollabDocsSession(scope).atoms.allSharedDocuments, (current) =>
+        current.filter((document) => document.documentId !== documentId));
     },
     generateId: () => crypto.randomUUID(),
     now: () => Date.now(),
@@ -454,6 +478,9 @@ export class CollaborativeDocumentCreationOrchestrator {
       }
 
       const content = input.sourceContent ?? descriptor.creation?.defaultContent ?? '';
+      if (!announced && isPersonalCollabScope(scope)) {
+        return await this.createPersonal(input, operation, title);
+      }
       if (!announced) {
         const config = await this.dependencies.resolveConfig(
           scope,
@@ -658,6 +685,60 @@ export class CollaborativeDocumentCreationOrchestrator {
       });
       throw normalized;
     }
+  }
+
+  /**
+   * A Personal page is a row in the local database: register it and open its
+   * tab. There is no room to seed, no credentials to resolve and no team to
+   * announce it to.
+   */
+  private async createPersonal(
+    input: CreateCollaborativeDocumentInput,
+    operation: FrozenOperation,
+    title: string,
+  ): Promise<SharedDocument> {
+    const { operationId, documentId } = operation;
+    const { descriptor, metadata } = operation.resolvedType!;
+    let saved = false;
+    let failure: unknown;
+    try {
+      saved = await this.dependencies.register(
+        input.scope,
+        documentId,
+        title,
+        descriptor.documentType,
+        input.parentFolderId,
+        metadata,
+      );
+    } catch (cause) {
+      failure = cause;
+    }
+    if (!saved) {
+      // Nothing was stored, so nothing opens and no row stays in the tree.
+      this.dependencies.discardPersonal(input.scope, documentId);
+      throw new CollaborativeDocumentCreationError(
+        'register-failed',
+        failure instanceof Error ? failure.message : 'The personal page was not saved.',
+        operationId,
+        documentId,
+        false,
+        failure === undefined ? undefined : { cause: failure },
+      );
+    }
+    const now = this.dependencies.now();
+    const document: SharedDocument = {
+      documentId,
+      teamProjectId: null,
+      title,
+      documentType: descriptor.documentType,
+      ...metadata,
+      createdBy: '',
+      createdAt: now,
+      updatedAt: now,
+      parentFolderId: input.parentFolderId,
+    };
+    if (input.openAfterCreate !== false) this.dependencies.openPersonal(input.scope, document);
+    return document;
   }
 }
 

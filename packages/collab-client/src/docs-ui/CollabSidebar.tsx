@@ -1,6 +1,6 @@
 import { SharedDocumentLink } from './SharedDocumentLink';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { CollabDocumentTypeDescriptor } from '@nimbalyst/collab-client/core';
+import { isPersonalCollabScope, type CollabDocumentTypeDescriptor } from '@nimbalyst/collab-client/core';
 import { useAtomValue } from 'jotai';
 import { store } from '@nimbalyst/runtime/store';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
@@ -26,7 +26,13 @@ import {
   normalizeCollabPath,
   resolveCollabCreateTargetFolderId,
   type CollabTreeNode,
+  type CollabTypeTreeResolver,
 } from '@nimbalyst/collab-client/docs';
+import {
+  CollabPlaceTypeMenu,
+  CollabTypeTreeBranch,
+  getPlaceableTypes,
+} from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from './primitives/useFloatingMenu';
 import { CollabSearchInput } from './primitives/CollabSearchInput';
 import { DocUnreadDot } from './DocUnreadDot';
@@ -56,8 +62,10 @@ const STATUS_CONFIG: Record<TeamSyncStatus, { label: string; dotClass: string }>
   error:        { label: 'Sync error',    dotClass: 'bg-red-500' },
 };
 
-const TeamSyncStatusLabel: React.FC<{ status: TeamSyncStatus }> = ({ status }) => {
-  const { label, dotClass } = STATUS_CONFIG[status];
+const TeamSyncStatusLabel: React.FC<{ status: TeamSyncStatus; personal?: boolean }> = ({ status, personal }) => {
+  const { label, dotClass } = personal
+    ? { label: 'On this device', dotClass: 'bg-gray-500' }
+    : STATUS_CONFIG[status];
   return (
     <span className="inline-flex items-center gap-1.5">
       <span className={`inline-block w-1.5 h-1.5 rounded-full shrink-0 ${dotClass}`} />
@@ -102,6 +110,16 @@ export interface CollabSidebarProps {
    * the host would drift from it.
    */
   registerCreateMenu?: (menu: CollabSidebarCreateMenu | null) => void;
+  /**
+   * Names placed tracker types and lists their items. Hosts without tracker
+   * data omit it, and the tree then shows no type nodes.
+   */
+  typeResolver?: CollabTypeTreeResolver;
+  /**
+   * Shows this tree as one section of a stacked sidebar ("Team", "Personal"):
+   * a compact section header replaces the scope summary header.
+   */
+  sectionTitle?: string;
 }
 
 export interface CollabSidebarCreateMenu {
@@ -124,8 +142,32 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   headerActions,
   onSelectFolder,
   registerCreateMenu,
+  typeResolver,
+  sectionTitle,
 }) => {
   const { scope, host, session, controller } = useCollabDocsUI();
+  // Per session, not the active scope: a Personal section is never active.
+  const typePlacements = useAtomValue(session.atoms.typePlacements);
+  const personal = isPersonalCollabScope(scope);
+  // No resolver (a host without tracker data): no type nodes.
+  const typeTreeInput = useMemo(
+    () => (typeResolver ? { placements: typePlacements, resolver: typeResolver } : undefined),
+    [typePlacements, typeResolver],
+  );
+  const placedTypeIds = useMemo(
+    () => new Set(typePlacements.map((placement) => placement.typeId)),
+    [typePlacements],
+  );
+  const placeableTypes = useMemo(
+    () => getPlaceableTypes(typeResolver, placedTypeIds),
+    [typeResolver, placedTypeIds],
+  );
+  const [placeTypeMenu, setPlaceTypeMenu] = useState<{
+    x: number;
+    y: number;
+    parentFolderId: string | null;
+  } | null>(null);
+  const [draggedType, setDraggedType] = useState<string | null>(null);
   const documentTypesRevision = useSyncExternalStore(
     (listener) => host.documents?.onDocumentTypesChanged?.(listener) ?? (() => undefined),
     () => host.documents?.documentTypes() ?? [],
@@ -137,7 +179,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   const sharedFolders = useAtomValue(session.atoms.sharedFolders);
   const teamSyncStatus = useAtomValue(session.atoms.syncStatus);
   const teamOrgId = scope.orgId;
-  const workspaceHasTeam = useAtomValue(session.atoms.hasTeam);
+  // A Personal scope needs no team; it is available as soon as it exists.
+  const scopeAvailable = useAtomValue(session.atoms.hasTeam) || personal;
 
   // Discovery: favorites, tree filter, and unread-bubble visibility.
   const treeFilter = useAtomValue(session.atoms.treeFilter);
@@ -209,12 +252,15 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   const showWarning = useCallback((title: string, message: string) => {
     host.notify?.({ level: 'warning', title, message, duration: 5000 });
   }, [host]);
+  const reportTypePlacementError = useCallback((error: unknown) => {
+    showWarning('Could not update the tree', error instanceof Error ? error.message : String(error));
+  }, [showWarning]);
 
   // Full tree (all docs + first-class folders) — used for path-collision checks
   // and auto-expand, independent of the active filter.
   const tree = useMemo(
-    () => buildCollabTreeAdaptive(sharedDocuments, sharedFolders),
-    [sharedDocuments, sharedFolders]
+    () => buildCollabTreeAdaptive(sharedDocuments, sharedFolders, typeTreeInput),
+    [sharedDocuments, sharedFolders, typeTreeInput]
   );
 
   // Docs visible under the active segmented filter (All / Favorites / Updated).
@@ -232,10 +278,13 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   // Favorites/Updated segments show only folders that still contain a match.
   const displayTree = useMemo(
     () => {
-      const built = buildCollabTreeAdaptive(visibleDocuments, sharedFolders);
-      return effectiveTreeFilter === 'all' ? built : pruneEmptyFolders(built);
+      // Favorites and Updated are document filters; placed types only show in All.
+      if (effectiveTreeFilter !== 'all') {
+        return pruneEmptyFolders(buildCollabTreeAdaptive(visibleDocuments, sharedFolders));
+      }
+      return buildCollabTreeAdaptive(visibleDocuments, sharedFolders, typeTreeInput);
     },
-    [visibleDocuments, sharedFolders, effectiveTreeFilter]
+    [visibleDocuments, sharedFolders, effectiveTreeFilter, typeTreeInput]
   );
   const trimmedSearchQuery = searchQuery.trim();
   const hasActiveSearch = trimmedSearchQuery.length > 0;
@@ -249,6 +298,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
     const collect = (nodes: CollabTreeNode[]) => {
       for (const node of nodes) {
+        // Type and item nodes never collide with document or folder names.
+        if (node.type === 'type' || node.type === 'item') continue;
         paths.add(node.path);
         if (node.type === 'folder') {
           collect(node.children);
@@ -490,6 +541,9 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       setContextMenu(null);
       return;
     }
+
+    // Type and item rows have no delete; "Remove from tree" is separate.
+    if (contextMenu.node.type !== 'folder') { setContextMenu(null); return; }
 
     // Folder: recursive delete with a descendant-count confirmation.
     const folderId = contextMenu.node.folderId;
@@ -921,9 +975,65 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     setDraggedFolder(null);
   }, [canDropFolder, canMutateMetadata, draggedFolder, host, session]);
 
+  // Placed types: one placement per type. Moving or removing a placement never
+  // touches the type or its items.
+  const canDropType = useCallback((targetFolderId: string | null): boolean => {
+    if (!draggedType) return false;
+    const placement = typePlacements.find((candidate) => candidate.typeId === draggedType);
+    return !!placement && (placement.parentFolderId ?? null) !== targetFolderId;
+  }, [draggedType, typePlacements]);
+
+  const moveDraggedType = useCallback((targetFolderId: string | null, targetFolderPath: string | null) => {
+    const typeId = draggedType;
+    setDropTargetPath(null);
+    setDraggedType(null);
+    if (!typeId || !canMutateMetadata('move this type')) return;
+    session.moveTypePlacement(typeId, targetFolderId).catch(reportTypePlacementError);
+    if (targetFolderPath) {
+      setExpandedFolders((currentFolders) => new Set(currentFolders).add(targetFolderPath));
+    }
+  }, [canMutateMetadata, draggedType, reportTypePlacementError, session]);
+
+  const handlePlaceType = useCallback((typeId: string) => {
+    const parentFolderId = placeTypeMenu?.parentFolderId ?? null;
+    setPlaceTypeMenu(null);
+    if (!canMutateMetadata('place this type')) return;
+    session.placeType(typeId, parentFolderId).catch(reportTypePlacementError);
+    const parentPath = parentFolderId ? folderPathById.get(parentFolderId) : null;
+    setUserTouchedExpansion(true);
+    setExpandedFolders((currentFolders) => {
+      const next = new Set(currentFolders).add(`type:${typeId}`);
+      if (parentPath) next.add(parentPath);
+      return next;
+    });
+  }, [canMutateMetadata, folderPathById, placeTypeMenu, reportTypePlacementError, session]);
+
   const renderTree = useCallback((nodes: CollabTreeNode[], depth = 0): React.ReactNode => {
     return nodes.map((node) => {
       const indent = depth * 16 + 8;
+
+      if (node.type === 'item') return null; // rendered by its type node
+
+      if (node.type === 'type') {
+        return (
+          <CollabTypeTreeBranch
+            key={node.id}
+            node={node}
+            indent={indent}
+            expanded={hasActiveSearch || expandedFolders.has(node.id)}
+            onToggle={() => { if (!hasActiveSearch) toggleFolder(node.id); }}
+            onOpenType={(typeId) => host.openArtifact({ kind: 'type', scope, typeId }, 'sidebar')}
+            onOpenItem={(trackerId) => host.openArtifact({ kind: 'tracker', scope, trackerId }, 'sidebar')}
+            onContextMenu={(event) => handleContextMenu(event, node)}
+            onDragStart={setDraggedType}
+            onDragEnd={() => {
+              setDraggedType(null);
+              setDropTargetPath(null);
+            }}
+            renderSubtypes={(subtypes) => renderTree(subtypes, depth + 1)}
+          />
+        );
+      }
 
       if (node.type === 'folder') {
         const isExpanded = hasActiveSearch || expandedFolders.has(node.path);
@@ -957,9 +1067,11 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               }}
               onContextMenu={(event) => handleContextMenu(event, node)}
               onDragOver={(event) => {
-                const accepts = draggedFolder
-                  ? canDropFolder(node.folderId ?? null)
-                  : canDropDocument(node.path);
+                const accepts = draggedType
+                  ? !!node.folderId && canDropType(node.folderId)
+                  : draggedFolder
+                    ? canDropFolder(node.folderId ?? null)
+                    : canDropDocument(node.path);
                 if (!accepts) return;
                 event.preventDefault();
                 event.stopPropagation();
@@ -979,6 +1091,13 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 }
               }}
               onDrop={(event) => {
+                if (draggedType) {
+                  if (!node.folderId || !canDropType(node.folderId)) return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  moveDraggedType(node.folderId, node.path);
+                  return;
+                }
                 if (draggedFolder) {
                   if (!canDropFolder(node.folderId ?? null)) return;
                   event.preventDefault();
@@ -1123,7 +1242,10 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     activeDocumentId,
     canDropDocument,
     canDropFolder,
+    canDropType,
     draggedFolder,
+    draggedType,
+    moveDraggedType,
     dropTargetPath,
     expandedFolders,
     handleContextMenu,
@@ -1143,7 +1265,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     scope,
   ]);
 
-  const selectedFolderLabel = selectedFolderPath ? getCollabNodeName(selectedFolderPath) : 'Shared Docs';
+  const selectedFolderLabel = selectedFolderPath ? getCollabNodeName(selectedFolderPath) : 'Pages';
   const contextDocument = contextMenu?.node.type === 'document' ? contextMenu.node.document : null;
   const useLocalOrigin = controller.useLocalOrigin ?? useUnavailableLocalOrigin;
   const contextLocalOrigin = useLocalOrigin(
@@ -1152,58 +1274,75 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     contextDocument?.documentType,
   );
 
+  const headerActionButtons = (
+    <>
+      {headerActions}
+      {onShowHome && (
+        <button
+          type="button"
+          className={`workspace-action-button bg-transparent border-none p-1.5 cursor-pointer rounded flex items-center justify-center transition-all duration-200 relative hover:bg-[var(--nim-bg-hover)] hover:text-[var(--nim-text)] ${
+            homeActive ? 'text-[var(--nim-primary)]' : 'text-[var(--nim-text-faint)]'
+          }`}
+          title="Discovery home"
+          aria-label="Discovery home"
+          onClick={() => {
+            onShowHome();
+            setContextMenu(null);
+          }}
+        >
+          <MaterialSymbol icon="grid_view" size={16} />
+        </button>
+      )}
+      {/* New document / New folder moved to the host's title-bar create
+          control, which sits directly over this tree. The folder context
+          menu still covers "create here". */}
+      {readReceiptsAvailable && (
+        <button
+          ref={overflowMenu.refs.setReference}
+          {...overflowMenu.getReferenceProps()}
+          type="button"
+          className="workspace-action-button bg-transparent border-none p-1.5 cursor-pointer rounded text-[var(--nim-text-faint)] flex items-center justify-center transition-all duration-200 relative hover:bg-[var(--nim-bg-hover)] hover:text-[var(--nim-text)]"
+          title="Shared document options"
+          aria-label="Shared document options"
+          onClick={() => {
+            setOverflowOpen((open) => !open);
+            setContextMenu(null);
+          }}
+        >
+          <MaterialSymbol icon="more_horiz" size={16} />
+        </button>
+      )}
+    </>
+  );
+
   return (
     <div
       className="collab-sidebar w-full h-full flex flex-col bg-nim-secondary border-r border-nim overflow-hidden"
-      data-testid="collab-sidebar"
+      data-testid={personal ? 'collab-sidebar-personal' : 'collab-sidebar'}
     >
-      <ScopeSummaryHeader
-        scopeKey={scope.scopeKey}
-        scopeName={scopeName}
-        scopePath={scopePath}
-        subtitle={<TeamSyncStatusLabel status={teamSyncStatus} />}
-        actionsClassName="gap-1"
-        actions={
-          <>
-            {headerActions}
-            {onShowHome && (
-              <button
-                type="button"
-                className={`workspace-action-button bg-transparent border-none p-1.5 cursor-pointer rounded flex items-center justify-center transition-all duration-200 relative hover:bg-[var(--nim-bg-hover)] hover:text-[var(--nim-text)] ${
-                  homeActive ? 'text-[var(--nim-primary)]' : 'text-[var(--nim-text-faint)]'
-                }`}
-                title="Discovery home"
-                aria-label="Discovery home"
-                onClick={() => {
-                  onShowHome();
-                  setContextMenu(null);
-                }}
-              >
-                <MaterialSymbol icon="grid_view" size={16} />
-              </button>
-            )}
-            {/* New document / New folder moved to the host's title-bar create
-                control, which sits directly over this tree. The folder context
-                menu still covers "create here". */}
-            {readReceiptsAvailable && (
-              <button
-                ref={overflowMenu.refs.setReference}
-                {...overflowMenu.getReferenceProps()}
-                type="button"
-                className="workspace-action-button bg-transparent border-none p-1.5 cursor-pointer rounded text-[var(--nim-text-faint)] flex items-center justify-center transition-all duration-200 relative hover:bg-[var(--nim-bg-hover)] hover:text-[var(--nim-text)]"
-                title="Shared document options"
-                aria-label="Shared document options"
-                onClick={() => {
-                  setOverflowOpen((open) => !open);
-                  setContextMenu(null);
-                }}
-              >
-                <MaterialSymbol icon="more_horiz" size={16} />
-              </button>
-            )}
-          </>
-        }
-      />
+      {sectionTitle ? (
+        <div
+          className="collab-sidebar-section-header flex items-center gap-2 px-3 pt-2 pb-1.5 border-b border-[var(--nim-border)] shrink-0"
+          data-testid={`collab-sidebar-section-${personal ? 'personal' : 'team'}`}
+        >
+          <h3 className="collab-sidebar-section-title m-0 text-[11px] font-semibold uppercase tracking-wide text-[var(--nim-text-muted)]">
+            {sectionTitle}
+          </h3>
+          <span className="text-[11px] text-[var(--nim-text-faint)] whitespace-nowrap">
+            <TeamSyncStatusLabel status={teamSyncStatus} personal={personal} />
+          </span>
+          <div className="ml-auto flex items-center gap-1">{headerActionButtons}</div>
+        </div>
+      ) : (
+        <ScopeSummaryHeader
+          scopeKey={scope.scopeKey}
+          scopeName={scopeName}
+          scopePath={scopePath}
+          subtitle={<TeamSyncStatusLabel status={teamSyncStatus} personal={personal} />}
+          actionsClassName="gap-1"
+          actions={headerActionButtons}
+        />
+      )}
 
       {treeSegments.length > 1 && (
       <div className="collab-tree-filter px-3 py-2 border-b border-[var(--nim-border)] shrink-0">
@@ -1242,16 +1381,27 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         <CollabSearchInput
           value={searchQuery}
           onChange={setSearchQuery}
-          placeholder="Search shared documents..."
-          label="Search shared documents"
+          placeholder={personal ? 'Search personal pages...' : 'Search shared documents...'}
+          label={personal ? 'Search personal pages' : 'Search shared documents'}
         />
       </div>
 
       {/* Document tree */}
       <div
         className={`flex-1 overflow-y-auto px-1.5 py-2 transition-colors ${dropTargetPath === '__root__' ? 'bg-nim-hover' : ''}`}
+        onContextMenu={(event) => {
+          // Empty space in the tree is the root: place a type there.
+          const target = event.target as HTMLElement;
+          if (target.closest('.file-tree-directory, .file-tree-file')) return;
+          if (!scopeAvailable || !typeResolver) return;
+          event.preventDefault();
+          setContextMenu(null);
+          setPlaceTypeMenu({ x: event.clientX, y: event.clientY, parentFolderId: null });
+        }}
         onDragOver={(event) => {
-          const accepts = draggedFolder ? canDropFolder(null) : canDropDocument(null);
+          const accepts = draggedType
+            ? canDropType(null)
+            : draggedFolder ? canDropFolder(null) : canDropDocument(null);
           if (!accepts) return;
           const target = event.target as HTMLElement;
           if (target.closest('.file-tree-directory, .file-tree-file')) return;
@@ -1275,6 +1425,12 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         onDrop={(event) => {
           const target = event.target as HTMLElement;
           if (target.closest('.file-tree-directory, .file-tree-file')) return;
+          if (draggedType) {
+            if (!canDropType(null)) return;
+            event.preventDefault();
+            moveDraggedType(null, null);
+            return;
+          }
           if (draggedFolder) {
             if (!canDropFolder(null)) return;
             event.preventDefault();
@@ -1311,11 +1467,13 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               <div className="px-2 py-4 text-center">
                 <MaterialSymbol icon="cloud_sync" size={32} className="text-nim-faint mb-2" />
                 <p className="text-xs text-nim-faint m-0">
-                  {workspaceHasTeam
-                    ? 'No shared documents yet.'
-                    : 'No team connected to this workspace.'}
+                  {personal
+                    ? 'No personal pages yet.'
+                    : scopeAvailable
+                      ? 'No shared documents yet.'
+                      : 'No team connected to this workspace.'}
                 </p>
-                {workspaceHasTeam && (
+                {scopeAvailable && !personal && (
                   <p className="text-xs text-nim-faint mt-1 m-0">
                     Create one here or share a local file to collaborate.
                   </p>
@@ -1440,6 +1598,19 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 <MaterialSymbol icon="create_new_folder" size={18} />
                 <span>New Folder</span>
               </button>
+              {typeResolver && <button
+                type="button"
+                className="collab-place-type-action w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!contextMenu.node.folderId}
+                onClick={() => {
+                  if (contextMenu.node.type !== 'folder' || !contextMenu.node.folderId) return;
+                  setPlaceTypeMenu({ x: contextMenu.x, y: contextMenu.y, parentFolderId: contextMenu.node.folderId });
+                  setContextMenu(null);
+                }}
+              >
+                <MaterialSymbol icon="table" size={18} />
+                <span>Place type...</span>
+              </button>}
               <button
                 type="button"
                 className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
@@ -1486,6 +1657,21 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 <span>Delete</span>
               </button>
             </>
+          ) : contextMenu.node.type === 'type' ? (
+            <button
+              type="button"
+              className="collab-remove-type-placement w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
+              onClick={() => {
+                if (contextMenu.node.type !== 'type') return;
+                const { typeId } = contextMenu.node;
+                setContextMenu(null);
+                // Removes the placement only; the type and its items stay.
+                if (canMutateMetadata('remove this type from the tree')) session.removeTypePlacement(typeId).catch(reportTypePlacementError);
+              }}
+            >
+              <MaterialSymbol icon="playlist_remove" size={18} />
+              <span>Remove from tree</span>
+            </button>
           ) : (
             <>
               <button
@@ -1658,6 +1844,16 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           )}
           </div>
         </FloatingPortal>
+      )}
+
+      {placeTypeMenu && (
+        <CollabPlaceTypeMenu
+          x={placeTypeMenu.x}
+          y={placeTypeMenu.y}
+          types={placeableTypes}
+          onPlace={handlePlaceType}
+          onClose={() => setPlaceTypeMenu(null)}
+        />
       )}
 
       <CollabCreateItemDialog

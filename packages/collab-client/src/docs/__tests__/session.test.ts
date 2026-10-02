@@ -4,6 +4,8 @@ import { store } from '@nimbalyst/runtime/store';
 import { asTeamMemberId } from '@nimbalyst/runtime/auth/jwtScopes';
 import {
   CollabScopeResolutionError,
+  createPersonalCollabScope,
+  isPersonalCollabScope,
   type CollabHost,
   type CollabPersonalStateRow,
   type CollabScope,
@@ -19,10 +21,14 @@ import {
   pruneCollabDocsSession,
   setDocUnreadAtom,
   sharedDocumentsAtom,
+  sharedTypePlacementsAtom,
   workspaceHasTeamAtom,
   type CollabDocsCommand,
+  type CollabDocsDataChange,
   type CollabDocsDataSource,
   type SharedDocument,
+  type SharedFolder,
+  type SharedTypePlacement,
 } from '..';
 
 const SCOPE: CollabScope = {
@@ -50,7 +56,9 @@ const UNAVAILABLE_SCOPE: CollabScope = {
   orgId: 'org-session-unavailable',
   indexConfig: { serverUrl: 'ws://sync.test', teamMemberId: asTeamMemberId('member-unavailable') },
 };
+const PERSONAL_SCOPE = createPersonalCollabScope('/workspace/session-test');
 const ALL_SCOPE_KEYS = [
+  PERSONAL_SCOPE.scopeKey,
   SCOPE.scopeKey,
   OTHER_SCOPE.scopeKey,
   LIFECYCLE_SCOPE.scopeKey,
@@ -74,6 +82,8 @@ function document(documentId: string, title = `${documentId}.md`): SharedDocumen
 
 interface HarnessOptions {
   documents?: SharedDocument[];
+  folders?: SharedFolder[];
+  typePlacements?: SharedTypePlacement[];
   personalRows?: CollabPersonalStateRow[];
   receiptRows?: Array<{ entityId: string; lastSeenVersion: number | null; lastViewedAt: number }>;
   setFavorite?: (input: any) => Promise<CollabPersonalStateRow | null>;
@@ -84,6 +94,7 @@ interface HarnessOptions {
 
 function createHarness(scope: CollabScope, options: HarnessOptions = {}) {
   const commands: CollabDocsCommand[] = [];
+  let dataListener: ((change: CollabDocsDataChange) => void) | null = null;
   let personalStateListener: ((row: CollabPersonalStateRow) => void) | null = null;
   let receiptListener: ((row: {
     entityId: string;
@@ -91,8 +102,15 @@ function createHarness(scope: CollabScope, options: HarnessOptions = {}) {
     lastViewedAt: number;
   }) => void) | null = null;
   const dataSource: CollabDocsDataSource = {
-    snapshot: vi.fn(async () => ({ items: options.documents ?? [], containers: [] })),
-    subscribe: vi.fn(() => () => undefined),
+    snapshot: vi.fn(async () => ({
+      items: options.documents ?? [],
+      containers: options.folders ?? [],
+      typePlacements: options.typePlacements,
+    })),
+    subscribe: vi.fn((listener: (change: CollabDocsDataChange) => void) => {
+      dataListener = listener;
+      return () => undefined;
+    }),
     command: vi.fn(async (command: CollabDocsCommand) => {
       commands.push(command);
       return { ok: true as const, folders: command.type === 'refresh-folders' ? [] : undefined };
@@ -164,6 +182,7 @@ function createHarness(scope: CollabScope, options: HarnessOptions = {}) {
     readReceiptSnapshot,
     reportError,
     session,
+    emitData: (change: CollabDocsDataChange) => dataListener?.(change),
     emitPersonalState: (row: CollabPersonalStateRow) => personalStateListener?.(row),
     emitReceipt: (row: {
       entityId: string;
@@ -246,6 +265,30 @@ describe('CollabDocsSession', () => {
     expect(store.get(sharedDocumentsAtom).map((row) => row.documentId)).toEqual(['doc-second']);
     expect(store.get(first.session.atoms.sharedDocuments).map((row) => row.documentId))
       .toEqual(['doc-first']);
+  });
+
+  it('runs a personal scope beside the team scope without claiming a team or the active scope', async () => {
+    const personal = createHarness(PERSONAL_SCOPE, {
+      documents: [document('doc-personal')],
+      personalStateAvailable: false,
+      readReceiptsAvailable: false,
+    });
+    await personal.session.start();
+
+    expect(store.get(personal.session.atoms.sharedDocuments).map((row) => row.documentId))
+      .toEqual(['doc-personal']);
+    expect(store.get(personal.session.atoms.hasTeam)).toBe(false);
+    expect(store.get(activeCollabScopeAtom)).toBeNull();
+
+    const team = createHarness(SCOPE, { documents: [document('doc-team')] });
+    team.session.activate();
+    await team.session.start();
+
+    expect(store.get(workspaceHasTeamAtom)).toBe(true);
+    expect(store.get(activeCollabScopeAtom)?.scopeKey).toBe(SCOPE.scopeKey);
+    expect(store.get(sharedDocumentsAtom).map((row) => row.documentId)).toEqual(['doc-team']);
+    expect(isPersonalCollabScope(PERSONAL_SCOPE)).toBe(true);
+    expect(isPersonalCollabScope(SCOPE)).toBe(false);
   });
 
   it('rolls back failed optimistic state and applies only scoped, advancing rows', async () => {
@@ -350,6 +393,44 @@ describe('CollabDocsSession', () => {
       { type: 'move-document', documentId: 'doc-alpha', parentFolderId: alpha?.folderId },
       { type: 'move-document', documentId: 'doc-projects', parentFolderId: projects?.folderId },
     ]);
+  });
+
+  it('places, moves and removes tracker types optimistically and takes the server snapshot as truth', async () => {
+    const folder: SharedFolder = {
+      folderId: 'kb', parentFolderId: null, name: 'KB', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1,
+    };
+    const placed = (typeId: string, parentFolderId: string | null, sortOrder = 7): SharedTypePlacement => ({
+      typeId, projectId: 'p1', parentFolderId, sortOrder, createdBy: 'member-self', createdAt: 1, updatedAt: 1,
+    });
+    const harness = createHarness(SCOPE, { folders: [folder], typePlacements: [placed('module', 'kb')] });
+    await harness.session.start();
+    harness.session.activate();
+    expect(store.get(sharedTypePlacementsAtom)).toEqual([placed('module', 'kb')]);
+
+    await harness.session.moveTypePlacement('module', null);
+    await harness.session.placeType('competitor', 'kb');
+    expect(store.get(sharedTypePlacementsAtom)).toEqual([
+      expect.objectContaining({ typeId: 'module', parentFolderId: null, sortOrder: 7, createdAt: 1 }),
+      expect.objectContaining({ typeId: 'competitor', parentFolderId: 'kb', projectId: null }),
+    ]);
+    expect(harness.commands).toContainEqual(
+      { type: 'set-type-placement', typeId: 'module', parentFolderId: null, sortOrder: 7 },
+    );
+
+    // Removing the folder drops the placement inside it, as the server does.
+    harness.session.removeFolder('kb');
+    await harness.session.removeTypePlacement('module');
+    expect(store.get(sharedTypePlacementsAtom)).toEqual([]);
+    expect(harness.commands).toContainEqual({ type: 'remove-type-placement', typeId: 'module' });
+
+    harness.emitData({
+      type: 'snapshot',
+      snapshot: { items: [], containers: [], typePlacements: [placed('person', null)] },
+    });
+    expect(store.get(harness.session.atoms.typePlacements)).toEqual([placed('person', null)]);
+    // A snapshot from a host without placements leaves them alone.
+    harness.emitData({ type: 'snapshot', snapshot: { items: [], containers: [] } });
+    expect(store.get(harness.session.atoms.typePlacements)).toEqual([placed('person', null)]);
   });
 
   it('owns retry, replacement, and teardown through the host scope contract', async () => {

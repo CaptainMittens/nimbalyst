@@ -28,7 +28,7 @@ vi.mock('../../../hooks/useTrackerContentCollab', () => ({
   }),
 }));
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
-import { loadBuiltinTrackers } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
+import { globalRegistry, loadBuiltinTrackers } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { replaceAllTrackerItemsAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
 import { TrackerItemDetail } from '../TrackerItemDetail';
 
@@ -149,6 +149,24 @@ describe('TrackerItemDetail metadata region', () => {
 
     const chip = screen.getByTestId('tracker-detail-field-pill-status') as HTMLButtonElement;
     expect(chip.disabled).toBe(true);
+  });
+
+  it('as a page header shows only single-valued chips: no tags, type tags, lists or multi-valued links', () => {
+    // The plan's collection field is the multi-valued link under test.
+    expect(globalRegistry.get('plan')?.fields.find((field) => field.name === 'collection')?.multiValue).toBe(true);
+
+    renderDetail({ workspacePath: '/ws', pageHeader: true });
+
+    const chips = Array.from(
+      screen.getByTestId('tracker-detail-field-pills').querySelectorAll('.tracker-field-pill'),
+    ).map((chip) => chip.getAttribute('data-field'));
+    expect(chips).toContain('status');
+    expect(chips).toContain('priority');
+    expect(chips).not.toContain('collection');
+    expect(chips).not.toContain('tags');
+    expect(screen.queryByTestId('tracker-detail-tags')).toBeNull();
+    expect(document.querySelector('.tracker-type-tags-editor')).toBeNull();
+    expect(document.querySelector('.tracker-detail-overflow-fields')).toBeNull();
   });
 
   it('hides the metadata region in content focus', () => {

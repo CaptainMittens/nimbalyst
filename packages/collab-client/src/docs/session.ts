@@ -9,7 +9,7 @@ import {
 } from '@nimbalyst/runtime/readReceipts/readReceipts';
 import {
   CollabScopeResolutionError,
-  type CollabDataChange,
+  isPersonalCollabScope,
   type CollabDocsCapability,
   type CollabHost,
   type CollabPersonalStateRow,
@@ -24,8 +24,8 @@ import {
   isDescendantFolder,
   normalizeCollabPath,
 } from './collabTree';
-import type { CollabDocsDataSource } from './dataSource';
-import type { SharedDocument, SharedFolder } from './types';
+import type { CollabDocsDataChange, CollabDocsDataSource } from './dataSource';
+import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
 
 export type CollabTreeFilter = 'all' | 'favorites' | 'updated';
 export type CollabDocsUIStatus = 'disconnected' | 'connecting' | 'syncing' | 'connected' | 'error';
@@ -58,6 +58,7 @@ type ListAtom<T> = WritableAtom<T[], [ListUpdate<T>], void>;
 
 const documentsByScope = atomFamily((_scopeKey: string) => atom<SharedDocument[]>([]));
 const foldersByScope = atomFamily((_scopeKey: string) => atom<SharedFolder[]>([]));
+const typePlacementsByScope = atomFamily((_scopeKey: string) => atom<SharedTypePlacement[]>([]));
 const statusByScope = atomFamily((_scopeKey: string) => atom<CollabDocsUIStatus>('disconnected'));
 const hasTeamByScope = atomFamily((_scopeKey: string) => atom(false));
 const orgIdByScope = atomFamily((_scopeKey: string) => atom<string | null>(null));
@@ -155,6 +156,8 @@ export const sharedDocumentsForScopeAtom = atomFamily((scopeKey: string) =>
   atom((get) => get(documentsByScope(scopeKey)).filter((document) => document.trashedAt == null)),
 );
 export const sharedFoldersAtom = activeListAtom(foldersByScope);
+/** Tracker types placed in the active scope's page tree, one per type. */
+export const sharedTypePlacementsAtom = activeListAtom(typePlacementsByScope);
 export const teamSyncStatusAtom = atom<CollabDocsUIStatus, [CollabDocsUIStatus], void>(
   (get) => {
     const scope = get(activeCollabScopeAtom);
@@ -391,6 +394,7 @@ export interface CollabDocsSessionAtoms {
   allSharedDocuments: ListAtom<SharedDocument>;
   trashedSharedDocuments: Atom<SharedDocument[]>;
   sharedFolders: ListAtom<SharedFolder>;
+  typePlacements: ListAtom<SharedTypePlacement>;
   syncStatus: WritableAtom<CollabDocsUIStatus, [CollabDocsUIStatus], void>;
   hasTeam: WritableAtom<boolean, [boolean], void>;
   activeTeamUserId: Atom<string | null>;
@@ -484,6 +488,7 @@ function createSessionAtoms(
     allSharedDocuments: allDocuments,
     trashedSharedDocuments: trashedDocuments,
     sharedFolders: folders,
+    typePlacements: typePlacementsByScope(scopeKey),
     syncStatus,
     hasTeam,
     activeTeamUserId,
@@ -629,6 +634,10 @@ export interface CollabDocsSession {
   moveFolder(folderId: string, parentFolderId: string | null): void;
   removeFolder(folderId: string): void;
   refreshFolders(): Promise<boolean>;
+  /** Place a tracker type in the page tree; an already placed type moves. */
+  placeType(typeId: string, parentFolderId: string | null): Promise<void>;
+  moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number): Promise<void>;
+  removeTypePlacement(typeId: string): Promise<void>;
   toggleFavorite(documentId: string): void;
   recordOpened(documentId: string): void;
   markDocumentViewed(documentId: string, updatedAt: number | null): Promise<void>;
@@ -853,6 +862,9 @@ class CollabDocsSessionImpl implements CollabDocsSession {
       current.filter((folder) => !removed.has(folder.folderId)));
     store.set(documentsByScope(this.scope.scopeKey), (current) => current.filter((document) =>
       !(document.parentFolderId && removed.has(document.parentFolderId))));
+    // The server removes placements inside the subtree too.
+    store.set(typePlacementsByScope(this.scope.scopeKey), (current) => current.filter((placement) =>
+      !(placement.parentFolderId && removed.has(placement.parentFolderId))));
     this.send({ type: 'remove-folder', folderId });
   }
 
@@ -861,6 +873,42 @@ class CollabDocsSessionImpl implements CollabDocsSession {
       await this.dataSource.command({ type: 'reconnect' });
     }
     return (await this.dataSource.command({ type: 'refresh-folders' })).folders !== null;
+  }
+
+  placeType(typeId: string, parentFolderId: string | null): Promise<void> {
+    return this.writeTypePlacement(typeId, parentFolderId, Date.now());
+  }
+
+  moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number): Promise<void> {
+    const existing = store.get(typePlacementsByScope(this.scope.scopeKey))
+      .find((placement) => placement.typeId === typeId);
+    return this.writeTypePlacement(typeId, parentFolderId, sortOrder ?? existing?.sortOrder ?? Date.now());
+  }
+
+  async removeTypePlacement(typeId: string): Promise<void> {
+    store.set(typePlacementsByScope(this.scope.scopeKey), (current) =>
+      current.filter((placement) => placement.typeId !== typeId));
+    await this.dataSource.command({ type: 'remove-type-placement', typeId })
+      .catch((error) => this.reportCommandError(error, 'Failed to remove tracker type from the tree'));
+  }
+
+  /** Optimistic upsert; the server echoes the stored row back to its author. */
+  private async writeTypePlacement(typeId: string, parentFolderId: string | null, sortOrder: number): Promise<void> {
+    const now = Date.now();
+    store.set(typePlacementsByScope(this.scope.scopeKey), (current) => {
+      const existing = current.find((placement) => placement.typeId === typeId);
+      return [...current.filter((placement) => placement.typeId !== typeId), {
+        typeId,
+        projectId: existing?.projectId ?? this.scope.indexConfig.teamProjectId ?? null,
+        parentFolderId,
+        sortOrder,
+        createdBy: existing?.createdBy ?? '',
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      }];
+    });
+    await this.dataSource.command({ type: 'set-type-placement', typeId, parentFolderId, sortOrder })
+      .catch((error) => this.reportCommandError(error, 'Failed to place tracker type'));
   }
 
   toggleFavorite(documentId: string): void {
@@ -971,7 +1019,9 @@ class CollabDocsSessionImpl implements CollabDocsSession {
 
   private async startInternal(): Promise<void> {
     if (this.disposed) throw new Error('Collab docs session has been disposed');
-    store.set(hasTeamByScope(this.scope.scopeKey), true);
+    // A Personal scope is not a team: `workspaceHasTeamAtom` must keep meaning
+    // "this project has a team" even when only Personal pages are running.
+    if (!isPersonalCollabScope(this.scope)) store.set(hasTeamByScope(this.scope.scopeKey), true);
     store.set(orgIdByScope(this.scope.scopeKey), this.scope.orgId);
     store.set(userIdByScope(this.scope.scopeKey), this.scope.indexConfig.teamMemberId ?? null);
     this.dataUnsubscribe = this.dataSource.subscribe((change) => this.applyDataChange(change));
@@ -994,7 +1044,7 @@ class CollabDocsSessionImpl implements CollabDocsSession {
     ) ?? null;
   }
 
-  private applyDataChange(change: CollabDataChange<SharedDocument, SharedFolder>): void {
+  private applyDataChange(change: CollabDocsDataChange): void {
     const scopeKey = this.scope.scopeKey;
     switch (change.type) {
       case 'snapshot':
@@ -1002,6 +1052,11 @@ class CollabDocsSessionImpl implements CollabDocsSession {
           reconcileSharedDocuments(current, change.snapshot.items));
         store.set(foldersByScope(scopeKey), (current) =>
           reconcileSharedFolders(current, change.snapshot.containers));
+        // Authoritative when present, unlike the reconciled lists above: a
+        // placement is ids only, so there is no locked name to preserve.
+        if (change.snapshot.typePlacements) {
+          store.set(typePlacementsByScope(scopeKey), change.snapshot.typePlacements);
+        }
         void this.migrateVirtualFolders();
         break;
       case 'items-upserted':

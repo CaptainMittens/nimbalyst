@@ -77,6 +77,7 @@ async function createSurface(personalState: boolean, readReceipts: boolean, host
       allSharedDocuments: atom(documents),
       trashedSharedDocuments: atom([]),
       sharedFolders: atom([]),
+      typePlacements: atom([]),
       syncStatus: atom('connected'),
       hasTeam: atom(true),
       activeTeamUserId: atom('member-self'),

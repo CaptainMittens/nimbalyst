@@ -13,7 +13,7 @@ export interface Tab {
   isVirtual?: boolean;
   isProcessing?: boolean; // Session is actively processing AI response
   hasUnread?: boolean; // Session has unread AI response
-  kind?: 'file' | 'tracker'; // Resource kind; 'tracker' tabs render a tracker item
+  kind?: 'file' | 'tracker' | 'type' | 'personal-page'; // Resource kind; 'tracker' tabs render a tracker item, 'type' a type page, 'personal-page' a local personal page
   trackerItemId?: string; // For tracker tabs: the tracker item id
   // NOTE: hasUnacceptedChanges removed - now subscribed via Jotai atom in TabDirtyIndicator
 }

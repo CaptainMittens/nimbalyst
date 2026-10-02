@@ -8,7 +8,14 @@
 
 import { atom } from 'jotai';
 import type { TeamSyncProvider as TeamSyncProviderType } from '@nimbalyst/runtime/sync';
-import { CollabScopeResolutionError, type CollabScope } from '@nimbalyst/collab-client/core';
+import {
+  CollabScopeResolutionError,
+  isPersonalCollabScope,
+  isPersonalCollabScopeKey,
+  personalCollabScopeKey,
+  workspacePathFromPersonalScopeKey,
+  type CollabScope,
+} from '@nimbalyst/collab-client/core';
 import {
   createCollabDocsSession,
   getCollabDocsSession,
@@ -19,6 +26,9 @@ import {
   type CollabDocsSession,
 } from '@nimbalyst/collab-client/docs';
 import { ElectronCollabHost } from '../../services/ElectronCollabHost';
+import { PersonalCollabHost } from '../../services/PersonalCollabHost';
+import { activeWorkspacePathAtom } from './openProjects';
+import { atomFamily } from '../debug/atomFamilyRegistry';
 import { pendingDocRegistrations } from './pendingDocRegistrations';
 import type { CollabDocumentOpenSource } from '../../utils/collabDocumentOpener';
 export {
@@ -54,20 +64,67 @@ export {
   getSharedFoldersForScopeKey,
 } from '@nimbalyst/collab-client/docs';
 
-const hostsByScope = new Map<string, ElectronCollabHost>();
+/**
+ * Every Pages host mounted in this window: the team host under the workspace
+ * path, and the Personal host under its own `personal:` scope key.
+ */
+const hostsByScope = new Map<string, ElectronCollabHost | PersonalCollabHost>();
+
+/**
+ * Pages mode has a Personal section that needs no account or team, so the
+ * mode is available whenever a workspace is open.
+ */
+export const pagesAvailableAtom = atom((get) => get(activeWorkspacePathAtom) != null);
 
 function getOrCreateElectronHost(scopeKey: string): ElectronCollabHost {
+  if (isPersonalCollabScopeKey(scopeKey)) {
+    throw new Error('A Personal pages scope has no team host');
+  }
   let host = hostsByScope.get(scopeKey);
-  if (!host) {
+  if (!(host instanceof ElectronCollabHost)) {
     host = new ElectronCollabHost({ scopeKey });
     hostsByScope.set(scopeKey, host);
   }
   return host;
 }
 
+function getHostForScope(scope: CollabScope): ElectronCollabHost | PersonalCollabHost {
+  return isPersonalCollabScope(scope)
+    ? getPersonalCollabHost(workspacePathFromPersonalScopeKey(scope.scopeKey))
+    : getOrCreateElectronHost(scope.scopeKey);
+}
+
 export function getElectronCollabHostForScopeKey(scopeKey: string): ElectronCollabHost {
   return getOrCreateElectronHost(scopeKey);
 }
+
+/** The Personal pages host of a workspace, keyed by its personal scope key. */
+export function getPersonalCollabHost(workspacePath: string): PersonalCollabHost {
+  const scopeKey = personalCollabScopeKey(workspacePath);
+  let host = hostsByScope.get(scopeKey);
+  if (!(host instanceof PersonalCollabHost)) {
+    host = new PersonalCollabHost(workspacePath);
+    hostsByScope.set(scopeKey, host);
+  }
+  return host;
+}
+
+/**
+ * The Personal pages session of a workspace. It is started but never
+ * activated: the team scope stays the window's single active scope.
+ */
+export function getPersonalCollabDocsSession(workspacePath: string): CollabDocsSession {
+  return getElectronCollabDocsSession(getPersonalCollabHost(workspacePath).scope);
+}
+
+/**
+ * A workspace's Personal pages (untrashed), for surfaces outside the sidebar
+ * such as a `personal://` tab's title. Fed by the Personal session that Pages
+ * mode starts, which re-reads main on every `personal-pages:changed`, so
+ * readers never subscribe to IPC themselves. Empty until that session loads.
+ */
+export const personalPagesDocumentsAtomFamily = atomFamily((workspacePath: string) =>
+  atom((get) => get(getPersonalCollabDocsSession(workspacePath).atoms.sharedDocuments)));
 
 export function rebindElectronCollabHostScope(host: ElectronCollabHost, scopeKey: string): void {
   for (const [registeredScopeKey, registeredHost] of hostsByScope) {
@@ -88,7 +145,10 @@ export function rebindElectronCollabHostScope(host: ElectronCollabHost, scopeKey
  * mounts its own, so this does not need the broadcast's workspace path.
  */
 export function invalidateElectronCollabScopes(): void {
-  for (const host of hostsByScope.values()) host.invalidateScope();
+  // A Personal host's scope is fixed; sign-in and org changes do not touch it.
+  for (const host of hostsByScope.values()) {
+    if (host instanceof ElectronCollabHost) host.invalidateScope();
+  }
 }
 
 export function getElectronCollabHost(scope: CollabScope): ElectronCollabHost {
@@ -98,7 +158,7 @@ export function getElectronCollabHost(scope: CollabScope): ElectronCollabHost {
 export function getElectronCollabDocsSession(scope: CollabScope): CollabDocsSession {
   const existing = getCollabDocsSession(scope.scopeKey);
   if (existing) return existing;
-  const host = getOrCreateElectronHost(scope.scopeKey);
+  const host = getHostForScope(scope);
   return createCollabDocsSession(scope, host.documents.dataSource, host);
 }
 
@@ -123,7 +183,9 @@ export function getSharedFoldersForScope(scope: CollabScope) {
  * callers must fall back rather than guess a type.
  */
 export function findSharedDocumentTypeById(documentId: string): string | undefined {
-  for (const scopeKey of hostsByScope.keys()) {
+  for (const [scopeKey, host] of hostsByScope) {
+    // Personal pages are not `collab://` documents.
+    if (host instanceof PersonalCollabHost) continue;
     const match = getSharedDocumentsForScopeKey(scopeKey).find(
       (candidate) => candidate.documentId === documentId,
     );
@@ -176,15 +238,14 @@ export async function initSharedDocuments(scope: CollabScope): Promise<void> {
 }
 
 export function getTeamSyncProvider(scope: CollabScope): TeamSyncProviderType | null {
-  return hostsByScope.get(scope.scopeKey)
-    ?.peekInProcessDocumentsDataSource()
-    ?.getProvider() ?? null;
+  return getTeamSyncProviderForScopeKey(scope.scopeKey);
 }
 
 export function getTeamSyncProviderForScopeKey(scopeKey: string): TeamSyncProviderType | null {
-  return hostsByScope.get(scopeKey)
-    ?.peekInProcessDocumentsDataSource()
-    ?.getProvider() ?? null;
+  const host = hostsByScope.get(scopeKey);
+  return host instanceof ElectronCollabHost
+    ? host.peekInProcessDocumentsDataSource()?.getProvider() ?? null
+    : null;
 }
 
 export async function refreshSharedFolders(scope: CollabScope): Promise<boolean> {
@@ -214,6 +275,9 @@ export async function registerDocumentInIndex(
       metadata,
     });
   } catch (error) {
+    // A Personal page is a local write with no offline queue to retry it:
+    // the caller has to see the refusal.
+    if (isPersonalCollabScope(scope)) throw error;
     console.error('[collabDocuments] Failed to register in index:', error);
     pendingDocRegistrations.enqueue(scope.scopeKey, {
       documentId,
@@ -294,9 +358,15 @@ export function destroyTeamSync(scope: CollabScope): void {
   getCollabDocsSession(scope.scopeKey)?.dispose();
 }
 
+/** Drop a closed workspace's team and Personal pages state. */
 export function pruneCollabDocumentsScopeState(scopeKey: string): void {
   pruneCollabDocsSession(scopeKey);
   hostsByScope.delete(scopeKey);
+  if (isPersonalCollabScopeKey(scopeKey)) return;
+  const personalScopeKey = personalCollabScopeKey(scopeKey);
+  pruneCollabDocsSession(personalScopeKey);
+  hostsByScope.delete(personalScopeKey);
+  personalPagesDocumentsAtomFamily.remove(scopeKey);
 }
 
 export interface PendingCollabDocument {

@@ -10,10 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 <!-- New features go here -->
+- Pages mode: place a tracker type in the team tree, open its items as pages with a header of single-valued fields, and open the type itself as a table.
+- Pages mode has a Personal section that works with no account or team: personal folders, pages and tracker types are stored on this device.
 
 ### Changed
 <!-- Changes to existing functionality go here -->
+- Shared Docs mode is now called Pages.
 - Enlarged transcript images can be zoomed with a two-finger pinch on touch screens or a trackpad pinch.
+- iOS: the session list and session header take less space, with search and filters in the toolbar and the prompt list in the session title's popover.
 
 ### Fixed
 <!-- Bug fixes go here -->

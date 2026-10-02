@@ -178,6 +178,9 @@ const COPY_TABLES: readonly string[] = [
   'document_feedback_index_cache',
   'feedback_request_index',
   'feedback_request_index_backfill',
+  'personal_page_folders',
+  'personal_page_documents',
+  'personal_page_type_placements',
 ];
 
 /**

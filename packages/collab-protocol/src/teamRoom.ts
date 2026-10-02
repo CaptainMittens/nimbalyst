@@ -42,7 +42,10 @@ export type TeamClientMessage =
   | TeamFolderRegisterMessage
   | TeamFolderRenameMessage
   | TeamFolderMoveMessage
-  | TeamFolderRemoveMessage;
+  | TeamFolderRemoveMessage
+  | TeamTypePlacementIndexSyncRequestMessage
+  | TeamTypePlacementSetMessage
+  | TeamTypePlacementRemoveMessage;
 
 /** Request full team state snapshot */
 export interface TeamSyncRequestMessage {
@@ -175,6 +178,32 @@ export interface TeamFolderRemoveMessage {
   folderId: string;
 }
 
+/** Request every tracker-type placement in the page tree. */
+export interface TeamTypePlacementIndexSyncRequestMessage {
+  type: 'typePlacementIndexSync';
+}
+
+/**
+ * Place a tracker type as a node in the page tree, or move it. One placement
+ * per type per project, so a second set for the same type replaces the first.
+ * `parentFolderId` null = root level; a missing folder is refused with
+ * `folder_not_found`. `projectId` omitted = the org's primary project.
+ */
+export interface TeamTypePlacementSetMessage {
+  type: 'typePlacementSet';
+  typeId: string;
+  projectId?: string | null;
+  parentFolderId: string | null;
+  sortOrder: number;
+}
+
+/** Take a tracker type out of the page tree. Idempotent. */
+export interface TeamTypePlacementRemoveMessage {
+  type: 'typePlacementRemove';
+  typeId: string;
+  projectId?: string | null;
+}
+
 /**
  * Announce that a document comment mentioned members or replied to one, so the
  * server can route org-scoped inbox deliveries for it.
@@ -223,6 +252,9 @@ export type TeamServerMessage =
   | TeamFolderIndexSyncResponseMessage
   | TeamFolderBroadcastMessage
   | TeamFolderRemoveBroadcastMessage
+  | TeamTypePlacementIndexSyncResponseMessage
+  | TeamTypePlacementBroadcastMessage
+  | TeamTypePlacementRemoveBroadcastMessage
   | TeamProjectAccessChangedMessage
   | TeamDocumentCommentNotifyAckMessage
   | TeamErrorMessage;
@@ -346,6 +378,28 @@ export interface TeamFolderRemoveBroadcastMessage {
   documentIds: string[];
 }
 
+/** Full tracker-type placement list. */
+export interface TeamTypePlacementIndexSyncResponseMessage {
+  type: 'typePlacementIndexSyncResponse';
+  placements: TypePlacementNode[];
+}
+
+/** Broadcast: a type was placed or moved (single upserted placement). */
+export interface TeamTypePlacementBroadcastMessage {
+  type: 'typePlacementBroadcast';
+  placement: TypePlacementNode;
+}
+
+/**
+ * Broadcast: placements were removed, either directly or because the folder
+ * subtree holding them was removed.
+ */
+export interface TeamTypePlacementRemoveBroadcastMessage {
+  type: 'typePlacementRemoveBroadcast';
+  projectId: string;
+  typeIds: string[];
+}
+
 /**
  * Answers `documentCommentNotify`. Sent only to the requesting connection.
  *
@@ -431,6 +485,21 @@ export interface EncryptedFolderNode {
   updatedAt: number;
 }
 
+/**
+ * A tracker type placed as a node in the page tree. Keyed by
+ * `(projectId, typeId)`. Ids only, so nothing here is encrypted.
+ */
+export interface TypePlacementNode {
+  typeId: string;
+  projectId: string;
+  /** Null = root level. */
+  parentFolderId: string | null;
+  sortOrder: number;
+  createdBy: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** Full team state snapshot sent on teamSync */
 export interface TeamState {
   metadata: {
@@ -452,6 +521,8 @@ export interface TeamState {
   documents: EncryptedDocIndexEntry[];
   /** First-class folder nodes (omitted by pre-folders servers). */
   folders?: EncryptedFolderNode[];
+  /** Tracker-type placements in the page tree (omitted by older servers). */
+  typePlacements?: TypePlacementNode[];
   /** Organization configuration (omitted by pre-settings servers). */
   settings?: OrgSettings;
 }

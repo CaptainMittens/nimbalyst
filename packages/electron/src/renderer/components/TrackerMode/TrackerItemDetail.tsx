@@ -115,6 +115,8 @@ interface TrackerItemDetailProps {
    * mounted -- file-backed bodies render their own `TabEditor` header instead.
    */
   onBodyEditorReady?: (editor: unknown | null) => void;
+  /** Typed page: single-valued chips only; tags, type tags, lists and label rows stay out of the header. */
+  pageHeader?: boolean;
 }
 
 /** How this item's body is edited -- see the `contentMode` memo below. */
@@ -177,6 +179,7 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
   hideHeader = false,
   onContentModeChange,
   onBodyEditorReady,
+  pageHeader = false,
 }) => {
   // Content-focus layout: collapse metadata sections and let the collaborative
   // body fill the surface. Toggling this does NOT remount the editor (same
@@ -1029,7 +1032,7 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
   // including the properties the item's labels bring.
   const labelLayout = useTrackerLabelFields(item?.primaryType ?? '', item?.fields);
   const { chipFields, overflowFields } = useTrackerChipFieldSections(
-    item?.primaryType ?? '', tagsField ? [tagsField.name] : [], labelLayout.fields,
+    item?.primaryType ?? '', tagsField ? [tagsField.name] : [], labelLayout.fields, pageHeader,
   );
 
   const relationshipCandidates = useTrackerRelationshipCandidates(item, chipFields);
@@ -1638,7 +1641,7 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
         )}
 
         {/* Tags stay open: they're edited far more often than they're read */}
-        {tagsField && (
+        {!pageHeader && tagsField && (
           <div className="tracker-detail-tags" data-testid="tracker-detail-tags">
             {editable ? (
               <TrackerFieldEditor
@@ -1653,7 +1656,7 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
         )}
 
         {/* Type tags editor (for native/editable items) */}
-        {editable && (
+        {editable && !pageHeader && (
           <TypeTagsEditor
             typeTags={item.typeTags}
             primaryType={item.primaryType}
@@ -1668,12 +1671,8 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
           />
         )}
 
-        {/*
-          Fields no chip can carry -- opaque objects, multiselects, arrays of
-          objects, and schema values the item can't edit. They read as plain
-          rows, and only when they hold something.
-        */}
-        {overflowValues.length > 0 && (
+        {/* Fields no chip can carry (objects, multiselects, uneditable values), shown only when set */}
+        {!pageHeader && overflowValues.length > 0 && (
           <div className="tracker-detail-overflow-fields space-y-3 pt-1 border-t border-nim">
             {overflowValues.map(({ field, value }) => (
               <ReadOnlyField key={field.name} field={field} value={value} />
@@ -1681,8 +1680,8 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
           </div>
         )}
 
-        <TrackerItemLabelProperties item={item} workspacePath={workspacePath} layout={labelLayout} values={storedValues}
-          editable={editable} onSaveField={handleTextFieldChange} onOpenItem={onOpenItem} />
+        {!pageHeader && <TrackerItemLabelProperties item={item} workspacePath={workspacePath} layout={labelLayout}
+          values={storedValues} editable={editable} onSaveField={handleTextFieldChange} onOpenItem={onOpenItem} />}
 
         </>
         )}

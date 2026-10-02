@@ -3,7 +3,7 @@ import {
   CollabDocsUIProvider,
   type CollabDocsUIController,
 } from '@nimbalyst/collab-client/docs-ui';
-import type { CollabScope } from '@nimbalyst/collab-client/core';
+import { isPersonalCollabScope, type CollabScope } from '@nimbalyst/collab-client/core';
 import {
   getElectronCollabDocsSession,
   trashSharedDocument,
@@ -63,6 +63,8 @@ const electronCollabDocsUIController: CollabDocsUIController = {
   },
 };
 
+const personalPagesUIController: CollabDocsUIController = {};
+
 /**
  * Context only, for trees mounted in their own React root.
  *
@@ -74,6 +76,9 @@ const electronCollabDocsUIController: CollabDocsUIController = {
  *
  * The session is cached per scopeKey, so mounting this alongside the main tree
  * shares one session (and one team socket) rather than opening a second.
+ *
+ * A Personal pages scope mounts this directly: it has no read receipts for
+ * `useDocUnread` to hydrate, no local-file origin and no rooms to sweep.
  */
 export function ElectronCollabDocsUIRoot({
   scope,
@@ -85,7 +90,7 @@ export function ElectronCollabDocsUIRoot({
   return (
     <CollabDocsUIProvider
       session={getElectronCollabDocsSession(scope)}
-      controller={electronCollabDocsUIController}
+      controller={isPersonalCollabScope(scope) ? personalPagesUIController : electronCollabDocsUIController}
     >
       {children}
     </CollabDocsUIProvider>

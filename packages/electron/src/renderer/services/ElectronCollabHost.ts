@@ -64,7 +64,10 @@ type ElectronDocsCapability = CollabDocsCapability<
 >;
 
 const DOCUMENT_PERSONAL_STATE_PREFIX = 'document:';
-let documentTypesAdapter: () => readonly CollabDocumentTypeDescriptor[] = () => [];
+// One shared empty list: `useSyncExternalStore` consumers compare snapshot
+// identity, and a fresh `[]` per call would re-render forever.
+const NO_DOCUMENT_TYPES: readonly CollabDocumentTypeDescriptor[] = [];
+let documentTypesAdapter: () => readonly CollabDocumentTypeDescriptor[] = () => NO_DOCUMENT_TYPES;
 let documentTypesSubscribe: (cb: () => void) => () => void = () => () => undefined;
 let createDocumentAdapter: (input: CollabDocsCreateInput) => Promise<void> = async () => {
   throw new Error('Collaborative document creation is not registered');
@@ -80,7 +83,7 @@ export function registerElectronCollabDocumentTypes(
   documentTypesSubscribe = subscribe;
   return () => {
     if (documentTypesAdapter === adapter) {
-      documentTypesAdapter = () => [];
+      documentTypesAdapter = () => NO_DOCUMENT_TYPES;
       documentTypesSubscribe = () => () => undefined;
     }
   };
@@ -99,6 +102,17 @@ export function registerElectronCollabDocumentCreation(
     }
   };
 }
+
+/**
+ * The registered catalog and creation adapters, for the Personal pages host:
+ * one catalog for both sections, and one creation pipeline that branches on
+ * the scope it is given.
+ */
+export const electronCollabDocumentAdapters = {
+  documentTypes: (): readonly CollabDocumentTypeDescriptor[] => documentTypesAdapter(),
+  onDocumentTypesChanged: (cb: () => void): (() => void) => documentTypesSubscribe(cb),
+  createDocument: (input: CollabDocsCreateInput): Promise<void> => createDocumentAdapter(input),
+};
 
 function storedDocumentItemId(documentId: string): string {
   return `${DOCUMENT_PERSONAL_STATE_PREFIX}${documentId}`;
@@ -376,6 +390,8 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
     if (ref.kind === 'folder') {
       return buildSharedFolderDeepLink(ref.folderId, ref.scope.orgId);
     }
+    // A type page has no deep link yet.
+    if (ref.kind === 'type') return null;
     return buildTrackerDeepLink(ref.trackerId, ref.scope.orgId, { view: 'document' });
   }
 

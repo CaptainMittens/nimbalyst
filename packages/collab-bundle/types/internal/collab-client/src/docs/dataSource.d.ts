@@ -1,5 +1,6 @@
-import type { CollabCommandResult, CollabDataSource } from '../core/index';
-import type { SharedDocument, SharedFolder } from './types';
+import type { CollabCommandResult, CollabDataChange, CollabDataSnapshot, CollabDataSource, Unsubscribe } from '../core/index';
+import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
+export type { SharedTypePlacement } from './types';
 export type CollabDocsCommand = {
     type: 'register-document';
     documentId: string;
@@ -49,10 +50,22 @@ export type CollabDocsCommand = {
 } | {
     type: 'refresh-folders';
 } | {
+    type: 'set-type-placement';
+    typeId: string;
+    parentFolderId: string | null;
+    sortOrder: number;
+} | {
+    type: 'remove-type-placement';
+    typeId: string;
+} | {
+    type: 'refresh-type-placements';
+} | {
     type: 'reconnect';
 };
 export interface CollabDocsCommandResult extends CollabCommandResult {
     folders?: SharedFolder[] | null;
+    /** `refresh-type-placements` only: the server list, or null on timeout. */
+    typePlacements?: SharedTypePlacement[] | null;
     /**
      * `register-document` only: whether the server confirmed the index row is
      * committed. `false` means unconfirmed (older server, or queued offline) —
@@ -61,4 +74,25 @@ export interface CollabDocsCommandResult extends CollabCommandResult {
      */
     registrationAcked?: boolean;
 }
-export type CollabDocsDataSource = CollabDataSource<SharedDocument, SharedFolder, CollabDocsCommand, CollabDocsCommandResult>;
+/**
+ * Document snapshot plus the tracker types placed in the page tree. A host
+ * that predates placements omits `typePlacements`; one that sets it is
+ * authoritative for this scope's project.
+ *
+ * Placement changes travel as `snapshot` changes rather than their own kinds:
+ * the docs source has to stay assignable to the core `CollabDataSource` seam,
+ * and a listener typed for the core change union cannot accept new kinds.
+ */
+export interface CollabDocsSnapshot extends CollabDataSnapshot<SharedDocument, SharedFolder> {
+    typePlacements?: SharedTypePlacement[];
+}
+export type CollabDocsDataChange = Exclude<CollabDataChange<SharedDocument, SharedFolder>, {
+    type: 'snapshot';
+}> | {
+    type: 'snapshot';
+    snapshot: CollabDocsSnapshot;
+};
+export interface CollabDocsDataSource extends Omit<CollabDataSource<SharedDocument, SharedFolder, CollabDocsCommand, CollabDocsCommandResult>, 'snapshot' | 'subscribe'> {
+    snapshot(): Promise<CollabDocsSnapshot>;
+    subscribe(cb: (change: CollabDocsDataChange) => void): Unsubscribe;
+}

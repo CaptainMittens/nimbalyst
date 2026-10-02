@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { asTeamMemberId } from '@nimbalyst/runtime/auth/jwtScopes';
+import { createPersonalCollabScope } from '@nimbalyst/collab-client/core';
 
 const { trackTeamAnalyticsEvent } = vi.hoisted(() => ({
   trackTeamAnalyticsEvent: vi.fn(),
@@ -20,6 +21,7 @@ vi.mock('../../components/CollabMode/collabTree', () => ({
   normalizeCollabPath: (value: string) => value.replace(/\\/g, '/').split('/').filter(Boolean).join('/'),
 }));
 vi.mock('../../store/atoms/collabDocuments', () => ({
+  getPersonalCollabHost: vi.fn(),
   getSharedDocumentsForScope: vi.fn(() => []),
   getSharedFoldersForScope: vi.fn(() => []),
   pendingCollabDocumentAtom: Symbol('pendingCollabDocumentAtom'),
@@ -161,6 +163,11 @@ function makeHarness(options: {
       events.push('publish');
     },
     cleanup: async () => { events.push('cleanup'); },
+    openPersonal: (_scope, document) => {
+      published.push(document);
+      events.push('open-personal');
+    },
+    discardPersonal: () => { events.push('discard-personal'); },
     generateId: () => `doc-${++generated}`,
     now: () => 100,
     hashContent: async content => `hash:${typeof content === 'string' ? content : content.byteLength}`,
@@ -179,6 +186,50 @@ function makeHarness(options: {
 
 describe('CollaborativeDocumentCreationOrchestrator', () => {
   beforeEach(() => trackTeamAnalyticsEvent.mockClear());
+
+  it('creates a personal page by registering it locally, without credentials or a room seed', async () => {
+    const harness = makeHarness();
+    const scope = createPersonalCollabScope('/workspace');
+
+    const document = await harness.orchestrator.create({
+      scope,
+      descriptor: markdownDescriptor,
+      requestedName: 'Reading list',
+      parentFolderId: null,
+      sourceContent: '# Reading list',
+    });
+
+    expect(harness.events).toEqual(['register', 'open-personal']);
+    expect(document).toMatchObject({
+      title: 'Reading list.md',
+      teamProjectId: null,
+      metadataVersion: 2,
+      editorId: 'builtin.lexical',
+    });
+    expect(harness.published.map((row) => row.documentId)).toEqual([document.documentId]);
+    expect(trackTeamAnalyticsEvent).not.toHaveBeenCalledWith('collab_document_created', expect.anything());
+  });
+
+  it('fails a personal page main refused to save, with the reason, and opens nothing', async () => {
+    const scope = createPersonalCollabScope('/workspace');
+    const refused = makeHarness();
+    refused.deps.register = async () => {
+      refused.events.push('register');
+      throw new Error('Database not initialized');
+    };
+    await expect(refused.orchestrator.create({
+      scope, descriptor: markdownDescriptor, requestedName: 'Ideas', parentFolderId: null,
+    })).rejects.toMatchObject({ code: 'register-failed', message: 'Database not initialized' });
+    expect(refused.events).toEqual(['register', 'discard-personal']);
+    expect(refused.published).toEqual([]);
+
+    const unsaved = makeHarness({ registrationAcked: false });
+    await expect(unsaved.orchestrator.create({
+      scope, descriptor: markdownDescriptor, requestedName: 'Ideas', parentFolderId: null,
+    })).rejects.toMatchObject({ code: 'register-failed' });
+    expect(unsaved.events).toEqual(['register', 'discard-personal']);
+    expect(unsaved.published).toEqual([]);
+  });
 
   it('can create a cascade child without publishing it as the pending open document', async () => {
     const harness = makeHarness({ descriptor: mockupDescriptor });

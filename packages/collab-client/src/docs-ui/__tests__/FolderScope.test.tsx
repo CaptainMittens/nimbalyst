@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render } from '@testing-library/react';
 import { atom, createStore, Provider } from 'jotai';
 import type { CollabHost } from '@nimbalyst/collab-client/core';
-import type { CollabDocsSession, SharedDocument, SharedFolder } from '@nimbalyst/collab-client/docs';
+import type { CollabDocsSession, SharedDocument, SharedFolder, SharedTypePlacement } from '@nimbalyst/collab-client/docs';
 import { CollabDocsUIProvider } from '../CollabDocsUIProvider';
 import { CollabSidebar } from '../CollabSidebar';
 import { SharedDocsListView } from '../SharedDocsListView';
@@ -49,6 +49,10 @@ const documentTypes = [] as const;
 const notUnread = atom(false);
 
 function renderDocsUI(children: React.ReactNode) {
+  return renderDocsUIWithHost(children);
+}
+
+function renderDocsUIWithHost(children: React.ReactNode, typePlacements: SharedTypePlacement[] = []) {
   const host = {
     surface: 'web_console',
     documents: {
@@ -71,6 +75,7 @@ function renderDocsUI(children: React.ReactNode) {
       allSharedDocuments: atom(documents),
       trashedSharedDocuments: atom([]),
       sharedFolders: atom(folders),
+      typePlacements: atom(typePlacements),
       syncStatus: atom('connected'),
       hasTeam: atom(true),
       activeTeamUserId: atom('member-self'),
@@ -88,14 +93,17 @@ function renderDocsUI(children: React.ReactNode) {
     markDocumentViewed: vi.fn(),
   } as unknown as CollabDocsSession;
 
-  return render(
+  const result = render(
     <Provider store={createStore()}>
       <CollabDocsUIProvider session={session}>{children}</CollabDocsUIProvider>
     </Provider>,
   );
+  return { ...result, host };
 }
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+});
 
 /**
  * NIM-2436. A folder is an addressable surface in the browser console
@@ -175,5 +183,37 @@ describe('routed folder scope', () => {
 
     expect(unscoped.container.textContent).toContain('Launch plan');
     expect(unscoped.container.textContent).not.toContain('Sync protocol notes');
+  });
+});
+
+describe('placed tracker types', () => {
+  // Placements are read from the sidebar's own session, never the window's
+  // active scope: the Personal section is a session that is never active.
+  it('opens the type from its row and an item from the expanded type', () => {
+    const typeResolver = {
+      typeName: (typeId: string) => (typeId === 'module' ? 'Modules' : null),
+      itemsOfType: () => [{ itemId: 'mod-1', title: 'Tracking' }, { itemId: 'mod-2', title: 'Identity' }],
+    };
+    const { container, host } = renderDocsUIWithHost(<CollabSidebar typeResolver={typeResolver} />, [{
+      typeId: 'module', projectId: null, parentFolderId: null, sortOrder: 0,
+      createdBy: 'member-self', createdAt: 1, updatedAt: 1,
+    }]);
+
+    const typeRow = container.querySelector<HTMLElement>('.collab-tree-type-row')!;
+    expect(typeRow.textContent).toContain('Modules');
+    expect(typeRow.textContent).toContain('2');
+    fireEvent.click(typeRow);
+    expect(host.openArtifact).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'type', typeId: 'module' }),
+      'sidebar',
+    );
+
+    const items = container.querySelectorAll<HTMLElement>('.collab-tree-item-row');
+    expect([...items].map((row) => row.textContent)).toEqual(['1Tracking', '2Identity']);
+    fireEvent.click(items[1]);
+    expect(host.openArtifact).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: 'tracker', trackerId: 'mod-2' }),
+      'sidebar',
+    );
   });
 });

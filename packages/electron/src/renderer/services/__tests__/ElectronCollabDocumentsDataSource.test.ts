@@ -42,9 +42,21 @@ describe('ElectronCollabDocumentsDataSource', () => {
         createdAt: 1,
         updatedAt: 2,
       }]),
+      getTypePlacements: vi.fn(() => [{
+        typeId: 'module',
+        projectId: 'project-one',
+        parentFolderId: 'folder-1',
+        sortOrder: 1,
+        createdBy: 'member-one',
+        createdAt: 1,
+        updatedAt: 2,
+      }]),
       getTeamState: vi.fn(() => ({ members: [] })),
       updateDocumentTitle: vi.fn(async () => undefined),
       refreshFolders: vi.fn(async () => []),
+      setTypePlacement: vi.fn(),
+      removeTypePlacement: vi.fn(),
+      refreshTypePlacements: vi.fn(async () => null),
       destroy: vi.fn(),
     };
     const source = new ElectronCollabDocumentsDataSource({
@@ -66,6 +78,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
         teamProjectId: 'project-owned',
       })],
       containers: [expect.objectContaining({ folderId: 'folder-1', name: 'Folder' })],
+      typePlacements: [expect.objectContaining({ typeId: 'module', parentFolderId: 'folder-1' })],
     });
     config.onDocumentChanged?.({
       documentId: 'doc-2',
@@ -77,13 +90,24 @@ describe('ElectronCollabDocumentsDataSource', () => {
       updatedAt: 4,
     });
     config.onFoldersRemoved?.(['folder-1'], ['doc-1']);
+    // Placement changes reach the session as snapshots carrying typePlacements.
+    config.onTypePlacementsRemoved?.(['module']);
     config.onStatusChange?.('connected');
     const inventory = { epoch: 'socket', sequence: 1, generation: 1, status: 'ready' as const, entries: [] };
     config.onDocumentFeedbackIndex?.(inventory);
     expect(onDocumentFeedbackIndex).toHaveBeenCalledWith(inventory);
     await source.command({ type: 'update-document-title', documentId: 'doc-1', title: 'Renamed' });
+    await source.command({ type: 'set-type-placement', typeId: 'module', parentFolderId: null, sortOrder: 4 });
+    await source.command({ type: 'remove-type-placement', typeId: 'module' });
+    await expect(source.command({ type: 'refresh-type-placements' }))
+      .resolves.toEqual({ ok: true, typePlacements: null });
 
-    expect(changes).toEqual(['items-upserted', 'containers-removed', 'status']);
+    expect(changes).toEqual(['items-upserted', 'containers-removed', 'snapshot', 'status']);
+    expect(provider.setTypePlacement).toHaveBeenCalledWith('module', null, 4);
+    expect(provider.removeTypePlacement).toHaveBeenCalledWith('module');
+    // No server list yet (older server): the snapshot must not claim an empty one.
+    provider.getTypePlacements.mockReturnValueOnce(null as never);
+    expect(await source.snapshot()).not.toHaveProperty('typePlacements');
     expect(observeStatus).toHaveBeenCalledWith('connected');
     expect(provider.updateDocumentTitle).toHaveBeenCalledWith('doc-1', 'Renamed');
     expect(provider.connect).toHaveBeenCalledTimes(1);

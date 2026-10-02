@@ -30,7 +30,7 @@ import {
   setGutterSectionOrderAtom,
   resetGutterCustomizationAtom,
 } from '../../store/atoms/appSettings';
-import { workspaceHasTeamAtom } from '../../store/atoms/collabDocuments';
+import { pagesAvailableAtom } from '../../store/atoms/collabDocuments';
 import { stytchIsSignedInAtom } from '../../store/atoms/stytchAuth';
 import { personalAccountsAtom } from '../../store/atoms/settingsDomains';
 import { orgInboxUnreadCountAtomFamily } from '../../store/atoms/teamInbox';
@@ -176,8 +176,9 @@ export const NavigationGutter: React.FC<NavigationGutterProps> = ({
   // Check if terminal feature is available (developer mode + feature enabled)
   const isTerminalAvailable = useAtomValue(terminalFeatureAvailableAtom);
 
-  // Show the collab mode button whenever the workspace has an active team.
-  const hasTeam = useAtomValue(workspaceHasTeamAtom);
+  // Pages has a Personal section that needs no team, so it shows whenever a
+  // workspace is open.
+  const pagesAvailable = useAtomValue(pagesAvailableAtom);
 
   // Only show the PR review button when the active workspace has a GitHub
   // remote (detected by pullRequestListeners). Guard on workspacePath so a
@@ -386,12 +387,12 @@ export const NavigationGutter: React.FC<NavigationGutterProps> = ({
         contentMode: 'pr-review', testId: 'pr-review-mode-button',
       }),
     }] : []),
-    ...(hasTeam ? [{
-      id: 'collab', section: 'modes' as GutterSection, icon: 'description', label: 'Shared Docs', hideable: true,
+    ...(pagesAvailable ? [{
+      id: 'collab', section: 'modes' as GutterSection, icon: 'description', label: 'Pages', hideable: true,
       render: () => renderModeButton({
         icon: 'description',
         badgeIcon: 'groups',
-        label: `Shared Docs (${getShortcutDisplay(KeyboardShortcuts.view.collabMode)})`,
+        label: `Pages (${getShortcutDisplay(KeyboardShortcuts.view.collabMode)})`,
         contentMode: 'collab', testId: 'collab-mode-button',
         onReclick: () => onToggleCollabCollapsed?.(),
         decoration: <AlphaBadge size="dot" className="absolute top-0 right-0.5 pointer-events-none" />,

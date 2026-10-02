@@ -1,4 +1,4 @@
-import type { SharedDocument, SharedFolder } from './types';
+import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
 export interface CollabTreeFolderNode {
     id: string;
     type: 'folder';
@@ -22,7 +22,56 @@ export interface CollabTreeDocumentNode {
     name: string;
     document: SharedDocument;
 }
-export type CollabTreeNode = CollabTreeFolderNode | CollabTreeDocumentNode;
+/**
+ * A tracker type placed in the tree. Its children are the type's items, after
+ * any placed subtypes (types that `extends` it).
+ */
+export interface CollabTreeTypeNode {
+    id: string;
+    type: 'type';
+    typeId: string;
+    path: string;
+    name: string;
+    /** Number of items of this type (not counting subtypes). */
+    count: number;
+    placement: SharedTypePlacement;
+    children: Array<CollabTreeTypeNode | CollabTreeItemNode>;
+}
+export interface CollabTreeItemNode {
+    id: string;
+    type: 'item';
+    itemId: string;
+    typeId: string;
+    path: string;
+    name: string;
+}
+export type CollabTreeNode = CollabTreeFolderNode | CollabTreeDocumentNode | CollabTreeTypeNode | CollabTreeItemNode;
+/**
+ * Host-supplied answers about tracker types and items. The tree stays pure: it
+ * never reads a registry or a store itself.
+ */
+export interface CollabTypeTreeResolver {
+    /** Display name of a type, or null when the type is unknown here. */
+    typeName(typeId: string): string | null;
+    /** The type this one `extends`, if any. */
+    typeExtends?(typeId: string): string | null;
+    /** Items of a type, in display order. */
+    itemsOfType(typeId: string): Array<{
+        itemId: string;
+        title: string;
+        sortKey?: string | number;
+    }>;
+    /** Types a user may place, for the "Place type..." menu. */
+    listedTypes?(): Array<{
+        typeId: string;
+        name: string;
+        icon?: string;
+    }>;
+}
+export interface CollabTypePlacementInput {
+    placements: SharedTypePlacement[];
+    resolver: CollabTypeTreeResolver;
+}
 export interface CollabFolderOption {
     folderId: string | null;
     name: string;
@@ -65,7 +114,7 @@ export declare function reconcileSharedDocumentDisplayName(currentDisplayName: s
  * sync replace a useful path restored with the tab's collaboration config.
  */
 export declare function getSharedDocumentDisplayPathWithFallback(document: Pick<SharedDocument, 'documentId' | 'title' | 'parentFolderId'>, folders: SharedFolder[], fallbackPath: string | null | undefined): string;
-export declare function buildCollabTree(documents: SharedDocument[], customFolders: string[]): CollabTreeNode[];
+export declare function buildCollabTree(documents: SharedDocument[], customFolders: string[], typePlacements?: CollabTypePlacementInput): CollabTreeNode[];
 /**
  * Build the collab tree from FIRST-CLASS folder nodes + each document's
  * `parentFolderId`, instead of splitting titles on '/'. Folder identity is the
@@ -77,7 +126,7 @@ export declare function buildCollabTree(documents: SharedDocument[], customFolde
  * Documents (or folders) whose `parentFolderId` points at a missing folder are
  * placed at root so nothing disappears if a parent is briefly out of sync.
  */
-export declare function buildCollabTreeFromFolders(documents: SharedDocument[], folders: SharedFolder[]): CollabTreeNode[];
+export declare function buildCollabTreeFromFolders(documents: SharedDocument[], folders: SharedFolder[], typePlacements?: CollabTypePlacementInput): CollabTreeNode[];
 /**
  * Compute the document title rewrites needed to rename a LEGACY (path-in-title)
  * folder. Legacy folders have no first-class `folderId`; their identity is the
@@ -112,7 +161,7 @@ export declare function computeLegacyFolderRenameUpdates(documents: SharedDocume
  * folder rows exist, we always use the first-class builder — so its
  * context-menu / drag / deep-link behavior (keyed off `folderId`) is preserved.
  */
-export declare function buildCollabTreeAdaptive(documents: SharedDocument[], folders: SharedFolder[]): CollabTreeNode[];
+export declare function buildCollabTreeAdaptive(documents: SharedDocument[], folders: SharedFolder[], typePlacements?: CollabTypePlacementInput): CollabTreeNode[];
 /**
  * Drop folder nodes that contain no documents (directly or transitively). Used
  * by the Favorites/Updated segments so an empty folder doesn't linger once its

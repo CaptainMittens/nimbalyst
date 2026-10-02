@@ -29,3 +29,4 @@ export * from './trackerTypeIdentity.js';
 export * from './trackerTypeInheritance.js';
 export * from './trackerStatusCategory.js';
 export * from './trackerCoreContext.js';
+export * from './singleValuedField.js';

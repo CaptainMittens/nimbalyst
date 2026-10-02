@@ -36,6 +36,44 @@ export interface CollabScope {
   indexConfig: CollabIndexConfig;
 }
 
+/** `orgId` of a Personal pages scope: local to this device, no team or account. */
+export const PERSONAL_COLLAB_ORG_ID = 'local';
+
+const PERSONAL_COLLAB_SCOPE_KEY_PREFIX = 'personal:';
+
+/** Scope key of a workspace's Personal pages, distinct from its team scope key. */
+export function personalCollabScopeKey(workspacePath: string): string {
+  return `${PERSONAL_COLLAB_SCOPE_KEY_PREFIX}${workspacePath}`;
+}
+
+/** The Personal pages scope for a workspace. It never connects to a server. */
+export function createPersonalCollabScope(workspacePath: string): CollabScope {
+  return {
+    scopeKey: personalCollabScopeKey(workspacePath),
+    orgId: PERSONAL_COLLAB_ORG_ID,
+    indexConfig: {
+      serverUrl: '',
+      teamMemberId: 'local' as TeamMemberId,
+      teamProjectId: null,
+    },
+  };
+}
+
+/** True for a Personal pages scope, which must never stand in for the team scope. */
+export function isPersonalCollabScope(scope: CollabScope | null | undefined): boolean {
+  return scope?.orgId === PERSONAL_COLLAB_ORG_ID;
+}
+
+/** True for a Personal pages scope key; for callers that hold only the key. */
+export function isPersonalCollabScopeKey(scopeKey: string): boolean {
+  return scopeKey.startsWith(PERSONAL_COLLAB_SCOPE_KEY_PREFIX);
+}
+
+/** The workspace path a Personal pages scope key belongs to. */
+export function workspacePathFromPersonalScopeKey(scopeKey: string): string {
+  return scopeKey.slice(PERSONAL_COLLAB_SCOPE_KEY_PREFIX.length);
+}
+
 /** A scope lookup failure with an explicit retry contract for shared lifecycle code. */
 export class CollabScopeResolutionError extends Error {
   readonly retryable: boolean;
@@ -114,7 +152,9 @@ export type CollabArtifactRef =
     teamProjectId: string | null;
   }
   | { kind: 'folder'; scope: CollabScope; folderId: string }
-  | { kind: 'tracker'; scope: CollabScope; trackerId: string };
+  | { kind: 'tracker'; scope: CollabScope; trackerId: string }
+  /** A tracker type placed in the page tree: opens the type's table. */
+  | { kind: 'type'; scope: CollabScope; typeId: string };
 
 export type CollabOpenSource =
   | 'sidebar'

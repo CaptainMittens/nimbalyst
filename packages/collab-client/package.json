@@ -57,6 +57,10 @@
       "types": "./src/trackers-ui/index.ts",
       "default": "./src/trackers-ui/index.ts"
     },
+    "./trackers-ui/embed": {
+      "types": "./src/trackers-ui/embed/index.ts",
+      "default": "./src/trackers-ui/embed/index.ts"
+    },
     "./trackers-ui/references": {
       "types": "./src/trackers-ui/references/index.ts",
       "default": "./src/trackers-ui/references/index.ts"

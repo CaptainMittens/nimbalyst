@@ -18,6 +18,7 @@ import { selectedOrgIdAtom } from '../../../store/atoms/orgScope';
 import { EMPTY_TEAM_INBOX_SNAPSHOT, teamInboxSnapshotAtom } from '../../../store/atoms/teamInbox';
 import { activeExtensionPanelAtom } from '../../../store/atoms/extensionPanels';
 import { windowModeAtom, setWindowModeAtom } from '../../../store/atoms/windowMode';
+import { activeWorkspacePathAtom } from '../../../store/atoms/openProjects';
 
 const projectOrg = vi.hoisted(() => ({ current: null as { orgId: string; name: string } | null }));
 const extensionButtons = vi.hoisted(() => ({ current: [] as Array<{ id: string; label: string; icon: string; placement: 'sidebar'; isAlpha: boolean }> }));
@@ -91,6 +92,17 @@ describe('Org mode gutter item', () => {
   it('is absent when the project has no organization', () => {
     renderGutter();
     expect(screen.queryByTestId('org-mode-button')).toBeNull();
+  });
+
+  it('offers Pages with a workspace open even without a team, since Personal pages need none', () => {
+    const store = createStore();
+    renderGutter(store);
+    expect(screen.queryByTestId('collab-mode-button')).toBeNull();
+    cleanup();
+
+    store.set(activeWorkspacePathAtom, '/workspace');
+    renderGutter(store);
+    screen.getByTestId('collab-mode-button');
   });
 
   it('switches to Org mode without touching the window\'s org selection, and badges unread', () => {

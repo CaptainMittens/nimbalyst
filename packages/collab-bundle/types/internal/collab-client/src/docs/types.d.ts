@@ -34,3 +34,18 @@ export interface SharedFolder {
     /** True when the encrypted folder name could not be decrypted. */
     decryptFailed?: boolean;
 }
+/**
+ * A tracker type placed as a node in the page tree. One placement per type
+ * per project; the type's items nest under it in the tree.
+ */
+export interface SharedTypePlacement {
+    typeId: string;
+    /** Owning team project; placements are scoped like folders. */
+    projectId: string | null;
+    /** Null/undefined means root level. */
+    parentFolderId?: string | null;
+    sortOrder: number;
+    createdBy: string;
+    createdAt: number;
+    updatedAt: number;
+}

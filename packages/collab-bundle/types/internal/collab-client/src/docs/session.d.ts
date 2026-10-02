@@ -3,7 +3,7 @@ import { type ReadReceipt, type UnreadEntitySnapshot } from '../../../runtime/sr
 import { type CollabDocsCapability, type CollabHost, type CollabScope } from '../core/index';
 import { type ChangedSharedDoc } from './collabDiscovery';
 import type { CollabDocsDataSource } from './dataSource';
-import type { SharedDocument, SharedFolder } from './types';
+import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
 export type CollabTreeFilter = 'all' | 'favorites' | 'updated';
 export type CollabDocsUIStatus = 'disconnected' | 'connecting' | 'syncing' | 'connected' | 'error';
 export interface CollabDiscoveryState {
@@ -45,6 +45,8 @@ export declare const trashedSharedDocumentsAtom: Atom<SharedDocument[]>;
  */
 export declare const sharedDocumentsForScopeAtom: import("jotai-family").AtomFamily<string, Atom<SharedDocument[]>>;
 export declare const sharedFoldersAtom: ListAtom<SharedFolder>;
+/** Tracker types placed in the active scope's page tree, one per type. */
+export declare const sharedTypePlacementsAtom: ListAtom<SharedTypePlacement>;
 export declare const teamSyncStatusAtom: WritableAtom<CollabDocsUIStatus, [CollabDocsUIStatus], void>;
 export declare const workspaceHasTeamAtom: WritableAtom<boolean, [boolean], void>;
 export declare const activeTeamOrgIdAtom: Atom<string | null>;
@@ -107,6 +109,7 @@ export interface CollabDocsSessionAtoms {
     allSharedDocuments: ListAtom<SharedDocument>;
     trashedSharedDocuments: Atom<SharedDocument[]>;
     sharedFolders: ListAtom<SharedFolder>;
+    typePlacements: ListAtom<SharedTypePlacement>;
     syncStatus: WritableAtom<CollabDocsUIStatus, [CollabDocsUIStatus], void>;
     hasTeam: WritableAtom<boolean, [boolean], void>;
     activeTeamUserId: Atom<string | null>;
@@ -174,6 +177,10 @@ export interface CollabDocsSession {
     moveFolder(folderId: string, parentFolderId: string | null): void;
     removeFolder(folderId: string): void;
     refreshFolders(): Promise<boolean>;
+    /** Place a tracker type in the page tree; an already placed type moves. */
+    placeType(typeId: string, parentFolderId: string | null): Promise<void>;
+    moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number): Promise<void>;
+    removeTypePlacement(typeId: string): Promise<void>;
     toggleFavorite(documentId: string): void;
     recordOpened(documentId: string): void;
     markDocumentViewed(documentId: string, updatedAt: number | null): Promise<void>;

@@ -1,16 +1,18 @@
 import type {
-  CollabDataChange,
-  CollabDataSnapshot,
   CollabScope,
   TeamMemberSummary,
 } from '@nimbalyst/collab-client/core';
 import type {
   CollabDocsCommand,
   CollabDocsCommandResult,
+  CollabDocsDataChange,
   CollabDocsDataSource,
+  CollabDocsSnapshot,
   SharedDocument,
   SharedFolder,
+  SharedTypePlacement,
 } from '@nimbalyst/collab-client/docs';
+import type { TypePlacementNode } from '@nimbalyst/collab-protocol';
 import {
   TeamSyncProvider,
   type TeamDocIndexEntry,
@@ -79,6 +81,18 @@ function mapFolder(folder: FolderNode): SharedFolder {
   };
 }
 
+function mapTypePlacement(placement: TypePlacementNode): SharedTypePlacement {
+  return {
+    typeId: placement.typeId,
+    projectId: placement.projectId,
+    parentFolderId: placement.parentFolderId,
+    sortOrder: placement.sortOrder,
+    createdBy: placement.createdBy,
+    createdAt: placement.createdAt,
+    updatedAt: placement.updatedAt,
+  };
+}
+
 function mapMember(member: TeamMemberInfo): TeamMemberSummary {
   return {
     memberId: asTeamMemberId(member.userId),
@@ -90,9 +104,7 @@ function mapMember(member: TeamMemberInfo): TeamMemberSummary {
 
 /** Electron renderer's in-process document index over TeamSyncProvider. */
 export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
-  private readonly listeners = new Set<(
-    change: CollabDataChange<SharedDocument, SharedFolder>,
-  ) => void>();
+  private readonly listeners = new Set<(change: CollabDocsDataChange) => void>();
   private readonly memberListeners = new Set<() => void>();
   private readonly provider: TeamSyncProvider;
   private readonly observeStatus?: ElectronCollabDocumentsDataSourceEvents['observeStatus'];
@@ -133,6 +145,10 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
         containerIds: folderIds,
         itemIds: documentIds,
       }),
+      // Placement changes ride the snapshot change; see CollabDocsSnapshot.
+      onTypePlacementsLoaded: emitSnapshot,
+      onTypePlacementChanged: emitSnapshot,
+      onTypePlacementsRemoved: emitSnapshot,
       onStatusChange: (status) => {
         this.emit({ type: 'status', status });
         observeStatus?.(status);
@@ -172,14 +188,12 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     )))(config);
   }
 
-  async snapshot(): Promise<CollabDataSnapshot<SharedDocument, SharedFolder>> {
+  async snapshot(): Promise<CollabDocsSnapshot> {
     await this.ensureConnected();
     return this.currentSnapshot();
   }
 
-  subscribe(
-    cb: (change: CollabDataChange<SharedDocument, SharedFolder>) => void,
-  ): () => void {
+  subscribe(cb: (change: CollabDocsDataChange) => void): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);
   }
@@ -256,6 +270,17 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
         return { ok: true };
       case 'refresh-folders':
         return { ok: true, folders: (await this.provider.refreshFolders())?.map(mapFolder) ?? null };
+      case 'set-type-placement':
+        this.provider.setTypePlacement(command.typeId, command.parentFolderId, command.sortOrder);
+        return { ok: true };
+      case 'remove-type-placement':
+        this.provider.removeTypePlacement(command.typeId);
+        return { ok: true };
+      case 'refresh-type-placements':
+        return {
+          ok: true,
+          typePlacements: (await this.provider.refreshTypePlacements())?.map(mapTypePlacement) ?? null,
+        };
       case 'reconnect':
         this.provider.reconnectNow();
         return { ok: true };
@@ -269,14 +294,17 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     this.provider.destroy();
   }
 
-  private currentSnapshot(): CollabDataSnapshot<SharedDocument, SharedFolder> {
+  private currentSnapshot(): CollabDocsSnapshot {
+    // Omitted until the server has sent a list, so the session keeps its own.
+    const typePlacements = this.provider.getTypePlacements();
     return {
       items: this.provider.getDocuments().map(mapDocument),
       containers: this.provider.getFolders().map(mapFolder),
+      ...(typePlacements ? { typePlacements: typePlacements.map(mapTypePlacement) } : {}),
     };
   }
 
-  private emit(change: CollabDataChange<SharedDocument, SharedFolder>): void {
+  private emit(change: CollabDocsDataChange): void {
     for (const listener of this.listeners) listener(change);
   }
 

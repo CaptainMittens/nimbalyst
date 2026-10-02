@@ -20,8 +20,12 @@ import {
   reconcileSharedDocumentDisplayName,
   renameCollabDocumentPath,
   resolveCollabCreateTargetFolderId,
+  pruneEmptyFolders,
+  type CollabTreeFolderNode,
+  type CollabTreeTypeNode,
+  type CollabTypeTreeResolver,
 } from '../collabTree';
-import type { SharedDocument, SharedFolder } from '../types';
+import type { SharedDocument, SharedFolder, SharedTypePlacement } from '../types';
 
 function makeDocument(
   documentId: string,
@@ -428,6 +432,86 @@ describe('collabTree', () => {
 
     it('uses the leaf name when a real title is present', () => {
       expect(getSharedDocumentDisplayName('Specs/API Spec', ID)).toBe('API Spec');
+    });
+  });
+
+  describe('placed tracker types', () => {
+    const placement = (typeId: string, parentFolderId: string | null, sortOrder = 0): SharedTypePlacement => ({
+      typeId,
+      projectId: null,
+      parentFolderId,
+      sortOrder,
+      createdBy: 'user-1',
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    const types: Record<string, { name: string; extends?: string; items: string[] }> = {
+      module: { name: 'Modules', items: ['Tracking', 'Identity'] },
+      technology: { name: 'Technologies', items: ['Cloudflare'] },
+      library: { name: 'Libraries', extends: 'technology', items: ['Yjs'] },
+      competitor: { name: 'Competitors', items: [] },
+    };
+    const resolver: CollabTypeTreeResolver = {
+      typeName: (typeId) => types[typeId]?.name ?? null,
+      typeExtends: (typeId) => types[typeId]?.extends ?? null,
+      itemsOfType: (typeId) => (types[typeId]?.items ?? []).map((title) => ({ itemId: `${typeId}-${title}`, title })),
+    };
+
+    it('places types after folders and before documents, by sortOrder, with items in resolver order', () => {
+      const tree = buildCollabTreeFromFolders(
+        [makeDocument('d-root', 'Readme'), makeDocument('d-spec', 'Architecture', 1, 'f-spec')],
+        [makeFolder('f-spec', 'Spec')],
+        {
+          placements: [
+            placement('competitor', null, 2),
+            placement('technology', null, 1),
+            placement('module', 'f-spec'),
+            placement('ghost', null),
+          ],
+          resolver,
+        },
+      );
+
+      expect(tree.map((node) => node.id)).toEqual([
+        'folder:f-spec',
+        'type:technology',
+        'type:competitor',
+        'document:d-root',
+      ]);
+      const spec = tree[0] as CollabTreeFolderNode;
+      expect(spec.children.map((node) => node.id)).toEqual(['type:module', 'document:d-spec']);
+      const modules = spec.children[0] as CollabTreeTypeNode;
+      expect(modules).toMatchObject({ name: 'Modules', path: 'Spec/Modules', count: 2 });
+      expect(modules.children.map((node) => node.name)).toEqual(['Tracking', 'Identity']);
+      expect(modules.children[0]).toMatchObject({ type: 'item', itemId: 'module-Tracking', typeId: 'module', path: 'Spec/Modules/Tracking' });
+    });
+
+    it('nests a placed subtype inside its placed base type', () => {
+      const tree = buildCollabTreeFromFolders([], [makeFolder('f-spec', 'Spec')], {
+        placements: [placement('library', 'f-spec'), placement('technology', null)],
+        resolver,
+      });
+
+      expect(tree.map((node) => node.id)).toEqual(['folder:f-spec', 'type:technology']);
+      expect((tree[0] as CollabTreeFolderNode).children).toEqual([]);
+      const technologies = tree[1] as CollabTreeTypeNode;
+      expect(technologies.count).toBe(1);
+      expect(technologies.children.map((node) => node.id)).toEqual(['type:library', 'item:technology-Cloudflare']);
+      expect(technologies.children[0].path).toBe('Technologies/Libraries');
+    });
+
+    it('keeps a type node when only one of its items matches the filter', () => {
+      const tree = buildCollabTreeAdaptive([makeDocument('d-1', 'Notes')], [], {
+        placements: [placement('module', null), placement('competitor', null)],
+        resolver,
+      });
+
+      const filtered = filterCollabTree(tree, 'identity');
+      expect(filtered).toHaveLength(1);
+      const modules = filtered[0] as CollabTreeTypeNode;
+      expect(modules.id).toBe('type:module');
+      expect(modules.children.map((node) => node.name)).toEqual(['Identity']);
+      expect(pruneEmptyFolders(tree).map((node) => node.id)).toContain('type:competitor');
     });
   });
 });

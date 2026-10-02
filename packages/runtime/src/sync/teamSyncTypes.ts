@@ -18,6 +18,7 @@ import type {
   EncryptedFolderNode as ProtocolEncryptedFolderNode,
 } from '@nimbalyst/collab-protocol';
 import type { TeamJwt, TeamMemberId } from '../auth/jwtScopes';
+import type { TypePlacementCallbacks } from './teamTypePlacements';
 
 export type {
   TeamClientMessage,
@@ -32,6 +33,10 @@ export type {
   TeamFolderIndexSyncResponseMessage,
   TeamFolderBroadcastMessage,
   TeamFolderRemoveBroadcastMessage,
+  TeamTypePlacementIndexSyncResponseMessage,
+  TeamTypePlacementBroadcastMessage,
+  TeamTypePlacementRemoveBroadcastMessage,
+  TypePlacementNode,
   TeamProjectAccessChangedMessage,
   TeamDocumentCommentNotifyMessage,
   TeamDocumentCommentNotifyAckMessage,
@@ -51,7 +56,7 @@ export type ServerTeamState = ProtocolTeamState;
 // Configuration
 // ============================================================================
 
-export interface TeamSyncConfig {
+export interface TeamSyncConfig extends TypePlacementCallbacks {
   /** WebSocket server URL (e.g., wss://sync.nimbalyst.com) */
   serverUrl: string;
 

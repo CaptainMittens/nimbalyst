@@ -297,6 +297,7 @@ export declare class TrackerSyncEngine {
      * matching ack, so it holds at most the in-flight pushes.
      */
     private readonly pendingLaneIds;
+    private schemaApplyChain;
     private readonly schemaOutbox;
     private readonly rollbackSnapshots;
     private readonly pendingConfigChanges;
@@ -454,7 +455,13 @@ export declare class TrackerSyncEngine {
      * this signal to detect a stale-key bootstrap and trigger `refreshKey()`.
      */
     private applyEnvelope;
+    /**
+     * Socket messages are dispatched without awaiting each other, and a host's
+     * `applyRemote` awaits file writes. Unserialized, an older delivery can finish
+     * after a newer one and leave the older content and syncId in place.
+     */
     private applySchemaEnvelope;
+    private applySchemaEnvelopeNow;
     private applySavedViewEnvelope;
     private applyNavigationEnvelope;
     private enqueueMutation;

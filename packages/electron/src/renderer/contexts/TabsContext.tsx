@@ -45,10 +45,17 @@ export interface TabData {
    * Resource kind for the tab. Undefined/`'file'` = a disk-backed file
    * (default). `'tracker'` = a tracker item rendered by the workstream host
    * (its `filePath` is a `tracker://<itemId>` resource id, NOT a real path).
+   * `'type'` = a tracker type's page in Pages mode (`type://<typeId>`).
+   * `'personal-page'` = a local personal page in Pages mode
+   * (`personal://<documentId>`), body stored in the local database.
    */
-  kind?: 'file' | 'tracker';
+  kind?: 'file' | 'tracker' | 'type' | 'personal-page';
   /** For tracker tabs: the tracker item id (also encoded in filePath). */
   trackerItemId?: string;
+  /** For type tabs: the tracker type id (also encoded in filePath). */
+  trackerTypeId?: string;
+  /** For personal page tabs: the personal document id (also encoded in filePath). */
+  personalDocumentId?: string;
 }
 
 /**
@@ -64,12 +71,30 @@ export function isTrackerTabPath(filePath: string): boolean {
   return filePath.startsWith(TRACKER_TAB_PREFIX);
 }
 
-/** True when a tab represents a non-filesystem resource (virtual/collab/tracker). */
+/** Prefix for a tracker type's page tab in Pages mode: `type://<typeId>`. */
+export const TYPE_TAB_PREFIX = 'type://';
+
+/** True when a tab filePath identifies a tracker type page (not a real file). */
+export function isTypeTabPath(filePath: string): boolean {
+  return filePath.startsWith(TYPE_TAB_PREFIX);
+}
+
+/** Prefix for a personal page tab in Pages mode: `personal://<documentId>`. */
+export const PERSONAL_PAGE_TAB_PREFIX = 'personal://';
+
+/** True when a tab filePath identifies a personal page (not a real file). */
+export function isPersonalPageTabPath(filePath: string): boolean {
+  return filePath.startsWith(PERSONAL_PAGE_TAB_PREFIX);
+}
+
+/** True when a tab represents a non-filesystem resource (virtual/collab/tracker/type/personal). */
 export function isNonFilesystemTab(filePath: string): boolean {
   return (
     filePath.startsWith('virtual://') ||
     isCollabUri(filePath) ||
-    isTrackerTabPath(filePath)
+    isTrackerTabPath(filePath) ||
+    isTypeTabPath(filePath) ||
+    isPersonalPageTabPath(filePath)
   );
 }
 
@@ -355,11 +380,17 @@ export function TabsProvider({
 
     const tabId = generateTabId();
     const isTracker = isTrackerTabPath(filePath);
+    const isType = isTypeTabPath(filePath);
+    const isPersonalPage = isPersonalPageTabPath(filePath);
     // Tracker tabs use the item id as their label fallback; the live title is
     // resolved by the tab bar from the canonical tracker atom.
     const fileName = isTracker
       ? displayName?.trim() || filePath.slice(TRACKER_TAB_PREFIX.length)
-      : resolveTabDisplayName(filePath, displayName);
+      : isType
+        ? displayName?.trim() || filePath.slice(TYPE_TAB_PREFIX.length)
+        : isPersonalPage
+          ? displayName?.trim() || 'Untitled'
+          : resolveTabDisplayName(filePath, displayName);
 
     const newTab: TabData = {
       id: tabId,
@@ -369,8 +400,10 @@ export function TabsProvider({
       isDirty: false,
       isPinned: initialState?.isPinned ?? false,
       isVirtual: filePath.startsWith('virtual://'),
-      kind: isTracker ? 'tracker' : 'file',
+      kind: isTracker ? 'tracker' : isType ? 'type' : isPersonalPage ? 'personal-page' : 'file',
       trackerItemId: isTracker ? filePath.slice(TRACKER_TAB_PREFIX.length) : undefined,
+      trackerTypeId: isType ? filePath.slice(TYPE_TAB_PREFIX.length) : undefined,
+      personalDocumentId: isPersonalPage ? filePath.slice(PERSONAL_PAGE_TAB_PREFIX.length) : undefined,
       contentHash: simpleHash(content),
       contentLoadedAt: new Date()
     };

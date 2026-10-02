@@ -73,6 +73,27 @@ describe('getTrackerFieldLayout', () => {
       .toEqual(['state', 'owner', 'tags', 'estimate']);
   });
 
+  it('leaves lists in the default layout and drops them from the header layout', () => {
+    globalRegistry.register({
+      ...model,
+      type: 'fieldLayoutHeaderSpec',
+      fields: [
+        ...model.fields,
+        { name: 'areas', type: 'multiselect', options: [] },
+        { name: 'stakeholders', type: 'array', itemType: 'string' },
+        { name: 'labels', type: 'label-ref' },
+        { name: 'dependsOn', type: 'relationship', multiValue: true },
+        { name: 'parent', type: 'relationship' },
+      ],
+    });
+
+    // Quick create still edits tags and collections through the default layout.
+    expect(getTrackerFieldLayout('fieldLayoutHeaderSpec').map((field) => field.name))
+      .toEqual(['state', 'owner', 'tags', 'estimate', 'stakeholders', 'labels', 'dependsOn', 'parent']);
+    expect(getTrackerFieldLayout('fieldLayoutHeaderSpec', [], { singleValuedOnly: true }).map((field) => field.name))
+      .toEqual(['state', 'owner', 'estimate', 'parent']);
+  });
+
   it('returns nothing for an unregistered tracker type', () => {
     expect(getTrackerFieldLayout('not-a-registered-type')).toEqual([]);
   });

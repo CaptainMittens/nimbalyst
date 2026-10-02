@@ -1,4 +1,4 @@
-import type { SharedDocument, SharedFolder } from './types';
+import type { SharedDocument, SharedFolder, SharedTypePlacement } from './types';
 
 export interface CollabTreeFolderNode {
   id: string;
@@ -25,7 +25,56 @@ export interface CollabTreeDocumentNode {
   document: SharedDocument;
 }
 
-export type CollabTreeNode = CollabTreeFolderNode | CollabTreeDocumentNode;
+/**
+ * A tracker type placed in the tree. Its children are the type's items, after
+ * any placed subtypes (types that `extends` it).
+ */
+export interface CollabTreeTypeNode {
+  id: string;
+  type: 'type';
+  typeId: string;
+  path: string;
+  name: string;
+  /** Number of items of this type (not counting subtypes). */
+  count: number;
+  placement: SharedTypePlacement;
+  children: Array<CollabTreeTypeNode | CollabTreeItemNode>;
+}
+
+export interface CollabTreeItemNode {
+  id: string;
+  type: 'item';
+  itemId: string;
+  typeId: string;
+  path: string;
+  name: string;
+}
+
+export type CollabTreeNode =
+  | CollabTreeFolderNode
+  | CollabTreeDocumentNode
+  | CollabTreeTypeNode
+  | CollabTreeItemNode;
+
+/**
+ * Host-supplied answers about tracker types and items. The tree stays pure: it
+ * never reads a registry or a store itself.
+ */
+export interface CollabTypeTreeResolver {
+  /** Display name of a type, or null when the type is unknown here. */
+  typeName(typeId: string): string | null;
+  /** The type this one `extends`, if any. */
+  typeExtends?(typeId: string): string | null;
+  /** Items of a type, in display order. */
+  itemsOfType(typeId: string): Array<{ itemId: string; title: string; sortKey?: string | number }>;
+  /** Types a user may place, for the "Place type..." menu. */
+  listedTypes?(): Array<{ typeId: string; name: string; icon?: string }>;
+}
+
+export interface CollabTypePlacementInput {
+  placements: SharedTypePlacement[];
+  resolver: CollabTypeTreeResolver;
+}
 
 export interface CollabFolderOption {
   folderId: string | null;
@@ -271,9 +320,140 @@ export function getSharedDocumentDisplayPathWithFallback(
   return getSharedDocumentDisplayPath(document, folders);
 }
 
+const TREE_NODE_RANK: Record<CollabTreeNode['type'], number> = {
+  folder: 0,
+  type: 1,
+  document: 2,
+  item: 3,
+};
+
+const compareTypeNodes = (left: CollabTreeTypeNode, right: CollabTreeTypeNode): number =>
+  (left.placement.sortOrder - right.placement.sortOrder)
+  || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: 'base' })
+  || left.typeId.localeCompare(right.typeId);
+
+/** Folders, then placed types (by sortOrder), then documents (by name). */
+function compareTreeNodes(left: CollabTreeNode, right: CollabTreeNode): number {
+  if (left.type !== right.type) return TREE_NODE_RANK[left.type] - TREE_NODE_RANK[right.type];
+  if (left.type === 'type' && right.type === 'type') return compareTypeNodes(left, right);
+  return left.name.localeCompare(right.name, undefined, {
+    numeric: true,
+    sensitivity: 'base',
+  });
+}
+
+function sortTreeNodes(nodes: CollabTreeNode[]): CollabTreeNode[] {
+  nodes.sort(compareTreeNodes);
+  // A type node's children keep their built order: subtypes, then items in
+  // the resolver's order.
+  for (const node of nodes) {
+    if (node.type === 'folder') sortTreeNodes(node.children);
+  }
+  return nodes;
+}
+
+/**
+ * Build type nodes from placements and attach them under their folder (or
+ * root). A type whose `extends` chain reaches another placed type nests inside
+ * that type's node instead. Placements the resolver cannot name are skipped.
+ */
+function attachTypeNodes(
+  roots: CollabTreeNode[],
+  folderNodeById: (folderId: string) => CollabTreeFolderNode | undefined,
+  input: CollabTypePlacementInput | undefined,
+): void {
+  if (!input || input.placements.length === 0) return;
+  const { resolver } = input;
+
+  const nodes = new Map<string, CollabTreeTypeNode>();
+  for (const placement of input.placements) {
+    if (nodes.has(placement.typeId)) continue;
+    const name = resolver.typeName(placement.typeId);
+    if (!name) continue;
+    nodes.set(placement.typeId, {
+      id: `type:${placement.typeId}`,
+      type: 'type',
+      typeId: placement.typeId,
+      path: '',
+      name,
+      count: 0,
+      placement,
+      children: [],
+    });
+  }
+
+  const nearestPlacedBase = (typeId: string): string | null => {
+    const seen = new Set([typeId]);
+    let current = resolver.typeExtends?.(typeId) ?? null;
+    while (current && !seen.has(current)) {
+      if (nodes.has(current)) return current;
+      seen.add(current);
+      current = resolver.typeExtends?.(current) ?? null;
+    }
+    return null;
+  };
+  const parentType = new Map<string, string | null>();
+  for (const typeId of nodes.keys()) parentType.set(typeId, nearestPlacedBase(typeId));
+  // Corrupt `extends` cycles between placed types would hide every node in
+  // the cycle; break them by placing the node normally.
+  for (const typeId of nodes.keys()) {
+    const seen = new Set<string>([typeId]);
+    let current = parentType.get(typeId) ?? null;
+    while (current) {
+      if (seen.has(current)) {
+        parentType.set(typeId, null);
+        break;
+      }
+      seen.add(current);
+      current = parentType.get(current) ?? null;
+    }
+  }
+
+  const subtypes = new Map<string, CollabTreeTypeNode[]>();
+  for (const node of nodes.values()) {
+    const base = parentType.get(node.typeId);
+    if (base) {
+      const list = subtypes.get(base) ?? [];
+      list.push(node);
+      subtypes.set(base, list);
+      continue;
+    }
+    const folderId = node.placement.parentFolderId;
+    const folder = folderId ? folderNodeById(folderId) : undefined;
+    if (folder) folder.children.push(node);
+    else roots.push(node);
+  }
+
+  const finalize = (node: CollabTreeTypeNode, parentPath: string) => {
+    node.path = joinCollabPath(parentPath, node.name);
+    const nested = (subtypes.get(node.typeId) ?? []).sort(compareTypeNodes);
+    for (const child of nested) finalize(child, node.path);
+    const items: CollabTreeItemNode[] = resolver.itemsOfType(node.typeId).map((item) => {
+      const name = item.title || item.itemId;
+      return {
+        id: `item:${item.itemId}`,
+        type: 'item',
+        itemId: item.itemId,
+        typeId: node.typeId,
+        path: joinCollabPath(node.path, name),
+        name,
+      };
+    });
+    node.count = items.length;
+    node.children = [...nested, ...items];
+  };
+  for (const node of nodes.values()) {
+    if (parentType.get(node.typeId)) continue;
+    const folderId = node.placement.parentFolderId;
+    const folder = folderId ? folderNodeById(folderId) : undefined;
+    finalize(node, folder ? folder.path : '');
+  }
+}
+
 export function buildCollabTree(
   documents: SharedDocument[],
-  customFolders: string[]
+  customFolders: string[],
+  typePlacements?: CollabTypePlacementInput,
 ): CollabTreeNode[] {
   const folderMap = new Map<string, CollabTreeFolderNode>();
   const roots: CollabTreeNode[] = [];
@@ -332,27 +512,10 @@ export function buildCollabTree(
     pushToParent(documentNode, parentPath);
   }
 
-  const sortNodes = (nodes: CollabTreeNode[]): CollabTreeNode[] => {
-    nodes.sort((left, right) => {
-      if (left.type !== right.type) {
-        return left.type === 'folder' ? -1 : 1;
-      }
-      return left.name.localeCompare(right.name, undefined, {
-        numeric: true,
-        sensitivity: 'base',
-      });
-    });
+  // Legacy folders have no folder id, so every placed type sits at root.
+  attachTypeNodes(roots, () => undefined, typePlacements);
 
-    for (const node of nodes) {
-      if (node.type === 'folder') {
-        sortNodes(node.children);
-      }
-    }
-
-    return nodes;
-  };
-
-  return sortNodes(roots);
+  return sortTreeNodes(roots);
 }
 
 /**
@@ -369,6 +532,7 @@ export function buildCollabTree(
 export function buildCollabTreeFromFolders(
   documents: SharedDocument[],
   folders: SharedFolder[],
+  typePlacements?: CollabTypePlacementInput,
 ): CollabTreeNode[] {
   const foldersById = new Map(folders.map(f => [f.folderId, f]));
   const nodesById = new Map<string, CollabTreeFolderNode>();
@@ -432,23 +596,9 @@ export function buildCollabTreeFromFolders(
     else roots.push(documentNode);
   }
 
-  const sortNodes = (nodes: CollabTreeNode[]): CollabTreeNode[] => {
-    nodes.sort((left, right) => {
-      if (left.type !== right.type) {
-        return left.type === 'folder' ? -1 : 1;
-      }
-      return left.name.localeCompare(right.name, undefined, {
-        numeric: true,
-        sensitivity: 'base',
-      });
-    });
-    for (const node of nodes) {
-      if (node.type === 'folder') sortNodes(node.children);
-    }
-    return nodes;
-  };
+  attachTypeNodes(roots, (folderId) => nodesById.get(folderId), typePlacements);
 
-  return sortNodes(roots);
+  return sortTreeNodes(roots);
 }
 
 /**
@@ -510,16 +660,17 @@ export function computeLegacyFolderRenameUpdates(
 export function buildCollabTreeAdaptive(
   documents: SharedDocument[],
   folders: SharedFolder[],
+  typePlacements?: CollabTypePlacementInput,
 ): CollabTreeNode[] {
   if (folders.length === 0) {
     const hasPathInTitle = documents.some(
       doc => !doc.parentFolderId && getCollabParentPath(getCollabDocumentPath(doc)) !== null,
     );
     if (hasPathInTitle) {
-      return buildCollabTree(documents, []);
+      return buildCollabTree(documents, [], typePlacements);
     }
   }
-  return buildCollabTreeFromFolders(documents, folders);
+  return buildCollabTreeFromFolders(documents, folders, typePlacements);
 }
 
 /**
@@ -530,7 +681,8 @@ export function buildCollabTreeAdaptive(
  */
 export function pruneEmptyFolders(nodes: CollabTreeNode[]): CollabTreeNode[] {
   const prune = (node: CollabTreeNode): CollabTreeNode | null => {
-    if (node.type === 'document') return node;
+    // Type nodes are content in their own right, even with no items yet.
+    if (node.type !== 'folder') return node;
     const children = node.children
       .map(prune)
       .filter((c): c is CollabTreeNode => c !== null);
@@ -552,12 +704,20 @@ export function filterCollabTree(nodes: CollabTreeNode[], query: string): Collab
   };
 
   const filterNode = (node: CollabTreeNode): CollabTreeNode | null => {
-    if (node.type === 'document') {
+    if (node.type === 'document' || node.type === 'item') {
       return nodeMatchesQuery(node) ? node : null;
     }
 
     if (nodeMatchesQuery(node)) {
       return node;
+    }
+
+    if (node.type === 'type') {
+      const filteredChildren = node.children
+        .map(filterNode)
+        .filter((child): child is CollabTreeTypeNode | CollabTreeItemNode =>
+          child !== null && (child.type === 'type' || child.type === 'item'));
+      return filteredChildren.length === 0 ? null : { ...node, children: filteredChildren };
     }
 
     const filteredChildren = node.children

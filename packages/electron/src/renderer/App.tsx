@@ -1396,7 +1396,7 @@ export default function App() {
       files: 'Files',
       agent: 'Agent',
       tracker: 'Tracker',
-      collab: 'Shared Docs',
+      collab: 'Pages',
       org: 'Organization',
       'pr-review': 'PR Review',
       settings: 'Settings',

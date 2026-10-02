@@ -36,10 +36,12 @@ import type {
   FolderNode,
   ServerTeamState,
   SharedDocumentTypeMetadataV2,
+  TypePlacementNode,
 } from './teamSyncTypes';
 import { asTeamMemberId } from '../auth/jwtScopes';
 import type { BoundedPreview } from '@nimbalyst/collab-protocol';
 import { appendSyncClientParams } from './syncClientInfo';
+import { TeamTypePlacementCache, typePlacementQueueKey } from './teamTypePlacements';
 
 // ============================================================================
 // TeamSyncProvider
@@ -76,6 +78,12 @@ export class TeamSyncProvider {
 
   /** Resolvers waiting for the next decrypted folder-index snapshot. */
   private folderResyncWaiters: Array<(folders: FolderNode[] | null) => void> = [];
+
+  /** Tracker types placed in the page tree, this project only. */
+  private readonly typePlacementEntries = new TeamTypePlacementCache(
+    () => this.config.teamProjectId ?? this.teamState?.metadata?.teamProjectId ?? null,
+    () => this.config,
+  );
 
   /**
    * Resolvers waiting for a `docIndexRegistered` ack, keyed by document id.
@@ -173,6 +181,7 @@ export class TeamSyncProvider {
     const folderWaiters = this.folderResyncWaiters;
     this.folderResyncWaiters = [];
     for (const waiter of folderWaiters) waiter(null);
+    this.typePlacementEntries.destroy();
     const registerWaiters = [...this.registerAckWaiters.values()].flat();
     this.registerAckWaiters.clear();
     // Unconfirmed, not confirmed-failed: a destroyed provider says nothing
@@ -421,6 +430,35 @@ export class TeamSyncProvider {
   }
 
   // --------------------------------------------------------------------------
+  // Public API: Tracker-type placements in the page tree
+  // --------------------------------------------------------------------------
+
+  /** Place a type (or move its placement). `parentFolderId` null = root level. */
+  setTypePlacement(typeId: string, parentFolderId: string | null, sortOrder = 0): void {
+    this.send({
+      type: 'typePlacementSet', typeId, parentFolderId, sortOrder,
+      projectId: this.config.teamProjectId ?? null,
+    });
+  }
+
+  removeTypePlacement(typeId: string): void {
+    this.send({ type: 'typePlacementRemove', typeId, projectId: this.config.teamProjectId ?? null });
+  }
+
+  /** Null until the server has sent a placement list (older servers never do). */
+  getTypePlacements(): TypePlacementNode[] | null {
+    return this.typePlacementEntries.authoritativeList();
+  }
+
+  /** Resolves after the server's placement list is applied; null on timeout. */
+  refreshTypePlacements(timeoutMs = 6000): Promise<TypePlacementNode[] | null> {
+    return this.typePlacementEntries.waitForSnapshot(
+      () => this.send({ type: 'typePlacementIndexSync' }),
+      timeoutMs,
+    );
+  }
+
+  // --------------------------------------------------------------------------
   // Message Handling
   // --------------------------------------------------------------------------
 
@@ -477,6 +515,15 @@ export class TeamSyncProvider {
         case 'folderRemoveBroadcast':
           this.handleFolderRemoveBroadcast(message);
           break;
+        case 'typePlacementIndexSyncResponse':
+          this.typePlacementEntries.applySnapshot(message.placements);
+          break;
+        case 'typePlacementBroadcast':
+          this.typePlacementEntries.applyUpsert(message.placement);
+          break;
+        case 'typePlacementRemoveBroadcast':
+          this.typePlacementEntries.applyRemove(message.projectId, message.typeIds);
+          break;
         case 'projectAccessChanged':
           this.handleProjectAccessChanged(message);
           break;
@@ -494,6 +541,9 @@ export class TeamSyncProvider {
           break;
         case 'error':
           console.error('[TeamSync] Server error:', message.code, message.message);
+          // A refused placement mutation would otherwise leave the author's
+          // optimistic row in place; the re-read replaces it with server truth.
+          if (this.typePlacementEntries.takeUnconfirmed()) this.send({ type: 'typePlacementIndexSync' });
           break;
       }
     } catch (err) {
@@ -549,6 +599,7 @@ export class TeamSyncProvider {
     if (folders.length > 0) {
       this.config.onFoldersLoaded?.(folders);
     }
+    this.typePlacementEntries.applySnapshot(server.typePlacements);
 
     // Replay index mutations / comment notifications queued while disconnected
     this.replayPendingOfflineMessages();
@@ -879,6 +930,7 @@ export class TeamSyncProvider {
   private send(message: TeamClientMessage): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
+      this.typePlacementEntries.noteSent(message);
       return;
     }
     const key = this.offlineQueueKey(message);
@@ -906,6 +958,8 @@ export class TeamSyncProvider {
       // a queued notification for the same comment cannot lose a delivery.
       return `${msg.type}:${msg.commentId}:${msg.reason}`;
     }
+    const placementKey = typePlacementQueueKey(msg);
+    if (placementKey) return placementKey;
     if (!this.isDocIndexMessage(msg)) return undefined;
     const entityId = 'documentId' in msg ? msg.documentId
       : 'folderId' in msg ? msg.folderId

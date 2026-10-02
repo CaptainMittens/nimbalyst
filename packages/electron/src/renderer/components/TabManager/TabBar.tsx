@@ -9,6 +9,8 @@ import {
 } from '../../hooks/useTabState';
 import { CommonFileActions } from '../CommonFileActions';
 import { historyDialogFileAtom } from '../../store';
+import { PERSONAL_PAGE_TAB_PREFIX, isPersonalPageTabPath } from '../../contexts/TabsContext';
+import { personalPageHistoryKey } from '../CollabMode/usePersonalPageBody';
 import { KeyboardShortcuts, getShortcutDisplay } from '../../../shared/KeyboardShortcuts';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import { trackerItemByIdAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
@@ -195,6 +197,16 @@ const TabItem: React.FC<TabItemProps> = ({
           fallback={tab.fileName}
           isActive={tab.id === activeTabId}
         />
+      ) : tab.kind === 'type' || tab.kind === 'personal-page' ? (
+        <>
+          {/* Same icons as the type and document rows in the Pages tree. */}
+          {tab.kind === 'type'
+            ? <MaterialSymbol icon="table" size={13} className="tab-type-icon mr-1 shrink-0 opacity-80 text-[var(--nim-purple)]" />
+            : <MaterialSymbol icon="description" size={13} className="tab-personal-page-icon mr-1 shrink-0 opacity-80" />}
+          <span className={`tab-title flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-[var(--nim-text-muted)] ${tab.id === activeTabId ? 'text-[var(--nim-text)] font-medium' : ''}`}>
+            {tab.fileName}
+          </span>
+        </>
       ) : (
         <>
           <span className={`tab-title flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-[var(--nim-text-muted)] ${tab.id === activeTabId ? 'text-[var(--nim-text)] font-medium' : ''}`}>
@@ -401,7 +413,10 @@ export const TabBar: React.FC<TabBarProps> = ({
     if (contextMenuTab) {
       const tab = tabs.find(t => t.id === contextMenuTab);
       if (tab?.filePath) {
-        openHistoryDialog(tab.filePath);
+        // A personal page's history is keyed by its document, not its tab path.
+        openHistoryDialog(isPersonalPageTabPath(tab.filePath)
+          ? personalPageHistoryKey(tab.filePath.slice(PERSONAL_PAGE_TAB_PREFIX.length))
+          : tab.filePath);
       }
     }
     closeContextMenu();

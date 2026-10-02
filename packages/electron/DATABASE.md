@@ -80,6 +80,7 @@ Past incident (NIM-899): the transcript backfill ran un-awaited at startup with 
 - **`project_state`**: Per-project state including window bounds, UI layout, open tabs, file tree, and editor settings
 - **`session_state`**: Global session restoration data for windows and focus order
 - **`document_history`**: Compressed document edit history with binary content storage
+- **`personal_page_folders`**, **`personal_page_documents`**, **`personal_page_type_placements`**: Per-workspace personal pages (no account needed): folders, documents with their markdown body and body version, and tracker-type placements. Owned by `PersonalPagesService`; body snapshots go to `document_history` under `personal-doc://<documentId>`
 
 ## Data Locations (macOS)
 

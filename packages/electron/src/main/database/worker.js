@@ -2671,6 +2671,10 @@ class PGLiteWorker {
           source_updated_at     TIMESTAMPTZ,
           metadata              JSONB NOT NULL DEFAULT '{}'::jsonb
         );
+        -- Mirror of SQLite 0048: the edge's qualifier bag and the field's
+        -- predicate id. NULL on rows indexed before this; a rebuild fills them.
+        ALTER TABLE tracker_relationship_index ADD COLUMN IF NOT EXISTS qualifiers JSONB;
+        ALTER TABLE tracker_relationship_index ADD COLUMN IF NOT EXISTS predicate TEXT;
         CREATE UNIQUE INDEX IF NOT EXISTS idx_tracker_rel_index_unique
           ON tracker_relationship_index (workspace, source_item_id, source_field_id, target_item_id);
         CREATE INDEX IF NOT EXISTS idx_tracker_rel_index_source
@@ -3190,6 +3194,53 @@ class PGLiteWorker {
       console.log('[PGLite Worker] tracker_type_navigation table created successfully');
     } catch (error) {
       console.error('[PGLite Worker] Failed to create tracker_type_navigation table:', error);
+      throw error;
+    }
+
+    // Migration: personal pages (schema version 49).
+    // Mirror of SQLite migration 0049_personal_pages.sql -- keep in sync.
+    try {
+      await this.db.exec(`
+        CREATE TABLE IF NOT EXISTS personal_page_folders (
+          workspace_path   TEXT NOT NULL,
+          folder_id        TEXT NOT NULL,
+          parent_folder_id TEXT,
+          name             TEXT NOT NULL,
+          sort_order       DOUBLE PRECISION NOT NULL DEFAULT 0,
+          created_at       TIMESTAMPTZ NOT NULL,
+          updated_at       TIMESTAMPTZ NOT NULL,
+          PRIMARY KEY (workspace_path, folder_id)
+        );
+        CREATE TABLE IF NOT EXISTS personal_page_documents (
+          workspace_path     TEXT NOT NULL,
+          document_id        TEXT NOT NULL,
+          title              TEXT NOT NULL,
+          document_type      TEXT NOT NULL,
+          editor_id          TEXT,
+          file_extension     TEXT,
+          metadata_version   INTEGER,
+          parent_folder_id   TEXT,
+          body               TEXT NOT NULL DEFAULT '',
+          body_version       INTEGER NOT NULL DEFAULT 0,
+          publication_status TEXT NOT NULL DEFAULT 'local',
+          created_at         TIMESTAMPTZ NOT NULL,
+          updated_at         TIMESTAMPTZ NOT NULL,
+          trashed_at         TIMESTAMPTZ,
+          PRIMARY KEY (workspace_path, document_id)
+        );
+        CREATE TABLE IF NOT EXISTS personal_page_type_placements (
+          workspace_path   TEXT NOT NULL,
+          type_id          TEXT NOT NULL,
+          parent_folder_id TEXT,
+          sort_order       DOUBLE PRECISION NOT NULL DEFAULT 0,
+          created_at       TIMESTAMPTZ NOT NULL,
+          updated_at       TIMESTAMPTZ NOT NULL,
+          PRIMARY KEY (workspace_path, type_id)
+        );
+      `);
+      console.log('[PGLite Worker] personal pages tables created successfully');
+    } catch (error) {
+      console.error('[PGLite Worker] Failed to create personal pages tables:', error);
       throw error;
     }
 

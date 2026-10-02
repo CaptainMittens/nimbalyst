@@ -282,6 +282,7 @@ import { ensureWorkspaceLocalNumbersInBackground } from './services/tracker/ensu
 import { initTrackerSchemaService, updateTrackerSchemaWorkspace } from './services/TrackerSchemaService';
 import { registerTrackerLifecycleIpc } from './services/tracker/trackerLifecycleService';
 import { initTrackerNavigationService } from './services/TrackerNavigationService';
+import { initPersonalPagesService } from './services/PersonalPagesService';
 import { initTrackerSavedViewService } from './services/TrackerSavedViewService';
 import { initTrackerRevisionService } from './services/tracker/trackerRevisionService';
 import {
@@ -2024,6 +2025,7 @@ app.whenReady().then(async () => {
     initTrackerSchemaService(); // Register IPC handlers + load built-in schemas
     registerTrackerLifecycleIpc(); // Promote to team / archive, from the UI
     initTrackerNavigationService();
+    initPersonalPagesService();
     initTrackerSavedViewService();
     initTrackerRevisionService();
 

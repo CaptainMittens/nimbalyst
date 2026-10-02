@@ -1,5 +1,6 @@
 import React from 'react';
 import './collabSidebarTree.css';
+import { type CollabTypeTreeResolver } from '../docs/index';
 export interface CollabSidebarProps {
     activeDocumentId?: string | null;
     /** Open the discovery hub (center pane). Shown as a Home action. */
@@ -23,6 +24,16 @@ export interface CollabSidebarProps {
      * the host would drift from it.
      */
     registerCreateMenu?: (menu: CollabSidebarCreateMenu | null) => void;
+    /**
+     * Names placed tracker types and lists their items. Hosts without tracker
+     * data omit it, and the tree then shows no type nodes.
+     */
+    typeResolver?: CollabTypeTreeResolver;
+    /**
+     * Shows this tree as one section of a stacked sidebar ("Team", "Personal"):
+     * a compact section header replaces the scope summary header.
+     */
+    sectionTitle?: string;
 }
 export interface CollabSidebarCreateMenu {
     items: Array<{
