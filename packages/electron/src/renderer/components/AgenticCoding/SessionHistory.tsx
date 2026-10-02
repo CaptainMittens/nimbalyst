@@ -20,6 +20,7 @@ import { ArchiveProgress } from './ArchiveProgress';
 import { IndexBuildDialog } from './IndexBuildDialog';
 import { ArchiveWorktreeDialog } from '../AgentMode/ArchiveWorktreeDialog';
 import { useArchiveWorktreeDialog } from '../../hooks/useArchiveWorktreeDialog';
+import { requestConfirmation } from '../../dialogs/requestConfirmation';
 import { getTimeGroupKey, TimeGroupKey } from '../../utils/dateFormatting';
 import { getFileName } from '../../utils/pathUtils';
 import { KeyboardShortcuts, getShortcutDisplay } from '../../../shared/KeyboardShortcuts';
@@ -1276,17 +1277,20 @@ const SessionHistoryComponent: React.FC = () => {
       const preview = await window.electronAPI.worktreeListGitignored(worktreeData.path);
       if (!preview.success || preview.count === 0) return;
 
-      const confirmed = window.confirm(
-        `Remove ${preview.count} gitignored ${preview.count === 1 ? 'item' : 'items'} from "${worktreeName}"?\n\nThis includes files like node_modules and build artifacts that can be regenerated.`
-      );
+      const confirmed = await requestConfirmation({
+        title: 'Clean Gitignored Files',
+        message: `Remove ${preview.count} gitignored ${preview.count === 1 ? 'item' : 'items'} from "${worktreeName}"?\n\nThis includes files like node_modules and build artifacts that can be regenerated.`,
+        confirmLabel: 'Remove',
+        destructive: true,
+      });
       if (!confirmed) return;
 
       const result = await window.electronAPI.worktreeCleanGitignored(worktreeData.path);
       if (result.success) {
-        window.alert(`Removed ${result.count} gitignored ${result.count === 1 ? 'item' : 'items'} from "${worktreeName}".`);
+        errorNotificationService.showInfo('Gitignored Files Removed', `Removed ${result.count} gitignored ${result.count === 1 ? 'item' : 'items'} from "${worktreeName}".`);
       } else {
         console.error('[SessionHistory] Failed to clean gitignored files:', result.error);
-        window.alert(`Failed to clean gitignored files: ${result.error}`);
+        errorNotificationService.showError('Clean Failed', `Failed to clean gitignored files: ${result.error}`);
       }
     } catch (error) {
       console.error('[SessionHistory] Failed to clean gitignored files:', error);
@@ -1770,7 +1774,12 @@ const SessionHistoryComponent: React.FC = () => {
     if (!onSessionDelete) return;
 
     const count = selectedSessionIds.size;
-    const confirmed = window.confirm(`Are you sure you want to permanently delete ${count} session${count > 1 ? 's' : ''}? This cannot be undone.`);
+    const confirmed = await requestConfirmation({
+      title: 'Delete Sessions',
+      message: `Are you sure you want to permanently delete ${count} session${count > 1 ? 's' : ''}? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
     if (!confirmed) return;
 
     for (const sessionId of selectedSessionIds) {

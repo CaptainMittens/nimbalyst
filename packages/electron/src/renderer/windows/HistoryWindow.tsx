@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
+import { useConfirmDialog } from '../hooks/useConfirmDialog';
+import { ConfirmDialog } from '../components/ConfirmDialog/ConfirmDialog';
 
 interface Snapshot {
   timestamp: string;
@@ -16,6 +18,8 @@ export function HistoryWindow() {
   const [previewContent, setPreviewContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const confirmDialog = useConfirmDialog();
 
   useEffect(() => {
     const loadHistory = async () => {
@@ -70,11 +74,14 @@ export function HistoryWindow() {
   const handleRestore = async () => {
     if (!selectedSnapshot || !previewContent) return;
 
-    const confirmed = window.confirm(
-      `Are you sure you want to restore this version from ${formatDate(selectedSnapshot.timestamp)}? This will replace the current file content.`
-    );
+    const confirmed = await confirmDialog.confirm({
+      title: 'Restore Snapshot',
+      message: `Are you sure you want to restore this version from ${formatDate(selectedSnapshot.timestamp)}? This will replace the current file content.`,
+      confirmLabel: 'Restore',
+    });
 
     if (confirmed) {
+      setActionError(null);
       try {
         // Send the content back to the main window via IPC
         // The main window will handle actually updating the editor content
@@ -87,17 +94,21 @@ export function HistoryWindow() {
         }
         window.close();
       } catch (err) {
-        alert('Failed to restore snapshot');
+        setActionError('Failed to restore snapshot');
       }
     }
   };
 
   const handleDelete = async (snapshot: Snapshot) => {
-    const confirmed = window.confirm(
-      `Are you sure you want to delete this snapshot from ${formatDate(snapshot.timestamp)}?`
-    );
+    const confirmed = await confirmDialog.confirm({
+      title: 'Delete Snapshot',
+      message: `Are you sure you want to delete this snapshot from ${formatDate(snapshot.timestamp)}?`,
+      confirmLabel: 'Delete',
+      destructive: true,
+    });
 
     if (confirmed) {
+      setActionError(null);
       try {
         await window.electronAPI.history.deleteSnapshot(filePath, snapshot.timestamp);
 
@@ -111,7 +122,7 @@ export function HistoryWindow() {
           setPreviewContent('');
         }
       } catch (err) {
-        alert('Failed to delete snapshot');
+        setActionError('Failed to delete snapshot');
       }
     }
   };
@@ -188,6 +199,9 @@ export function HistoryWindow() {
       <div className="history-header p-5 border-b border-[var(--nim-border)] bg-[var(--nim-bg-secondary)]">
         <h1 className="m-0 text-2xl font-semibold text-[var(--nim-text)]">File History</h1>
         <p className="file-path mt-2 text-[13px] text-[var(--nim-text-muted)] font-mono">{filePath}</p>
+        {actionError && (
+          <p className="history-action-error mt-2 text-[13px] text-[var(--nim-error)]">{actionError}</p>
+        )}
       </div>
 
       <div className="history-content flex flex-1 overflow-hidden">
@@ -272,6 +286,13 @@ export function HistoryWindow() {
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        {...confirmDialog.options}
+        onConfirm={confirmDialog.handleConfirm}
+        onCancel={confirmDialog.handleCancel}
+      />
     </div>
   );
 }

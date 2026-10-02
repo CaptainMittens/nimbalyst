@@ -41,6 +41,8 @@ import {
   projectActivitySummaryAtom,
 } from '../store/atoms/sessionActivity';
 import { generateWorkspaceAccentColor } from './WorkspaceSummaryHeader';
+import { requestConfirmation } from '../dialogs/requestConfirmation';
+import { errorNotificationService } from '../services/ErrorNotificationService';
 import './ProjectRail.css';
 
 const REVEAL_LABEL = getShowInFileBrowserLabel();
@@ -278,7 +280,10 @@ export function ProjectRail() {
 
   const handleOpenAddMenu = useCallback(() => {
     if (atCap) {
-      window.alert('The project limit is eight per window. Close a project or enable Allow unlimited projects in Settings > Advanced.');
+      errorNotificationService.showWarning(
+        'Project limit reached',
+        'The project limit is eight per window. Close a project or enable Allow unlimited projects in Settings > Advanced.',
+      );
       return;
     }
     refreshRecents();
@@ -294,9 +299,11 @@ export function ProjectRail() {
       // the prompt when closing an inactive rail project.
       const streaming = activity.get(project.path)?.streaming.size ?? 0;
       if (streaming > 0) {
-        const proceed = window.confirm(
-          `${project.name} has ${streaming} streaming session${streaming === 1 ? '' : 's'}. Close anyway? Sessions will be paused.`
-        );
+        const proceed = await requestConfirmation({
+          title: 'Close project',
+          message: `${project.name} has ${streaming} streaming session${streaming === 1 ? '' : 's'}. Close anyway? Sessions will be paused.`,
+          confirmLabel: 'Close project',
+        });
         if (!proceed) return;
       }
 

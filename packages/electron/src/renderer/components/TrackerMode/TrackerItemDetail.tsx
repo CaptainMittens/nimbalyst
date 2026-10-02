@@ -42,6 +42,7 @@ import { resolveLinkedSessions } from '../../utils/resolveLinkedSessions';
 import { prRemoteAtom, navigateToPullRequest } from '../../store/atoms/pullRequests';
 import { getRecordPrReferences } from '@nimbalyst/runtime/plugins/TrackerPlugin/prReferences';
 import { buildTrackerDeepLink } from '../../store/atoms/collabDocuments';
+import { requestConfirmation } from '../../dialogs/requestConfirmation';
 import { errorNotificationService } from '../../services/ErrorNotificationService';
 import { getRelativeTimeString } from '../../utils/dateFormatting';
 import { useTrackerItemBody, useTrackerTeam, type TrackerContentMode } from './useTrackerItemBody';
@@ -871,8 +872,14 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
           {onDelete && (
             <button
               className="p-1 rounded hover:bg-nim-tertiary text-nim-muted hover:text-[#ef4444]"
-              onClick={() => {
-                if (window.confirm(`Delete "${getRecordTitle(item)}"? This cannot be undone.`)) {
+              onClick={async () => {
+                const approved = await requestConfirmation({
+                  title: 'Delete item?',
+                  message: `Delete "${getRecordTitle(item)}"? This cannot be undone.`,
+                  confirmLabel: 'Delete',
+                  destructive: true,
+                });
+                if (approved) {
                   onDelete(item.id);
                 }
               }}

@@ -170,10 +170,6 @@ test.describe('Multi-Project Rail', () => {
     const activeItem = rail.locator('[data-testid="project-rail-item"].active');
     await activeItem.hover();
 
-    // Auto-accept the streaming-confirm dialog (none expected here, but
-    // installing a handler is harmless if no dialog opens).
-    page.once('dialog', (dialog) => dialog.accept());
-
     const closeButton = activeItem.locator('.project-rail-item-close');
     await closeButton.click();
 

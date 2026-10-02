@@ -78,14 +78,6 @@ test.beforeAll(async () => {
 
   page = await electronApp.firstWindow();
 
-  // Handle any dialogs (dismiss them)
-  page.on('dialog', dialog => dialog.dismiss().catch(() => {}));
-
-  // Override window.confirm to auto-accept (for delete confirmation)
-  await page.evaluate(() => {
-    window.confirm = () => true;
-  });
-
   await waitForAppReady(page);
 });
 
@@ -295,6 +287,7 @@ test('deleting an open file should close the tab and not recreate the file', asy
 
   const deleteButton = page.locator('[data-testid="context-menu-delete"]');
   await deleteButton.click();
+  await page.locator('.confirm-dialog-button-confirm').click();
 
   await expect(page.locator('.file-tabs-container .tab .tab-title', { hasText: 'op-delete.md' })).toHaveCount(0, { timeout: 5000 });
 
