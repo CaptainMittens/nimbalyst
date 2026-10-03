@@ -1,20 +1,18 @@
 import { test, expect } from '@playwright/test';
-import { chromium, type Browser, type ElectronApplication, type Page } from 'playwright';
+import type { ElectronApplication, Page } from 'playwright';
 import { launchElectronApp, createTempWorkspace } from '../helpers';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+// Mirrors TITLE_BAR_BUFFER in runtime's windowControlsClearance.ts.
+const TITLE_BAR_BUFFER = 8;
+
 test.describe.configure({ mode: 'serial' });
 let app: ElectronApplication | undefined;
-let browser: Browser | undefined;
 let page: Page;
 let workspace: string;
 let recents: Array<{ path: string; name: string; timestamp: number }>;
-let previousRecents: unknown;
-let previousViewport: { width: number; height: number } | null;
 
-// Optional CDP reuse is for a disposable preview profile, never a daily-use app.
-// The default launches the same isolated Electron fixture as the other specs.
 test.beforeAll(async () => {
   // Cold Electron/Vite startup has a separate budget from menu interactions.
   test.setTimeout(60_000);
@@ -26,20 +24,10 @@ test.beforeAll(async () => {
     await fs.mkdir(folder);
     return { path: folder, name, timestamp: Date.now() - index };
   }));
-  if (process.env.NIMBALYST_E2E_CDP_URL) {
-    browser = await chromium.connectOverCDP(process.env.NIMBALYST_E2E_CDP_URL);
-    const pages = browser.contexts().flatMap(context => context.pages())
-      .filter(candidate => candidate.url().includes('/renderer/index.html'));
-    expect(pages).toHaveLength(1);
-    page = pages[0];
-  } else {
-    app = await launchElectronApp({ workspace, permissionMode: 'allow-all' });
-    page = await app.firstWindow();
-  }
+  app = await launchElectronApp({ workspace, permissionMode: 'allow-all' });
+  page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   await page.waitForFunction(() => typeof window.electronAPI?.invoke === 'function');
-  previousViewport = page.viewportSize();
-  previousRecents = await page.evaluate(() => window.electronAPI.invoke('app-settings:get', 'recent.workspaces'));
   await page.evaluate(async () => {
     await window.electronAPI.invoke('app:set-multi-project-mode', true);
     await window.electronAPI.invoke('app-settings:set', 'recent.workspaces', []);
@@ -51,13 +39,7 @@ test.beforeAll(async () => {
 });
 
 test.afterAll(async () => {
-  if (page && !page.isClosed()) {
-    await page.keyboard.press('Escape');
-    await page.evaluate(value => window.electronAPI.invoke('app-settings:set', 'recent.workspaces', value ?? []), previousRecents);
-    if (previousViewport) await page.setViewportSize(previousViewport);
-  }
   await app?.close();
-  await browser?.close(); // Disconnects a CDP client; does not quit the external app.
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
@@ -121,7 +103,6 @@ test('repositions on resize and makes the last recent folder reachable by scroll
   await expectMenuInsideWindow();
 });
 
-
 test('keeps a stable height near the window-controls band and grows back after resize', async () => {
   const menu = page.getByTestId('project-rail-add-menu');
   await page.setViewportSize({ width: 1000, height: 600 });
@@ -135,9 +116,10 @@ test('keeps a stable height near the window-controls band and grows back after r
     value: { visible: true, getTitlebarAreaRect: () => new DOMRect(80, 0, innerWidth - 80, 38) },
   }));
   try {
-    // These are the heights between "fits naturally" and "clamps to the top".
-    // Using the menu's measured height also works with different UI fonts.
-    for (const extraHeight of [21, 26, 31]) {
+    // These are the heights between "fits naturally" and "clamps below the
+    // title bar plus its buffer". Using the menu's measured height also works
+    // with different UI fonts.
+    for (const extraHeight of [21, 26, 31].map(h => h + TITLE_BAR_BUFFER)) {
       await page.setViewportSize({ width: 1000, height: Math.ceil(naturalHeight) + extraHeight });
       await expectMenuInsideWindow();
       const frames = await menu.evaluate(async element => {
@@ -152,7 +134,7 @@ test('keeps a stable height near the window-controls band and grows back after r
       // A single successful poll could catch the fitting half of a resize
       // loop. Every sampled frame must fit and the height must stay stable.
       for (const frame of frames) {
-        expect(frame.top).toBeGreaterThanOrEqual(38);
+        expect(frame.top).toBeGreaterThanOrEqual(38 + TITLE_BAR_BUFFER);
         expect(frame.bottom).toBeLessThanOrEqual(frame.viewportHeight - 7);
       }
       expect(Math.max(...frames.map(frame => frame.height)) - Math.min(...frames.map(frame => frame.height))).toBeLessThanOrEqual(1);
