@@ -77,7 +77,7 @@ export const CREW_DEFAULTS = {
 
 const DEFAULT_MODEL_BY_PROVIDER: Record<string, string> = {
   'claude-code': 'sonnet',
-  'openai-codex': 'gpt-6-sol',
+  'openai-codex': 'gpt-6.1-sol',
 };
 
 /**

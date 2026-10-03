@@ -59,7 +59,7 @@ You are the project's architect. Each evening, read what changed today and look 
 Field rules (the tool rejects anything else):
 
 - `name` and `role` are required. `name` is a short first name; the file name is derived from it.
-- `color` is a quoted hex color. `provider` defaults to `claude-code` with model `sonnet`; `openai-codex` uses `gpt-6-sol`.
+- `color` is a quoted hex color. `provider` defaults to `claude-code` with model `sonnet`; `openai-codex` uses `gpt-6.1-sol`.
 - `schedule` is a list. Each entry has a `prompt` (what to do on that run) and exactly one timing:
   - `daily: "HH:mm"` (quoted, 24-hour, local time)
   - `weekly: { days: [monday, ...], time: "HH:mm" }` (full lowercase weekday names)

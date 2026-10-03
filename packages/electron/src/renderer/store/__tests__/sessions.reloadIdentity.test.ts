@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import type { SessionData, TranscriptViewMessage } from '@nimbalyst/runtime/ai/server/types';
-import { loadSessionDataAtom, reloadSessionDataAtom, sessionStoreAtom, preserveReloadIdentity, sessionRegistryAtom, sessionListRootAtom, sessionListWorkspaceAtom } from '../atoms/sessions';
+import { loadSessionDataAtom, reloadSessionDataAtom, sessionStoreAtom, preserveReloadIdentity, sessionRegistryAtom, sessionListRootAtom, sessionListWorkspaceAtom, updateSessionStoreAtom } from '../atoms/sessions';
 import {createStore} from 'jotai';
 import {selectedMachineAtom} from '../atoms/remoteMachines';
 import { TranscriptProjector } from '@nimbalyst/runtime/ai/server/transcript/TranscriptProjector';
@@ -111,6 +111,24 @@ describe('machine-scoped session lists', () => {
     expect(store.get(sessionListRootAtom).map(session => session.id)).toEqual(['remote']);
     store.set(selectedMachineAtom('/repo'), '');
     expect(store.get(sessionListRootAtom).map(session => session.id)).toEqual(['local']);
+  });
+});
+
+describe('updateSessionStoreAtom registry identity', () => {
+  // Token usage arrives every assistant step; a new registry Map repaints the
+  // session list and every session reference in open transcripts.
+  it('keeps the registry Map for updates with no registry fields', () => {
+    const store = createStore();
+    store.set(sessionStoreAtom('session-1'), makeSession());
+    store.set(sessionRegistryAtom, new Map([['session-1', {id: 'session-1', createdAt: 1, updatedAt: 2}]]) as any);
+    const registry = store.get(sessionRegistryAtom);
+
+    store.set(updateSessionStoreAtom, {sessionId: 'session-1', updates: {tokenUsage: {inputTokens: 1, outputTokens: 2, totalTokens: 3}}});
+    expect(store.get(sessionRegistryAtom)).toBe(registry);
+    expect(store.get(sessionStoreAtom('session-1'))?.tokenUsage?.totalTokens).toBe(3);
+
+    store.set(updateSessionStoreAtom, {sessionId: 'session-1', updates: {title: 'Renamed'}});
+    expect(store.get(sessionRegistryAtom).get('session-1')?.title).toBe('Renamed');
   });
 });
 

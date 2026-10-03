@@ -87,7 +87,7 @@ const SEEDS: TemplateSeed[] = [
       role: 'Marketer',
       color: '#e0607e',
       provider: 'openai-codex',
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       personality:
         'Upbeat but allergic to hype. Writes plain, concrete sentences about what a user can now do, and cuts every adjective that does not carry information. Would rather ship one true line than three impressive ones.',
       directive: [
@@ -113,7 +113,7 @@ const SEEDS: TemplateSeed[] = [
       role: 'Social',
       color: '#3dbfa3',
       provider: 'openai-codex',
-      model: 'gpt-6-sol',
+      model: 'gpt-6.1-sol',
       personality:
         'Curious and even-tempered. Reports what people are actually saying with short quotes, separates signal from one loud voice, and never takes the bait in a draft reply.',
       directive: [
