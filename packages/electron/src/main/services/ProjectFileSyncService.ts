@@ -15,15 +15,15 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { createHash } from 'crypto';
 import { logger } from '../utils/logger';
-import { ProjectSyncProvider, type ProjectSyncManifestFile, type ProjectSyncResponse, type ProjectSyncFileUpdate } from '@nimbalyst/runtime/sync';
+import { ProjectSyncProvider, type ProjectSyncManifestFile, type ProjectSyncResponse, type ProjectSyncFileUpdate, type ProjectFilePushOutcome } from '@nimbalyst/runtime/sync';
 import { getPersonalDocSyncConfig } from './SyncManager';
 import { timeStartupPhase } from '../utils/startupTiming';
 import { database } from '../database/PGLiteDatabaseWorker';
 import { dirtyEditorRegistry } from './DirtyEditorRegistry';
 import { getPersonalSessionJwt } from './StytchAuthService';
 import { hashProjectFiles } from './ProjectManifestHasher';
-
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+import { exceedsProjectSyncLimit, OversizedFileWarnings, storedSyncIds } from './projectFileSyncLimits';
+import { keepDivergedRemoteCopy } from './projectFileSyncConflicts';
 
 interface SyncedFileState {
   syncId: string;
@@ -43,6 +43,7 @@ export class ProjectFileSyncService {
   // by absolute path. Resolved when the editor becomes clean.
   private deferredRemoteDeletes = new Map<string, { projectId: string; workspacePath: string; syncId: string; filePath: string }>();
   private cleanUnsubscribe: (() => void) | null = null;
+  private oversizedWarnings = new OversizedFileWarnings();
 
   constructor() {
     // When an editor saves or closes, retry any remote write/delete we deferred
@@ -232,22 +233,13 @@ export class ProjectFileSyncService {
     try {
       const relativePath = path.relative(workspacePath, filePath);
       const syncId = this.syncIdFromPath(relativePath);
-      const content = await fs.readFile(filePath, 'utf-8');
       const stat = await fs.stat(filePath);
+      if (exceedsProjectSyncLimit(stat.size, relativePath)) {
+        this.oversizedWarnings.warn(filePath, stat.size);
+        return;
+      }
+      const content = await fs.readFile(filePath, 'utf-8');
       const title = path.basename(filePath, '.md');
-
-      await this.provider.pushFileContent(
-        encryptedProjectId,
-        syncId,
-        content,
-        relativePath,
-        title,
-        Math.floor(stat.mtimeMs)
-      );
-
-      // The pushed content is now the agreed baseline (durable so the conflict
-      // guard survives a restart).
-      await this.setBaseline(encryptedProjectId, syncId, this.sha256(content), Math.floor(stat.mtimeMs));
 
       // Register newly-created files in the file map so remote deletes/updates
       // from mobile can be applied to the right local path. The map is only
@@ -257,6 +249,19 @@ export class ProjectFileSyncService {
         | { fileMap: Map<string, string>; workspacePath: string }
         | undefined;
       cache?.fileMap.set(syncId, filePath);
+
+      const outcome = await this.provider.pushFileContent(
+        encryptedProjectId,
+        syncId,
+        content,
+        relativePath,
+        title,
+        Math.floor(stat.mtimeMs)
+      );
+
+      // Content the server stored is the agreed baseline (durable so the
+      // conflict guard survives a restart).
+      await this.setBaselinesForStored(encryptedProjectId, outcome, [{ syncId, content, lastModifiedAt: Math.floor(stat.mtimeMs) }]);
     } catch (err) {
       logger.main.error(`[ProjectFileSync] Failed to push file save:`, err);
     }
@@ -328,6 +333,9 @@ export class ProjectFileSyncService {
   // MARK: - Sync Response Handling
 
   private async handleSyncResponse(projectId: string, response: ProjectSyncResponse): Promise<void> {
+    // Pushes whose ack was lost and which the server says it holds are agreed
+    // content; settle them before the diff below consults the baseline.
+    for (const p of response.confirmedPushes ?? []) await this.setBaseline(projectId, p.syncId, p.contentHash, p.lastModifiedAt);
     const cache = (this as any)._fileMapCache?.get(projectId) as { fileMap: Map<string, string>; workspacePath: string } | undefined;
     if (!cache) return;
 
@@ -400,14 +408,13 @@ export class ProjectFileSyncService {
 
       if (filesToPush.length > 0) {
         const networkStart = Date.now();
-        await this.provider!.pushFileBatch(projectId, filesToPush);
-        // The server requested these because the client's copy was newer; after
-        // pushing, both sides agree on the local content. Advance the baseline so
-        // a later legitimate remote edit isn't wrongly rejected as locally-diverged.
-        for (const f of filesToPush) {
-          await this.setBaseline(projectId, f.syncId, this.sha256(f.content), f.lastModifiedAt);
-        }
-        logger.main.info(`[ProjectFileSync] Pushed ${filesToPush.length} files to server in ${Date.now() - networkStart}ms`);
+        const outcome = await this.provider!.pushFileBatch(projectId, filesToPush);
+        // The server requested these because the client's copy was newer; once
+        // it stores them, both sides agree on the local content. Advance the
+        // baseline so a later legitimate remote edit isn't wrongly rejected as
+        // locally-diverged.
+        await this.setBaselinesForStored(projectId, outcome, filesToPush);
+        logger.main.info(`[ProjectFileSync] Pushed ${filesToPush.length} files to server (${outcome.stored.length} stored) in ${Date.now() - networkStart}ms`);
       }
     }
 
@@ -537,6 +544,7 @@ export class ProjectFileSyncService {
           logger.main.warn(
             `[ProjectFileSync] Refusing stale remote overwrite (local mtime ${localMtimeMs} >= remote ${file.lastModifiedAt}): ${file.relativePath}; re-pushing local`,
           );
+          await keepDivergedRemoteCopy(filePath, file, localHash, baseline?.contentHash);
           await this.repushLocalFile(projectId, workspacePath, file.syncId, filePath);
           return;
         }
@@ -548,6 +556,7 @@ export class ProjectFileSyncService {
           logger.main.warn(
             `[ProjectFileSync] Refusing remote overwrite of locally-diverged file: ${file.relativePath}; re-pushing local`,
           );
+          await keepDivergedRemoteCopy(filePath, file, localHash, baseline.contentHash);
           await this.repushLocalFile(projectId, workspacePath, file.syncId, filePath);
           return;
         }
@@ -610,6 +619,18 @@ export class ProjectFileSyncService {
     }
   }
 
+  /** A push only moves the baseline for files the server confirmed it stored (NIM-7337). */
+  private async setBaselinesForStored(
+    projectId: string,
+    outcome: ProjectFilePushOutcome,
+    files: Array<{ syncId: string; content: string; lastModifiedAt: number }>,
+  ): Promise<void> {
+    const stored = storedSyncIds(outcome);
+    for (const f of files) {
+      if (stored.has(f.syncId)) await this.setBaseline(projectId, f.syncId, this.sha256(f.content), f.lastModifiedAt);
+    }
+  }
+
   /** Load the durable baseline for a project into the in-memory cache. */
   private async loadBaseline(projectId: string): Promise<void> {
     try {
@@ -659,7 +680,7 @@ export class ProjectFileSyncService {
       const stat = await fs.stat(filePath);
       const relativePath = path.relative(workspacePath, filePath);
       const title = path.basename(filePath, '.md');
-      await this.provider.pushFileContent(
+      const outcome = await this.provider.pushFileContent(
         projectId,
         syncId,
         content,
@@ -667,7 +688,7 @@ export class ProjectFileSyncService {
         title,
         Math.floor(stat.mtimeMs),
       );
-      await this.setBaseline(projectId, syncId, this.sha256(content), Math.floor(stat.mtimeMs));
+      await this.setBaselinesForStored(projectId, outcome, [{ syncId, content, lastModifiedAt: Math.floor(stat.mtimeMs) }]);
     } catch (err) {
       logger.main.error(`[ProjectFileSync] Failed to re-push local file: ${filePath}`, err);
     }
@@ -750,11 +771,11 @@ export class ProjectFileSyncService {
 
   private async scanMarkdownFiles(dir: string): Promise<string[]> {
     const results: string[] = [];
-    await this.walkDir(dir, results);
+    await this.walkDir(dir, results, dir);
     return results;
   }
 
-  private async walkDir(dir: string, results: string[]): Promise<void> {
+  private async walkDir(dir: string, results: string[], root: string): Promise<void> {
     const basename = path.basename(dir);
 
     // Skip common non-content directories
@@ -778,14 +799,14 @@ export class ProjectFileSyncService {
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        await this.walkDir(fullPath, results);
+        await this.walkDir(fullPath, results, root);
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
         try {
           const stat = await fs.stat(fullPath);
-          if (stat.size <= MAX_FILE_SIZE) {
+          if (!exceedsProjectSyncLimit(stat.size, path.relative(root, fullPath))) {
             results.push(fullPath);
           } else {
-            logger.main.warn(`[ProjectFileSync] Skipping large file: ${entry.name} (${Math.round(stat.size / 1024 / 1024)}MB)`);
+            this.oversizedWarnings.warn(fullPath, stat.size);
           }
         } catch {
           // Skip files we can't stat

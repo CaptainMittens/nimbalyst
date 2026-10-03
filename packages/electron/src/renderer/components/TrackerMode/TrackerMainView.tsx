@@ -111,6 +111,7 @@ import {
 } from './trackerSessionLaunch';
 import { trackTeamAnalyticsEvent } from '../../utils/teamAnalytics';
 import { TrackerQuickAddOverlay } from './TrackerQuickAddOverlay';
+import { confirmTrackerItemDelete } from './confirmTrackerItemDelete';
 import { orgPresenceAtomFamily } from '../../store/atoms/teamInbox';
 import { gitStatusAtom } from '../../store/atoms/gitOperations';
 import type { TeamMemberOption } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/TrackerFieldEditor';
@@ -1154,6 +1155,7 @@ export const TrackerMainView: React.FC<TrackerMainViewProps> = ({
       overrideItems={viewItemsWithPersonalFields}
       onArchiveItems={handleArchiveItems}
       onDeleteItems={handleDeleteItems}
+      confirmDelete={confirmTrackerItemDelete}
       onCopyDeepLink={teamOrgId ? handleCopyDeepLink : undefined}
       searchQuery={searchQuery}
       hasExternalFilters={hasExternalTableFilters}
@@ -1428,6 +1430,7 @@ export const TrackerMainView: React.FC<TrackerMainViewProps> = ({
               overrideItems={viewItemsWithPersonalFields}
               onArchiveItems={handleArchiveItems}
               onDeleteItems={handleDeleteItems}
+              confirmDelete={confirmTrackerItemDelete}
               onCopyDeepLink={teamOrgId ? handleCopyDeepLink : undefined}
               onOpenDocument={handleOpenItemAsDocument}
               searchQuery={searchQuery}

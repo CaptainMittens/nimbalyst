@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 <!-- Bug fixes go here -->
+- Team trackers: sync no longer fails to start in a workspace where one item had built up a backlog of unsent edits too large to load, and an edit that would make a shared item too large to sync is refused with an error instead of appearing saved.
+- Phone sync: a project file over the size limit no longer stops the other files in the same upload from syncing; the oversized file is skipped.
 - Pages: team sync no longer stops with "Data source has been disposed" after the Pages view recovers from an error.
 - Knowledge graph label properties and relation names now load for the open project instead of staying unavailable until a schema change.
 - A Mermaid diagram with a syntax error no longer leaves stray error graphics behind that could push a project window's title bar out of view.

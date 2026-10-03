@@ -58,6 +58,22 @@ vi.mock('../TrackerSyncManager', () => ({
   syncTrackerItem: mockSyncTrackerItem,
   unsyncTrackerItem: mockUnsyncTrackerItem,
   isTrackerSyncActive: mockIsTrackerSyncActive,
+  isTrackerSyncConfigured: () => true,
+  // The wire shape, minus the labels CRDT these tests never exercise.
+  trackerItemToPayload: (item: any) => {
+    const record = trackerItemToRecord(item);
+    return {
+      itemId: record.id,
+      primaryType: record.primaryType,
+      archived: record.archived,
+      bodyVersion: 0,
+      fields: { ...record.fields },
+      labels: {},
+      comments: record.system.comments ?? [],
+      activity: record.system.activity ?? [],
+      system: {},
+    };
+  },
   onTrackerItemApplied: () => () => {},
   onTrackerSyncWorkspaceConnected: () => () => {},
   getTrackerItemForSync: async () => null,
@@ -285,7 +301,7 @@ describe('tracker batch IPC handlers', () => {
     expect(updateInFile).toHaveBeenCalledWith('plan-file', {
       collection: [{ itemId: 'milestone-1' }],
     });
-    expect(updateStore).toHaveBeenCalledWith('bug-store', { priority: 'high' });
+    expect(updateStore).toHaveBeenCalledWith('bug-store', { priority: 'high' }, { beforeWrite: expect.any(Function) });
   });
 
   it('keeps a batched file relationship update canonical in nested customFields', async () => {
@@ -629,6 +645,30 @@ describe('updateTrackerItem sync payload', () => {
       fields: trackerItemToRecord(mockSyncTrackerItem.mock.calls[0][0]).fields,
     };
     expect(pushedPayload.fields.dependsOn).toEqual(editedValue);
+  });
+
+  // Saving first and letting the sync refusal be swallowed left the item marked
+  // synced with nothing queued, so a teammate's next edit overwrote it.
+  it('refuses an edit that would make a shared item too large for its room, before saving it', async () => {
+    mockGlobalRegistryGet.mockReturnValue({ sharing: 'team', draftByDefault: false, fields: [] });
+    mockIsTrackerSyncActive.mockReturnValue(true);
+    const row = makeTrackerRow({ workspace: tempDir });
+    const writes: string[] = [];
+    mockQuery.mockImplementation(async (sql: string) => {
+      const normalized = sql.replace(/\s+/g, ' ').trim();
+      if (normalized.startsWith('SELECT')) return { rows: [row] };
+      writes.push(normalized);
+      return { rows: [row] };
+    });
+
+    const result = await mockIpcHandlers.get('document-service:update-tracker-item')!({}, {
+      itemId: 'bug-001',
+      updates: { description: 'd'.repeat(300_000) },
+    });
+
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('too large') });
+    expect(writes).toEqual([]);
+    expect(mockSyncTrackerItem).not.toHaveBeenCalled();
   });
 });
 

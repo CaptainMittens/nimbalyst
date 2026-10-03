@@ -17,6 +17,7 @@ import type {
 import crypto from 'crypto';
 import { getCurrentIdentity } from './TrackerIdentityService';
 import { createNativeTrackerItem, type NativeTrackerCreatePayload } from './tracker/createNativeTrackerItem';
+import { assertTrackerItemFitsRoom, pushSharedTrackerItem } from './tracker/trackerItemShareGate';
 import { applyCommentMutation, type CommentMutation } from './tracker/commentMutations';
 import { appendActivity } from './tracker/trackerActivity';
 import { COLUMN_ONLY_IDENTITY_KEYS, extractItemCustomFields } from './tracker/trackerRowCustomFields';
@@ -1990,9 +1991,15 @@ export class ElectronDocumentService implements DocumentService {
 
   /**
    * Update fields on a tracker item in PGLite.
-   * Merges provided fields into the existing JSONB data column.
+   * Merges provided fields into the existing JSONB data column. `beforeWrite`
+   * sees the item exactly as it is about to be stored and can refuse it by
+   * throwing; nothing has been written at that point.
    */
-  async updateTrackerItem(itemId: string, updates: Record<string, any>): Promise<TrackerItem> {
+  async updateTrackerItem(
+    itemId: string,
+    updates: Record<string, any>,
+    options: { beforeWrite?: (item: TrackerItem) => void } = {},
+  ): Promise<TrackerItem> {
     const row = await this.resolveTrackerRowForPublicId(itemId, { createProjectionForFullDocument: true });
     if (!row) {
       throw new Error(`Tracker item not found: ${itemId}`);
@@ -2000,15 +2007,10 @@ export class ElectronDocumentService implements DocumentService {
     const data = typeof row.data === 'string' ? JSON.parse(row.data) : (row.data || {});
 
     // Handle typeTags separately -- stored in SQL column, not JSONB
-    if (updates.typeTags !== undefined) {
-      const newTypeTags: string[] = Array.isArray(updates.typeTags) ? updates.typeTags : [row.type];
-      // Ensure primary type is always included
-      if (!newTypeTags.includes(row.type)) newTypeTags.unshift(row.type);
-      await database.query(
-        `UPDATE tracker_items SET type_tags = $1 WHERE id = $2`,
-        [newTypeTags, row.id]
-      );
-    }
+    const newTypeTags: string[] | undefined = updates.typeTags === undefined ? undefined
+      : Array.isArray(updates.typeTags) ? [...updates.typeTags] : [row.type];
+    // Ensure primary type is always included
+    if (newTypeTags && !newTypeTags.includes(row.type)) newTypeTags.unshift(row.type);
 
     // Stamp lastModifiedBy with current identity
     // getCurrentIdentity imported statically at top of file
@@ -2055,6 +2057,10 @@ export class ElectronDocumentService implements DocumentService {
     // survives the sync re-serialization and inverse-write reads find it (NIM-1305).
     nestRelationshipFieldsIntoCustomFields(data, globalRegistry.get(row.type)?.fields ?? [], { writtenFields });
 
+    options.beforeWrite?.(this.rowToTrackerItem({ ...row, data, type_tags: newTypeTags ?? row.type_tags }));
+    if (newTypeTags) {
+      await database.query(`UPDATE tracker_items SET type_tags = $1 WHERE id = $2`, [newTypeTags, row.id]);
+    }
     const result = await database.query<any>(
       `UPDATE tracker_items SET data = $1, updated = NOW() WHERE id = $2 RETURNING *`,
       [JSON.stringify(data), row.id]
@@ -3849,23 +3855,16 @@ export function setupDocumentServiceHandlers(resolver: DocumentServiceResolver) 
         if (oldWorkspace) await pinCitedRevisions(database, oldWorkspace, payload.itemId, updates, globalRegistry.get(oldType)?.fields ?? []);
       }
 
-      const item = await svc.updateTrackerItem(payload.itemId, updates);
+      // A shared item its room would refuse is refused here, before the save.
+      const isShared = (candidate: TrackerItem) =>
+        shouldSyncTrackerItem(getEffectiveTrackerSharingPolicy(candidate.workspace, candidate.type, payload), candidate);
+      const item = await svc.updateTrackerItem(payload.itemId, updates, {
+        beforeWrite: candidate => { if (isShared(candidate)) assertTrackerItemFitsRoom(candidate); },
+      });
       const sharingPolicy = getEffectiveTrackerSharingPolicy(item.workspace, item.type, payload);
 
       if (shouldSyncTrackerItem(sharingPolicy, item)) {
-        const syncActive = isTrackerSyncActive(item.workspace);
-        // console.log('[DocumentService] update-tracker-item sync gate:', { sharingPolicy, workspace: item.workspace, syncActive });
-        try {
-          if (syncActive) {
-            await syncTrackerItem(item);
-            // console.log('[DocumentService] update-tracker-item synced:', item.id);
-          } else {
-            await svc.updateTrackerItemSyncStatus(item.id, 'pending');
-            // console.log('[DocumentService] update-tracker-item skipped: sync not active for workspace');
-          }
-        } catch (syncErr) {
-          console.error('[DocumentService] update-tracker-item sync failed:', syncErr);
-        }
+        await pushSharedTrackerItem(item, itemId => svc.updateTrackerItemSyncStatus(itemId, 'pending'));
       } else {
         // console.log('[DocumentService] update-tracker-item no sync: sharing =', sharingPolicy.sharing);
       }

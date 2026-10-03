@@ -300,6 +300,8 @@ export declare class TrackerSyncEngine {
     private schemaApplyChain;
     private readonly schemaOutbox;
     private readonly rollbackSnapshots;
+    /** Set once `consolidatePendingUpdates` has run for this engine. */
+    private outboxConsolidated;
     private readonly pendingConfigChanges;
     constructor(config: TrackerSyncEngineConfig);
     /**

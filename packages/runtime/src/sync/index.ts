@@ -364,4 +364,5 @@ export type {
   ProjectSyncFileUpdate,
   ProjectSyncManifestFile,
   ProjectSyncResponse,
+  ProjectFilePushOutcome,
 } from './ProjectSyncProvider';

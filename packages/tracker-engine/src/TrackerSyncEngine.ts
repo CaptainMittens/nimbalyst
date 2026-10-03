@@ -76,6 +76,7 @@ import {
 } from './trackerEnvelopeCodec.js';
 import { classifyTrackerClose, type TrackerAccessTermination } from './trackerAccessTermination.js';
 import { TrackerSchemaOutbox } from './trackerSchemaOutbox.js';
+import { generateClientMutationId, parseServerMessage } from './trackerWireHelpers.js';
 import {
   planTrackerIdentityRecovery,
   type StrandedIdentityFacts,
@@ -437,6 +438,9 @@ export class TrackerSyncEngine {
     snapshot: TrackerRowSnapshot;
   }>();
 
+  /** Set once `consolidatePendingUpdates` has run for this engine. */
+  private outboxConsolidated = false;
+
   private readonly pendingConfigChanges = new Map<string, {
     requestedPrefix: string;
     resolve: (result: TrackerConfigSetResult) => void;
@@ -675,6 +679,7 @@ export class TrackerSyncEngine {
     if (itemIds.size !== payloads.length) throw new Error('Tracker mutation batches require unique item ids');
     const applyBatch = this.persistence.applyAndEnqueueBatchAtomically;
     if (!applyBatch) throw new Error('Tracker persistence does not support atomic mutation batches');
+    for (const payload of payloads) encodeTrackerPayloadPlaintext(payload);
 
     const now = Date.now();
     const batchId = generateClientMutationId();
@@ -768,6 +773,12 @@ export class TrackerSyncEngine {
 
   private async runBootstrap(): Promise<void> {
     try {
+      // Before any remote item lands: the store reads the local rows as the
+      // newest local state, which a remote apply would overwrite.
+      if (!this.outboxConsolidated && this.persistence.consolidatePendingUpdates) {
+        await this.persistence.consolidatePendingUpdates().catch(err => this.config.onBootstrapError?.(err));
+        this.outboxConsolidated = true;
+      }
       await this.runSchemaBootstrap();
 
       let cursor: SyncId = await this.persistence.getMaxSyncId();
@@ -817,8 +828,9 @@ export class TrackerSyncEngine {
       this.setStatus('connected');
       this.announcePresence();
 
-      // After bootstrap, replay any persisted-but-unconfirmed mutations.
-      await this.replayPending();
+      // After bootstrap, replay any persisted-but-unconfirmed mutations. A
+      // replay failure must not cost the other lanes their push (NIM-7336).
+      await this.replayPending().catch(err => this.config.onBootstrapError?.(err));
       await this.schemaOutbox.push();
       await this.pushPendingNavigation();
       await this.pushPendingSavedViews();
@@ -1622,6 +1634,11 @@ export class TrackerSyncEngine {
     kind: 'create' | 'update' | 'delete',
     options: { persistedEnqueue?: boolean },
   ): Promise<{ clientMutationId: string }> {
+    // Encode before touching anything: an item the room can never accept must
+    // not get a local apply or an outbox row. It used to get both, and a row
+    // per reconnect piled up to 257 MB (NIM-7336). A host that saves its own
+    // copy first must run the same check before that save.
+    if (payload) encodeTrackerPayloadPlaintext(payload);
     const clientMutationId = generateClientMutationId();
     const now = Date.now();
 
@@ -1873,36 +1890,5 @@ export class TrackerSyncEngine {
       clearInterval(this.pingTimer);
       this.pingTimer = null;
     }
-  }
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-/**
- * Generate a stable client mutation ID. The format is informational; the
- * server treats it as an opaque string echoed back in
- * `trackerMutationAck`.
- */
-function generateClientMutationId(): string {
-  // crypto.randomUUID is available in both browsers and Node 19+, which
-  // covers every platform the engine runs on.
-  const uuid = crypto.randomUUID();
-  return `cm-${uuid}`;
-}
-
-function parseServerMessage(data: unknown): TrackerServerMessage | null {
-  const text =
-    typeof data === 'string'
-      ? data
-      : typeof data === 'object' && data && 'toString' in data
-        ? String(data)
-        : null;
-  if (text === null) return null;
-  try {
-    return JSON.parse(text) as TrackerServerMessage;
-  } catch {
-    return null;
   }
 }

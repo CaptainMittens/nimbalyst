@@ -18,6 +18,7 @@ import { initialTrackerBodyCache } from '../../services/tracker/trackerBodySnaps
 import { applyRelationshipFieldWrites } from '../../services/tracker/relationshipFieldWrite';
 import { pinCitedRevisions } from '../../services/tracker/citationPins';
 import { appendActivity } from '../../services/tracker/trackerActivity';
+import { pushSharedTrackerItem, sharedTrackerItemTooLarge, trackerItemTooLargeForRoom } from '../../services/tracker/trackerItemShareGate';
 import { assignLocalKeysToRows } from '../../services/tracker/localKeyAllocator';
 import { workspaceLocalKeyStore } from '../../services/tracker/workspaceLocalKeyStore';
 import { extractItemCustomFields } from '../../services/tracker/trackerRowCustomFields';
@@ -75,6 +76,7 @@ import {
   issueKeyStatus,
   localIssueKeyResponseMessage,
   TRACKER_TRACKS_EXPLANATION,
+  tooLargeToShareToolResult,
   type BodyWriteFailure,
   type McpToolResult,
 } from './trackerToolResult';
@@ -891,7 +893,7 @@ export const trackerToolSchemas = [
           type: "array",
           items: { type: "object" },
           description:
-            "Merge entries into the project's PREDICATE REGISTRY (claim-stored vocabulary: the verbs a claim or a `predicate: <id>` field uses). Each entry is {id, label, inverseLabel?, subjectKinds: [type|'*'], objectKinds?: [type|'*'], valueShape: entity|text|boolean-assessment|quantity|select, direction: directed|symmetric, transitive?}. An `entity` predicate whose subject and object kinds admit two pages' types is offered as a named relation when one page links the other. MERGES BY ID: an entry replaces the predicate with the same id or is added; predicates you omit are kept. To delete, list ids in `removePredicates`. Removals and narrowing `subjectKinds` are destructive and need `confirmDestructive`. May be sent alone or alongside `labels`/`schema`/`patch`; predicates are applied first. Persisted to .nimbalyst/predicates.yaml.",
+            "Merge entries into the project's PREDICATE REGISTRY: the named relations between typed pages. Each entry is {id, label, inverseLabel?, subjectKinds: [type|'*'], objectKinds?: [type|'*'], valueShape: entity|text|boolean-assessment|quantity|select, direction: directed|symmetric, transitive?}. A relation is `valueShape: entity` with `label` read from the linking page, `inverseLabel` read from the linked page, `subjectKinds` the linking page's types and `objectKinds` the linked page's types (subtypes count through `extends`). It is offered when one typed page links another, and stored on that body link as `rel=<id>`. No qualifiers; no generic relations such as 'related to'. MERGES BY ID: an entry replaces the predicate with the same id or is added; predicates you omit are kept. To delete, list ids in `removePredicates`. Removals and narrowing `subjectKinds` are destructive and need `confirmDestructive`. May be sent alone or alongside `labels`/`schema`/`patch`; predicates are applied first. Persisted to .nimbalyst/predicates.yaml.",
         },
         removePredicates: {
           type: "array",
@@ -901,7 +903,7 @@ export const trackerToolSchemas = [
         labels: {
           type: "object",
           description:
-            "Merge into the project's LABEL REGISTRY (.nimbalyst/labels.yaml). A label is a tag that carries fields; a page may carry several and a label may have several broader labels. Shape: {labels?: [{id, label, pluralLabel?, description?, broader?: [labelId], icon?, color?, role?: page|structure|market-node, properties?: [propertyId|predicateId], expects?: [{property, min?, max?}], factBox?: [propertyId], template?}], properties?: [{id, label, type: string|text|number|date|datetime|select|multiselect|boolean|url|user|relationship|array, options?, qualifiers?, facet?, description?, range?: [labelId], multiValue?}], claimProperties?: {<predicateId>: {range?: [labelId], options?, facet?, description?}}, remove?: {labels?: [id], properties?: [id], claimProperties?: [id]}}. `properties` are FIELD-stored (current value in the item's customFields; stored as {value, qualifiers} when qualifiers are declared); claim-stored vocabulary stays in `predicates`. Properties and predicates share one id namespace. MERGES BY ID: each entry replaces the entry with the same id or is added; entries you omit are kept, so concurrent additions commute. Removing a label or property, removing a property from a label, removing a broader link, retyping a property, or removing an option is destructive and needs `confirmDestructive`. Applied after `predicates`.",
+            "Legacy: merge into the LABEL REGISTRY (.nimbalyst/labels.yaml) of the earlier knowledge graph. Knowledge pages do not use labels; give a page a tracker type and use `predicates` for relations. Send this only to repair a project that already has a label registry. Shape: {labels?: [{id, label, pluralLabel?, description?, broader?: [labelId], icon?, color?, role?, properties?: [propertyId], expects?: [{property, min?, max?}], factBox?: [propertyId], template?}], properties?: [{id, label, type: string|text|number|date|datetime|select|multiselect|boolean|url|user|relationship|array, options?, facet?, description?, range?: [labelId], multiValue?}], claimProperties?: {<predicateId>: {range?, options?, facet?, description?}}, remove?: {labels?: [id], properties?: [id], claimProperties?: [id]}}. `properties` hold a current value in the item's customFields. Properties and predicates share one id namespace. MERGES BY ID: each entry replaces the entry with the same id or is added; entries you omit are kept, so concurrent additions commute. Removing a label or property, removing a property from a label, removing a broader link, retyping a property, or removing an option is destructive and needs `confirmDestructive`. Applied after `predicates`.",
         },
         fileName: {
           type: "string",
@@ -2073,6 +2075,11 @@ export async function handleTrackerCreate(
       params: [id, args.type, typeTags, JSON.stringify(data), workspacePath, syncStatus, contentJson, originSource, originSourceRef, contentJson === null ? 0 : 1],
     }];
     if (contentJson !== null) creationStatements.push(initialTrackerBodyCache(id, contentJson));
+    const tooLarge = shouldSyncTrackerItem(sharingPolicy, data) ? trackerItemTooLargeForRoom(rowToTrackerItem({
+      id, type: args.type, type_tags: typeTags, data: JSON.stringify(data), workspace: workspacePath,
+      source: originSource, source_ref: originSourceRef, created: new Date(), updated: new Date(), last_indexed: new Date(),
+    })) : null;
+    if (tooLarge) return tooLargeToShareToolResult('tracker_create', tooLarge);
     await db.runTransaction(creationStatements);
 
     // Number the row before it is read back, so an agent-created item reports
@@ -2426,6 +2433,8 @@ export async function handleTrackerUpdate(
           });
         }
 
+        const tooLarge = row ? sharedTrackerItemTooLarge(rowToTrackerItem({ ...row, data: JSON.stringify(data) }), workspacePath) : null;
+        if (tooLarge) return tooLargeToShareToolResult('tracker_update', tooLarge);
         if (Object.keys(fileUpdates).length > 0) {
           await docService.updateTrackerItemInFile(publicTrackerId, fileUpdates);
         }
@@ -2469,21 +2478,10 @@ export async function handleTrackerUpdate(
         }
 
         if (row && workspacePath) {
-          const updateModel = globalRegistry.get(refreshedItem.type);
-          const sharingPolicy = getEffectiveTrackerSharingPolicy(workspacePath, refreshedItem.type, updateModel);
+          const sharingPolicy = getEffectiveTrackerSharingPolicy(workspacePath, refreshedItem.type, globalRegistry.get(refreshedItem.type));
           if (shouldSyncTrackerItem(sharingPolicy, refreshedItem)) {
-            if (isTrackerSyncActive(workspacePath)) {
-              try {
-                await syncTrackerItem(refreshedItem);
-              } catch (syncError) {
-                console.error('[MCP Server] tracker_update sync failed:', syncError);
-              }
-            } else {
-              await db.query(
-                `UPDATE tracker_items SET sync_status = 'pending' WHERE id = $1`,
-                [row.id]
-              );
-            }
+            const pushed = { ...refreshedItem, workspace: workspacePath };
+            await pushSharedTrackerItem(pushed, () => db.query(`UPDATE tracker_items SET sync_status = 'pending' WHERE id = $1`, [row!.id]), '[MCP Server] tracker_update');
           }
         }
 
@@ -2717,6 +2715,8 @@ export async function handleTrackerUpdate(
         });
       }
 
+      const tooLarge = sharedTrackerItemTooLarge(rowToTrackerItem({ ...row, data: JSON.stringify(data) }), workspacePath);
+      if (tooLarge) return tooLargeToShareToolResult('tracker_update', tooLarge);
       if (primaryTypeChanged) {
         await db.query(
           `UPDATE tracker_items SET type = $1 WHERE id = $2`,
@@ -2842,21 +2842,10 @@ export async function handleTrackerUpdate(
       const refreshedRow = await resolveTrackerRowByReference(db, row.id, workspacePath);
       const effectiveWorkspacePath = refreshedRow?.workspace || workspacePath;
       if (refreshedRow && effectiveWorkspacePath) {
-        const updateModel = globalRegistry.get(refreshedRow.type);
-        const sharingPolicy = getEffectiveTrackerSharingPolicy(effectiveWorkspacePath, refreshedRow.type, updateModel);
-        if (shouldSyncTrackerItem(sharingPolicy, rowToTrackerItem(refreshedRow))) {
-          if (isTrackerSyncActive(effectiveWorkspacePath)) {
-            try {
-              await syncTrackerItem(rowToTrackerItem(refreshedRow));
-            } catch (syncError) {
-              console.error('[MCP Server] tracker_update sync failed:', syncError);
-            }
-          } else {
-            await db.query(
-              `UPDATE tracker_items SET sync_status = 'pending' WHERE id = $1`,
-              [row.id]
-            );
-          }
+        const sharingPolicy = getEffectiveTrackerSharingPolicy(effectiveWorkspacePath, refreshedRow.type, globalRegistry.get(refreshedRow.type));
+        const refreshedItem = rowToTrackerItem(refreshedRow);
+        if (shouldSyncTrackerItem(sharingPolicy, refreshedItem)) {
+          await pushSharedTrackerItem({ ...refreshedItem, workspace: effectiveWorkspacePath },() => db.query(`UPDATE tracker_items SET sync_status = 'pending' WHERE id = $1`, [row.id]), '[MCP Server] tracker_update');
         }
       }
       // Defect A (NIM-1305): materialize inverse relationship fields on target
@@ -3399,6 +3388,8 @@ export async function handleTrackerAddComment(
     data.lastModifiedBy = authorIdentity;
     appendActivity(data, authorIdentity, 'commented');
 
+    const tooLarge = sharedTrackerItemTooLarge(rowToTrackerItem({ ...row, data: JSON.stringify(data) }), workspacePath);
+    if (tooLarge) return tooLargeToShareToolResult('tracker_add_comment', tooLarge);
     await db.query(
       `UPDATE tracker_items SET data = $1, updated = NOW() WHERE id = $2`,
       [JSON.stringify(data), row.id]

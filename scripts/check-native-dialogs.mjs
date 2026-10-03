@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Fails on native browser dialogs (`confirm`, `alert`, `prompt`) in renderer
- * and collab-client source.
+ * Fails on native browser dialogs (`confirm`, `alert`, `prompt`) in renderer,
+ * runtime, and collab-client source.
  *
  * A native dialog blocks the renderer thread, so Playwright has to install a
  * `page.on('dialog')` handler before every action that might raise one or the
@@ -22,7 +22,7 @@ import ts from 'typescript';
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, '..');
 
-export const SCAN_ROOTS = ['packages/electron/src/renderer', 'packages/collab-client/src'];
+export const SCAN_ROOTS = ['packages/electron/src/renderer', 'packages/runtime/src', 'packages/collab-client/src'];
 const NATIVE_DIALOGS = new Set(['confirm', 'alert', 'prompt']);
 const GLOBAL_OBJECTS = new Set(['window', 'globalThis', 'self']);
 

@@ -37,6 +37,13 @@ export interface EditingCellRef {
   field: EditingField;
 }
 
+/**
+ * Host-supplied confirmation for a destructive delete of `itemCount` items.
+ * Runtime cannot reach the host's dialog system, so the host passes one in;
+ * without it, delete is refused rather than falling back to a native dialog.
+ */
+export type ConfirmTrackerDelete = (itemCount: number) => Promise<boolean>;
+
 export interface UseTrackerRowsOptions {
   /** Sorted items the row UI is rendering (mirrored into an internal ref). */
   items: TrackerRecord[];
@@ -47,6 +54,8 @@ export interface UseTrackerRowsOptions {
   onItemSelect?: (itemId: string) => void;
   /** Bulk delete callback. */
   onDeleteItems?: (itemIds: string[]) => void;
+  /** Confirms a delete before `onDeleteItems` runs. Delete is refused without it. */
+  confirmDelete?: ConfirmTrackerDelete;
   /**
    * Bulk archive callback. `options.record === false` marks a replay, so a
    * recorder wrapped around this callback must not push a fresh undo entry for
@@ -167,6 +176,7 @@ export function useTrackerRows({
   activeTypeFilter,
   onItemSelect,
   onDeleteItems,
+  confirmDelete,
   onArchiveItems,
   onSwitchToFilesMode,
   resolveRecordById,
@@ -793,12 +803,13 @@ export function useTrackerRows({
         case 'Backspace': {
           if (e.metaKey || e.ctrlKey) {
             e.preventDefault();
-            if (selectedIds.size > 0 && onDeleteItems) {
+            if (selectedIds.size > 0 && onDeleteItems && confirmDelete) {
               const ids = Array.from(selectedIds);
-              if (window.confirm(`Delete ${ids.length} item${ids.length > 1 ? 's' : ''}? This cannot be undone.`)) {
+              void confirmDelete(ids.length).then((approved) => {
+                if (!approved) return;
                 onDeleteItems(ids);
                 setSelectedIds(new Set());
-              }
+              });
             }
           }
           break;
@@ -821,7 +832,7 @@ export function useTrackerRows({
 
     node.addEventListener('keydown', handleKeyDown);
     return () => node.removeEventListener('keydown', handleKeyDown);
-  }, [focusedIndex, selectedIds, onItemSelect, onDeleteItems, handleSelectAll, closeContextMenu]);
+  }, [focusedIndex, selectedIds, onItemSelect, onDeleteItems, confirmDelete, handleSelectAll, closeContextMenu]);
 
   // Scroll focused row into view. The RevoGrid table does its own
   // virtualized scrolling, so this only matches the list view's rows.
