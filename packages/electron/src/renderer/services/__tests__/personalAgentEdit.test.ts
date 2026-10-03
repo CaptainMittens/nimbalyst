@@ -1,0 +1,138 @@
+// @vitest-environment node
+/**
+ * Agent edits to Personal pages (Decision 20) through the same entry point as
+ * every other agent edit, `applyAgentDiff`, against the real Personal pages
+ * service on the real SQLite engine. The edit must change the stored body,
+ * leave the pre-edit text in local history, survive a relaunch, and never
+ * overwrite text someone saved between the agent's read and its write.
+ */
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('electron', async () => ({
+  app: {
+    getPath: (await import('../../../../test-stubs/privateUserData')).testApp.getPath,
+    getName: vi.fn(() => 'test'),
+    getVersion: vi.fn(() => '1'),
+    on: vi.fn(),
+  },
+  BrowserWindow: { getAllWindows: () => [] },
+}));
+vi.mock('../../../main/database/initialize', () => ({ getDatabase: () => null }));
+vi.mock('../../../main/HistoryManager', () => ({ historyManager: { createSnapshot: vi.fn() } }));
+// The shared-page routes are not under test; keep their room machinery out.
+vi.mock('../HeadlessCollabDocument', () => ({
+  acquireHeadlessCollabDocument: vi.fn(),
+  readHeadlessCollabDocContent: vi.fn(),
+  HeadlessCollabDocumentError: class extends Error {},
+}));
+vi.mock('../HeadlessCollabDocEdit', () => ({ applyHeadlessCollabDocEdit: vi.fn() }));
+vi.mock('../collabAgentEditRevision', () => ({
+  hasRecentAgentEditRevision: vi.fn(() => true),
+  recordRevisionBeforeAgentEdit: vi.fn(),
+  revisionSourceFromAcquisition: vi.fn(),
+  revisionSourceFromOpenTab: vi.fn(),
+}));
+
+import { SQLiteDatabase } from '../../../main/database/sqlite/SQLiteDatabase';
+import { PersonalPagesService, personalDocHistoryKey } from '../../../main/services/PersonalPagesService';
+import { applyAgentDiff, readCollabDocForAgent } from '../agentDocumentAccess';
+
+const SCHEMA_DIR = path.resolve(__dirname, '../../../main/database/sqlite/schemas');
+const WS = '/ws/personal-agent-edit';
+
+describe('agent edits to Personal pages', () => {
+  let tmp: string;
+  let db: SQLiteDatabase;
+  let service: PersonalPagesService;
+  const history = { createSnapshot: vi.fn(async (..._args: unknown[]) => undefined) };
+  /** Runs once, between the agent's read and its write, when set. */
+  let beforeNextWrite: (() => Promise<void>) | null = null;
+
+  const launch = async () => {
+    db = new SQLiteDatabase({ dbDir: path.join(tmp, 'sqlite-db'), schemaDir: SCHEMA_DIR, slowQueryThresholdMs: 1000, sampleRate: 0 });
+    await db.initialize();
+    service = new PersonalPagesService({ db: () => db, history, notify: () => {} });
+  };
+
+  beforeEach(async () => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nim-personal-agent-edit-'));
+    history.createSnapshot.mockClear();
+    beforeNextWrite = null;
+    await launch();
+    (globalThis as any).window = {
+      electronAPI: {
+        invoke: async (channel: string, ...args: any[]) => {
+          if (channel === 'personal-pages:get-body') return service.getBody(args[0], args[1]);
+          if (channel === 'personal-pages:update-body') {
+            const hook = beforeNextWrite;
+            beforeNextWrite = null;
+            await hook?.();
+            return service.updateBody(args[0], args[1], args[2], args[3]);
+          }
+          if (channel === 'history:create-snapshot') return history.createSnapshot(args[0], args[1], args[2], args[3]);
+          throw new Error(`unexpected channel ${channel}`);
+        },
+      },
+    };
+    await service.command(WS, {
+      type: 'register-document', documentId: 'ideas', title: 'Ideas', documentType: 'markdown', parentFolderId: null,
+      metadata: { metadataVersion: 2, fileExtension: '.md', editorId: 'markdown' },
+    });
+    await service.updateBody(WS, 'ideas', '# Ideas\n\nTables: undecided.\n', 0);
+    history.createSnapshot.mockClear();
+  });
+
+  afterEach(async () => {
+    delete (globalThis as any).window;
+    service.dispose();
+    await db.close();
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('changes the stored body, keeps the old text in history, and survives a relaunch', async () => {
+    expect(await readCollabDocForAgent('personal://ideas', WS)).toEqual({
+      content: '# Ideas\n\nTables: undecided.\n',
+      route: 'headless',
+    });
+
+    const result = await applyAgentDiff('personal://ideas', [
+      { oldText: 'Tables: undecided.', newText: 'Tables: one shared DataTable.' },
+    ], { workspacePath: WS });
+
+    expect(result).toMatchObject({ success: true });
+    expect(history.createSnapshot).toHaveBeenCalledWith(
+      personalDocHistoryKey('ideas'), '# Ideas\n\nTables: undecided.\n', 'pre-apply', 'Before agent edit',
+    );
+    expect(history.createSnapshot).toHaveBeenCalledWith(
+      personalDocHistoryKey('ideas'), '# Ideas\n\nTables: one shared DataTable.\n', 'auto-save', 'Auto-save',
+    );
+
+    service.dispose();
+    await db.close();
+    await launch();
+    expect((await service.getBody(WS, 'ideas'))?.content).toBe('# Ideas\n\nTables: one shared DataTable.\n');
+  });
+
+  it('re-applies the edit on top of text saved between its read and its write', async () => {
+    beforeNextWrite = async () => {
+      const current = await service.getBody(WS, 'ideas');
+      await service.updateBody(WS, 'ideas', `${current!.content}\nTyped meanwhile.\n`, current!.version);
+    };
+
+    const result = await applyAgentDiff('personal://ideas', [
+      { oldText: 'Tables: undecided.', newText: 'Tables: one shared DataTable.' },
+    ], { workspacePath: WS });
+
+    expect(result).toMatchObject({ success: true });
+    expect((await service.getBody(WS, 'ideas'))?.content).toBe('# Ideas\n\nTables: one shared DataTable.\n\nTyped meanwhile.\n');
+  });
+
+  it('reports text that is not on the page instead of writing anything', async () => {
+    const result = await applyAgentDiff('personal://ideas', [{ oldText: 'Not there', newText: 'x' }], { workspacePath: WS });
+    expect(result.success).toBe(false);
+    expect((await service.getBody(WS, 'ideas'))?.version).toBe(1);
+  });
+});

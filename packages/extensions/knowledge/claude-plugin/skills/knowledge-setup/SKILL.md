@@ -1,95 +1,90 @@
 ---
 name: knowledge-setup
-description: Initialize or repair a project's knowledge graph in Nimbalyst trackers -- define the entity, claim, question, finding, and investigation kinds, merge the core vocabulary pack (and the market or spec pack when asked) into the label and predicate registries, create the wiki home page, and install the "How we write this wiki" guide page. Safe to re-run; it never overwrites or deletes. Use when the user wants to start a team wiki or knowledge base, add a vocabulary pack, or check that an existing one is set up.
+description: Set up or check a project's knowledge pages in Nimbalyst Pages -- install the editable "How we write this wiki" guide page, define the team's own page types (and subtypes) and the named relations between them, and report content from the earlier knowledge graph without changing it. Safe to re-run; it never overwrites or deletes. Use when the user wants to start a team wiki or knowledge base, add a type or a relation, or check that an existing setup is complete. To write pages, use the knowledge-graph skill.
 ---
 
 # Knowledge setup
 
-<!-- remote-only
-On the wiki server, `tracker_define_type` and the other tools act on the team project `wiki_status` resolved, and connecting a repository (`wiki_bind_repo` or `wiki_create_project`) already runs this setup there with the core pack. Use this skill when the user asks to check or repair a wiki's setup, or to add the market or spec pack.
--->
+Sets up what the `knowledge-graph` skill writes into. Every step checks what exists first, adds only what is missing, and reports **created**, **already present**, **conflict**, or **needs the person**. Never delete, rename, archive or overwrite anything; stop and ask when a step would.
 
-Sets up everything the `knowledge-graph` skill writes into. Every step checks what exists first, adds only what is missing, and reports each step as **created**, **already present**, or **conflict**. Never delete, rename, or overwrite anything; stop and ask when a step would.
+The base guide is `references/wiki-guide.md` next to this file. Example relations are in `../knowledge-graph/references/relations.yaml`.
 
-The kind definitions are in `../knowledge-graph/references/` (five kind files). The vocabulary is in `../knowledge-graph/references/packs/<pack>/`, each pack a `labels.yaml` (labels, field-stored properties, claim-property extensions) and a `predicates.yaml` (claim-stored verbs). The base wiki guide is `references/wiki-guide.md` next to this file. Copy them; do not paraphrase them.
+## 0. Which section
 
-## 0. Packs
+If the workspace is shared with a team, set up the Team section of Pages and define types with `sharing: team` so teammates see them. Otherwise use the Personal section and `sharing: personal`. Every Pages tool takes the matching `section` (`team` or `personal`).
 
-| Pack | Adds | When |
-| --- | --- | --- |
-| `core` | Labels `area`, `home`, `topic`, `person`, `organization` (and the deprecated `concept`, loadable only); the general relationship verbs. | Always. |
-| `market` | Labels `product`, `market`, `capability`, `technology`, `protocol`, `format`, `connector`; market, maker and competition verbs; dated organization and product facts. | The team tracks the products, companies and markets it decides against. |
-| `spec` | Labels `subsystem`, `feature`, `surface`, `requirement`, `invariant`, `data-store`, `integration`, `wire-protocol`; structure and provenance verbs that point pages at code paths, decisions and sessions. | The wiki is the project's specification. |
+## 1. Look before adding
 
-Always install `core`. Ask the user which of `market` and `spec` to add, unless they already said. A pack is already installed when its first label exists (`market`: `product`; `spec`: `subsystem`); offer only the missing ones.
+Read only; change nothing in this step.
 
-## 1. Kinds
+- `tracker_list_types`: the types that exist, their sharing, and any `extends`.
+- `.nimbalyst/predicates.yaml`: the relations that exist (a missing file means none).
+- **Content from the earlier knowledge graph:** types `entity`, `claim`, `question`, `finding`, `investigation`, `ontology-proposal`, project types that held decisions (`keystone`, `decision-exploration`), `.nimbalyst/labels.yaml`, predicates whose only `subjectKinds` is `entity`, and an `entity` titled "How we write this wiki". Report them as "earlier model, left in place". Do not edit or remove them, do not add labels or vocabulary packs, and never pass `labels` to `tracker_define_type`. Offer the move into pages as a separate job the person starts (`../knowledge-graph/references/migrating-v1.md`).
 
-1. Call `tracker_list_types` and note which of `entity`, `claim`, `question`, `finding`, `investigation` already exist and who owns them (`personal` or `team:<name>`).
-<!-- desktop-only -->
-2. Decide sharing. If the project is shared with a team, define the kinds with `sharing: team` so the web console and teammates see them. Otherwise leave `sharing: personal`. Use the same sharing for all five.
-3. For each missing kind, read its reference file and call `tracker_define_type` with `schema` set to the YAML converted to a JSON object (drop comments; change only `sharing`).
-<!-- /desktop-only -->
-<!-- remote-only
-2. Sharing: nothing to decide. The server stores every kind as a team kind whatever `sharing` says.
-3. For each missing kind, read its reference file and call `tracker_define_type` with `schema` set to the YAML converted to a JSON object (drop comments; change nothing else).
--->
-4. If a kind already exists, compare it to the reference. Missing fields or options (for example `entity.labels`) may be added with a `schema` + `overwrite: true` that keeps every existing field. Never remove, rename, or change the type of an existing field or option, never pass `confirmDestructive` on your own, and never overwrite a kind that differs in an incompatible way. Report each conflict to the user with the field names and stop for that kind.
-<!-- desktop-only -->
-5. Switching an existing personal kind to team needs `promoteExistingItems: true`; ask the user first.
-<!-- /desktop-only -->
+## 2. Guide page
 
-## 2. Vocabulary
+- **Base version:** 4. The base text is `references/wiki-guide.md`, unchanged; its last line names the version.
+- **Find it.** `listPages` for the section, then look for a page titled "How we write this wiki" and read it with `readCollabDoc` at its `uri`.
+- **Missing:** create it with `createSharedDoc` (`section`, `title: How we write this wiki`, no parent, `after` the Home page's node when there is one, `initialContent` = the base text). Read it back at the returned `uri` and confirm the text is there.
+- **Only the earlier guide exists** (an `entity` titled "How we write this wiki"): leave it. Offer to create the new page and carry over the team's own edits that still apply; create it only after the person approves the merged text.
 
-<!-- desktop-only -->
-Read the project's current registries from `.nimbalyst/predicates.yaml` and `.nimbalyst/labels.yaml` at the workspace root (for a team project these are the local copies of the team's registries; a missing file means an empty registry).
-<!-- /desktop-only -->
-<!-- remote-only
-Read the project's current registries from the `predicates` array and the `labels` object in the `tracker_list_types` result (missing means empty). Ignore any `.nimbalyst/*.yaml`: they are not the server's copy.
--->
+If the guide page exists, **never overwrite it**. Compare it with the base, ignoring whitespace:
 
-For `core`, then each chosen pack, in that order, make at most one `tracker_define_type` call carrying both halves. Both arguments merge by id: an entry replaces the entry with its id or is added, and entries you omit are kept. So send only what is new, never an entry the project already has.
+- Same text: "already present, matches base version 4".
+- Different text, version line 4: the team edited it. Report "already present, edited by the team".
+- Different text, older or missing version line: the base changed since it was installed, and the team may also have edited it. Report both.
 
-- **`predicates`:** every predicate in the pack's `predicates.yaml` whose `id` is not in the registry. An existing predicate with the same `id` but a different definition is a conflict: keep it and report it.
-- **`labels.labels`:** every label whose `id` is not in the registry. A label that already exists (a pack may extend one another pack defines, as `market` does with `organization`) is sent only if the pack adds to it: send the existing entry unchanged except `properties`, `factBox` and `expects` extended with the pack's entries it lacks (existing order first). Never change any other key of an existing label.
-- **`labels.properties`:** every field property whose `id` is not in the registry. An existing one that differs is a conflict.
-- **`labels.claimProperties`:** every entry whose predicate id has none yet.
+When it differs, offer a diff and a merge that keeps every team edit and proposes only the base changes that do not conflict. Write it with `applyCollabDocEdit` only after the person approves the merged text. A team that rewrote the guide on purpose may decline; that is final until they ask again.
 
-Predicates are applied before labels in the same call, so a label may name a predicate the call adds. A property id that is already a predicate (or the reverse) is a conflict; report it and leave both alone. Never send `removePredicates` or `labels.remove`. If nothing is missing for a pack, make no call.
+## 3. Types
 
-## 3. Wiki home page
+Define types only when the person asks or agrees. Ask what the team keeps several of and would want in a table. Suggest from what the project already discusses (module, technology, competitor, person are common); the team decides. A type for a single page is not a type.
 
-Look for an `entity` with `kind: home` (`tracker_list` with `type: entity` and `where` on `kind`). If one exists, use it and report it. Otherwise create one: `kind: home`, `labels: [home]`, no `parent`, a title such as "<Project> wiki", and a short body saying what the wiki covers. There is one home page per project; if you find several, report them and use none until the user picks.
+- **Reuse first.** Match on id and display name in `tracker_list_types`. If the project already has a fitting type (for example a `competitor` type), use it.
+- **Define** with `tracker_define_type` and `schema`. Keep it small: `title` plus two to four single-valued fields (select, string, boolean, user, date). Only single-valued fields show in a page header; multi-valued fields show only in tables. No `labels`, `kind` or qualifier fields.
 
-## 4. Guide page
+  ```json
+  {
+    "type": "technology",
+    "displayName": "Technology",
+    "displayNamePlural": "Technologies",
+    "icon": "memory",
+    "color": "#7c3aed",
+    "modes": { "inline": true, "fullDocument": true },
+    "idPrefix": "tech",
+    "idFormat": "ulid",
+    "sharing": "team",
+    "fields": [
+      { "name": "title", "type": "string", "required": true },
+      { "name": "maturity", "type": "select", "options": [
+        { "value": "ga", "label": "Generally available" },
+        { "value": "beta", "label": "Beta" },
+        { "value": "deprecated", "label": "Deprecated" }
+      ] },
+      { "name": "inStack", "type": "boolean" }
+    ],
+    "roles": { "title": "title" }
+  }
+  ```
 
-The guide tells people and agents what belongs in the wiki. It is a wiki page, so it syncs to the team and the web console like any other page, and a team may rewrite it completely.
+- **Subtypes** set `extends: <base type>` and declare only what they add (`{ "type": "library", "extends": "technology", "displayName": "Library", "displayNamePlural": "Libraries" }`). A subtype's pages show in its base type's table and nest inside it in the tree.
+- **Existing types:** never pass `overwrite` without the person's approval, and then keep every existing field and option. Never pass `confirmDestructive` on your own.
+- **Place each new type** where the person wants it with `moveSharedItem` (`kind: type`, `itemId` = the type id, `newParentFolderId` = the parent page, or none for the top of the section). A subtype is not placed; it shows inside its base. Offer two or three sentences for the type's page saying what belongs in it.
 
-- **Base version:** `2`. Bump it whenever `references/wiki-guide.md` changes.
-- **Assemble the text:** `references/wiki-guide.md` holds a section per optional pack between `<!-- pack:<id> -->` and `<!-- /pack:<id> -->` lines. Keep the sections of installed packs, drop the rest, and remove the marker lines. That text is "the base" below.
-- **Find it:** an `entity` whose `aliases` contain `wiki-guide` (include archived items; an archived guide means the team retired it, so report that and do not recreate it).
+## 4. Relations
 
-If there is no guide page, create it:
+Add a relation when the team links two of its types often and the link means one specific thing ("built on", "competes with"). Each one is a predicate with:
 
-- `type: entity`, `title: How we write this wiki`, `kind: topic`, `labels: [topic]`, `parent` set to the home page, `aliases: [wiki-guide]`.
-- `tags: [wiki-guide-base:2]` (the base version it was installed from).
-- `description`: the assembled base, unchanged.
-<!-- desktop-only -->
-- In a team project, publish it if the tracker leaves it as a draft, then read it back with `tracker_get` and confirm it has an issue key and the body.
-<!-- /desktop-only -->
-<!-- remote-only
-- Read it back with `tracker_get` and confirm it has an issue key and the body.
--->
+- `id` (kebab-case), `label`, and `inverseLabel` (how it reads from the other page; the same as `label` when `direction: symmetric`)
+- `subjectKinds`: the types a link can be written on; `objectKinds`: the types it can point at. Use the project's type ids; subtypes are covered through `extends`.
+- `valueShape: entity` and `direction: directed` or `symmetric`. No qualifiers.
 
-If a guide page already exists, **never overwrite it**. Compare its body with the base, ignoring whitespace-only differences, and read its `wiki-guide-base:<n>` tag:
+Copy the shape from `../knowledge-graph/references/relations.yaml`, renamed to the project's types, and send only new ids with `tracker_define_type` (`predicates: [...]`; it merges by id and keeps the rest). Do not add generic relations ("related to", "depends on"): a plain link says that already.
 
-- Same text: report "already present, matches base version <n>".
-- The only difference is the section of a pack installed after the guide was: report "already present, missing the <pack> section".
-- Different text, tag equals the current base version: the team has edited it. Report "already present, edited by the team".
-- Different text, older or missing tag: the base guide has changed since it was installed, and the team may also have edited it. Report both facts.
-
-In the "different" and "missing section" cases, offer the user a diff between their page and the base, and offer a merge: keep every team edit, and propose only the base changes (or the missing pack section) that do not conflict with them. Write the merged body with `tracker_update` (`description`, plus the tag set to the current base version, keeping other tags) only after the user approves the merged text. A team that has replaced the guide on purpose may decline; that is final until they ask again.
+- An existing id with a different definition is a conflict: keep it and report it.
+- Adding `objectKinds` to an existing predicate narrows it and counts as destructive. Propose it to the person; only with their approval pass `confirmDestructive`.
+- Never send `removePredicates`.
 
 ## Report
 
-End with one line per step: packs (installed, added this run), kinds (each kind: created / already present / fields added / conflict), vocabulary (per pack: labels, properties and predicates added, labels extended, or none; conflicts), home page (key), guide page (key and status from step 4).
+End with one line per step: section, earlier-model content found (types, labels file, guide entity), guide page (link and status), types (each: created, already present, conflict, or needs placing), relations (added, already present, conflicts), and what the person still has to do in Pages.

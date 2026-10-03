@@ -846,7 +846,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
             className="pages-mode-empty flex-1 flex items-center justify-center text-sm text-nim-faint"
             data-testid="pages-mode-empty"
           >
-            Open a personal page, or create one with +
+            Open a page, or right-click in the sidebar and choose New page
           </div>
         )}
         {hasTabs && (

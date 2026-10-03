@@ -92,4 +92,29 @@ describe('createDesktopTrackerDataSource', () => {
     })).rejects.toThrow('Refused by main');
     expect(command).toHaveBeenLastCalledWith({ type: 'create-item', item: expect.objectContaining({ id: 'h', sharing: 'personal' }) });
   });
+
+  it('routes a view edit batch: file-backed fields to the file, the rest in each type\'s lane', async () => {
+    const store = createStore();
+    const registry = new TrackerDataModelRegistry();
+    registry.register(entityModel('team'));
+    const fromFile = { ...item('f', 'File'), source: 'frontmatter', system: { ...item('f', 'File').system, documentPath: 'plans/f.md' } } as TrackerRecord;
+    store.set(replaceAllTrackerItemsAtom, [item('a', 'Alpha'), fromFile]);
+    const command = vi.fn(async () => ({ ok: true as const, result: { success: true, results: [] } }));
+    const ipc = { invoke: vi.fn(async () => undefined) };
+    const source = createDesktopTrackerDataSource({ workspacePath: '/ws', store, registry, ipc, writer: { command, getItemRevision: vi.fn() } });
+
+    await source.command({ type: 'update-items', input: { entries: [
+      { itemId: 'a', storeUpdates: { title: 'A' } },
+      { itemId: 'f', storeUpdates: { title: 'F', kanbanSortOrder: 3 } },
+    ] } });
+    expect(command).toHaveBeenLastCalledWith({ type: 'update-items', input: { entries: [
+      { itemId: 'a', storeUpdates: { title: 'A' }, sharing: 'team', draftByDefault: false },
+      { itemId: 'f', fileUpdates: { title: 'F' }, storeUpdates: { kanbanSortOrder: 3 }, sharing: 'team', draftByDefault: false },
+    ] } });
+    expect(ipc.invoke).toHaveBeenCalledWith('document-service:tracker-item-reindex-relationships', { itemIds: ['a', 'f'] });
+
+    command.mockResolvedValueOnce({ ok: true, result: { success: false, results: [{ success: false, error: 'Row refused' }] } } as never);
+    await expect(source.command({ type: 'update-items', input: { entries: [{ itemId: 'a', storeUpdates: { title: 'B' } }] } }))
+      .rejects.toThrow('Row refused');
+  });
 });

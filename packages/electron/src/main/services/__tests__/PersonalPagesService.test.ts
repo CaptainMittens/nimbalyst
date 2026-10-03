@@ -26,6 +26,7 @@ import { SQLiteDatabase } from '../../database/sqlite/SQLiteDatabase';
 import { runMigrations } from '../../database/sqlite/MigrationRunner';
 import { loadBetterSqlite } from '../../database/sqlite/betterSqliteLoader';
 import { PersonalPagesService, personalDocHistoryKey } from '../PersonalPagesService';
+import { PERSONAL_HOME_PAGE_ID } from '../personalPages/personalHomePage';
 
 const SCHEMA_DIR = path.resolve(__dirname, '..', '..', 'database', 'sqlite', 'schemas');
 const WS = '/ws/personal-pages';
@@ -320,6 +321,39 @@ describe('PersonalPagesService', () => {
     expect(await survivors()).toEqual(['b', 'in-b']);
   });
 
+  // Seeded once per workspace: a renamed, edited or deleted Home is never
+  // restored or overwritten on a later launch.
+  it('seeds an editable Home page once per workspace, across launches', async () => {
+    const seeded = new Set<string>();
+    const homeSeed = { seeded: (ws: string) => seeded.has(ws), markSeeded: (ws: string) => { seeded.add(ws); } };
+    const relaunch = async () => {
+      await db?.close();
+      const plain = await open();
+      plain.dispose();
+      return new PersonalPagesService({ db: () => db, history, notify, homeSeed });
+    };
+
+    let service = await relaunch();
+    const first = await service.snapshot(WS);
+    expect(first.items).toEqual([expect.objectContaining({ documentId: PERSONAL_HOME_PAGE_ID, title: 'Home', documentType: 'markdown', parentFolderId: null })]);
+    const body = await service.getBody(WS, PERSONAL_HOME_PAGE_ID);
+    expect(body?.content).toContain('New page');
+    expect(seeded.has(WS)).toBe(true);
+
+    await service.command(WS, { type: 'update-document-title', documentId: PERSONAL_HOME_PAGE_ID, title: 'Start here' });
+    await service.updateBody(WS, PERSONAL_HOME_PAGE_ID, 'My own notes', body!.version);
+    service = await relaunch();
+    expect((await service.snapshot(WS)).items).toEqual([expect.objectContaining({ documentId: PERSONAL_HOME_PAGE_ID, title: 'Start here' })]);
+    expect((await service.getBody(WS, PERSONAL_HOME_PAGE_ID))?.content).toBe('My own notes');
+
+    await service.command(WS, { type: 'remove-document', documentId: PERSONAL_HOME_PAGE_ID });
+    service = await relaunch();
+    expect((await service.snapshot(WS)).items).toEqual([]);
+    // A workspace that already has pages gets its Home too.
+    await service.command('/ws/existing', { type: 'register-document', documentId: 'd1', title: 'Doc', documentType: 'markdown', parentFolderId: null });
+    expect((await service.snapshot('/ws/existing')).items.map((item) => item.documentId).sort()).toEqual(['d1', PERSONAL_HOME_PAGE_ID]);
+  });
+
   it('returns a conflict with the current content on a stale expectedVersion', async () => {
     const service = await open();
     await service.command(WS, { type: 'register-document', documentId: 'd1', title: 'Doc', documentType: 'markdown', parentFolderId: null });
@@ -419,6 +453,13 @@ describe('PersonalPagesService on PGLite', () => {
       expect(after.items.map((doc) => [doc.documentId, doc.parentFolderId])).toEqual([['type-page:task', null]]);
       expect(after.itemPlacements).toEqual([]);
       expect(after.typePlacements.map((placement) => placement.typeId)).toEqual(['task']);
+
+      const seeding = new PersonalPagesService({
+        db: () => db, history: { createSnapshot: vi.fn(async () => undefined) }, notify: vi.fn(),
+        homeSeed: { seeded: () => false, markSeeded: vi.fn() },
+      });
+      expect((await seeding.snapshot(WS)).items.find((doc) => doc.documentId === PERSONAL_HOME_PAGE_ID)).toMatchObject({ title: 'Home' });
+      expect((await seeding.getBody(WS, PERSONAL_HOME_PAGE_ID))?.content).toContain('New page');
     } finally {
       await pglite.close();
     }

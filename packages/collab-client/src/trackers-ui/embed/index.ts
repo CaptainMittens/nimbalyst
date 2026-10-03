@@ -10,3 +10,7 @@ export type { TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
 export { pageTreeAncestors, type PageTreeAncestorsInput, type PageTreeNodeRef } from './pageTreeAncestors';
 // The type page lists what the tree row counts: a type and its subtypes.
 export { typeWithSubtypes } from '../../docs/collabPageTree';
+// Views placed in a page: a link (`placedViewUrl.ts`) with the definition in its title.
+export { LazyPlacedViewEmbed as PlacedViewEmbed } from './LazyPlacedViewEmbed';
+export type { PlacedViewEmbedProps } from './PlacedViewEmbed';
+export { PlacedViewNote } from './PlacedViewNote';

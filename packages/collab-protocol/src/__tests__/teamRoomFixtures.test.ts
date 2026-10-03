@@ -7,6 +7,7 @@ import { expect, it } from 'vitest';
 import type {
   EncryptedDocIndexEntry,
   ItemPlacementNode,
+  PageMarkEntry,
   TeamClientMessage,
   TeamServerMessage,
   TeamState,
@@ -66,7 +67,25 @@ const pageTreeTeam = {
   itemPlacements: [node, childNode],
 } satisfies Omit<TeamState, 'settings'> & Exhaustive<Pick<TeamState, 'folders' | 'pageTree' | 'typePlacements' | 'itemPlacements'>>;
 
+// A decision on a plain page, and an open question in a typed page's body
+// (no project or title: the client resolves the tracker item).
+const decidedMark = {
+  documentId: 'page-1', projectId: 'project-1', title: 'Specs', kind: 'decided',
+  text: 'Storage lives in [Flagship](https://console.nimbalyst.com/x).', plainText: 'Storage lives in Flagship.',
+  by: 'Greg Hinkle', email: 'greg@example.com', on: '2026-09-30', over: 'our own engine', line: 3, offset: 41,
+} satisfies Exhaustive<PageMarkEntry>;
+const openMark = {
+  documentId: 'tracker-content/NIM-42', projectId: null, title: null, kind: 'open',
+  text: 'Pricing is unknown.', plainText: 'Pricing is unknown.', by: 'Spike 6', email: null, on: null, over: null, line: 1, offset: 0,
+} satisfies PageMarkEntry;
+
 const fixtures: Record<string, unknown> = {
+  'pageMarksQuery.json': {
+    type: 'pageMarksQuery', requestId: 'marks-1', kind: 'decided', email: 'greg@example.com', documentIds: ['page-1'],
+  } satisfies Client<'pageMarksQuery'>,
+  'pageMarksResponse.json': {
+    type: 'pageMarksResponse', requestId: 'marks-1', marks: [decidedMark, openMark], status: 'ready',
+  } satisfies Server<'pageMarksResponse'>,
   'itemPlacementIndexSync.json': { type: 'itemPlacementIndexSync' } satisfies Client<'itemPlacementIndexSync'>,
   'itemPlacementSet.json': {
     type: 'itemPlacementSet', itemId: 'NIM-44', projectId: 'project-1', parentId: 'NIM-42', parentKind: 'item', sortOrder: 1,

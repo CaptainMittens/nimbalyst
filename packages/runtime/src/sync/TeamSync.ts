@@ -47,6 +47,7 @@ import type { BoundedPreview } from '@nimbalyst/collab-protocol';
 import { appendSyncClientParams } from './syncClientInfo';
 import { TeamTypePlacementCache, typePlacementQueueKey } from './teamTypePlacements';
 import { TeamItemPlacementCache, itemPlacementQueueKey } from './teamItemPlacements';
+import { TeamPageMarksRequests, type TeamPageMarksFilters, type TeamPageMarksResult } from './teamPageMarks';
 
 // ============================================================================
 // TeamSyncProvider
@@ -95,6 +96,9 @@ export class TeamSyncProvider {
     () => this.config.teamProjectId ?? this.teamState?.metadata?.teamProjectId ?? null,
     () => this.config,
   );
+
+  /** Open `pageMarksQuery` requests. */
+  private readonly pageMarkRequests = new TeamPageMarksRequests();
 
   /** Set by a snapshot from a TeamRoom whose folders were converted into documents. */
   private pageTree = false;
@@ -197,6 +201,7 @@ export class TeamSyncProvider {
     for (const waiter of folderWaiters) waiter(null);
     this.typePlacementEntries.destroy();
     this.itemPlacementEntries.destroy();
+    this.pageMarkRequests.cancelAll();
     const registerWaiters = [...this.registerAckWaiters.values()].flat();
     this.registerAckWaiters.clear();
     // Unconfirmed, not confirmed-failed: a destroyed provider says nothing
@@ -529,6 +534,19 @@ export class TeamSyncProvider {
     return this.itemPlacementEntries.waitForSnapshot(() => this.send({ type: 'itemPlacementIndexSync' }), timeoutMs);
   }
 
+  /**
+   * Decision and open-question marks from the team's pages, read from the
+   * server's marks index (pages this member can read, never trashed ones).
+   * Null while offline or when the server does not answer in time.
+   */
+  queryPageMarks(filters: TeamPageMarksFilters, timeoutMs = 8000): Promise<TeamPageMarksResult | null> {
+    return this.pageMarkRequests.request((message) => {
+      if (this.ws?.readyState !== WebSocket.OPEN) return false;
+      this.send(message);
+      return true;
+    }, filters, timeoutMs);
+  }
+
   // --------------------------------------------------------------------------
   // Message Handling
   // --------------------------------------------------------------------------
@@ -606,6 +624,9 @@ export class TeamSyncProvider {
           break;
         case 'projectAccessChanged':
           this.handleProjectAccessChanged(message);
+          break;
+        case 'pageMarksResponse':
+          this.pageMarkRequests.receive(message);
           break;
         case 'documentCommentNotifyAck':
           // Fire-and-forget: nothing in the client waits on this. Surfacing a

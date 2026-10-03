@@ -33,6 +33,7 @@ import { historyManager, type HistoryManager } from '../HistoryManager';
 import { safeHandle } from '../utils/ipcRegistry';
 import { logger } from '../utils/logger';
 import * as store from './personalPages/personalPagesStore';
+import { seedPersonalHomeOnce, workspaceStateHomeSeedFlags, type PersonalHomeSeedFlags } from './personalPages/personalHomePage';
 
 export interface PersonalPagesSnapshot {
   items: SharedDocument[];
@@ -51,6 +52,8 @@ export interface PersonalPagesDeps {
   db?: () => store.PersonalPagesDb | null;
   history?: Pick<HistoryManager, 'createSnapshot'>;
   notify?: (workspacePath: string) => void;
+  /** Seeds a Home page on a workspace's first snapshot. Absent: no seeding. */
+  homeSeed?: PersonalHomeSeedFlags;
 }
 
 export function personalDocHistoryKey(documentId: string): string {
@@ -85,12 +88,16 @@ export class PersonalPagesService {
   private readonly getDb: () => store.PersonalPagesDb | null;
   private readonly history: Pick<HistoryManager, 'createSnapshot'>;
   private readonly notify: (workspacePath: string) => void;
+  private readonly homeSeed: PersonalHomeSeedFlags | undefined;
+  /** Workspaces whose Home seed was already settled in this process. */
+  private readonly homeChecked = new Set<string>();
   private disposed = false;
 
   constructor(deps: PersonalPagesDeps = {}) {
     this.getDb = deps.db ?? (() => getDatabase() as store.PersonalPagesDb | null);
     this.history = deps.history ?? historyManager;
     this.notify = deps.notify ?? broadcastChanged;
+    this.homeSeed = deps.homeSeed;
   }
 
   dispose(): void {
@@ -107,6 +114,10 @@ export class PersonalPagesService {
   async snapshot(workspacePath: string): Promise<PersonalPagesSnapshot> {
     const ws = requireWorkspace(workspacePath);
     const db = this.db();
+    if (this.homeSeed && !this.homeChecked.has(ws)) {
+      await seedPersonalHomeOnce(db, ws, this.homeSeed);
+      this.homeChecked.add(ws);
+    }
     const [items, typePlacements, itemPlacements] = await Promise.all([
       store.listDocuments(db, ws),
       store.listTypePlacements(db, ws),
@@ -353,7 +364,7 @@ let service: PersonalPagesService | null = null;
 
 export function initPersonalPagesService(): void {
   if (service) return;
-  const instance = new PersonalPagesService();
+  const instance = new PersonalPagesService({ homeSeed: workspaceStateHomeSeedFlags });
   service = instance;
   safeHandle('personal-pages:snapshot', async (_event, workspacePath: string) => {
     return instance.snapshot(workspacePath);

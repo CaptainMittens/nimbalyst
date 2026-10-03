@@ -15,6 +15,8 @@
  * (e.g. `.mockup.html`) are fine; matching is by lowercased suffix.
  */
 
+import { parsePlacedViewUrl } from '../../../core/placedViewUrl';
+
 const embeddable = new Set<string>();
 const changeListeners = new Set<() => void>();
 
@@ -42,6 +44,8 @@ export function getEmbeddableExtensions(): readonly string[] {
 
 export function isEmbeddableUrl(url: string, embedType?: string): boolean {
   if (!url) return false;
+  // A placed view is not a file, so it needs no registered type.
+  if (parsePlacedViewUrl(url) !== null) return true;
   const isCollabReference = /^nimbalyst:\/\/doc\//i.test(url);
   // Collaborative references intentionally have no file suffix in the URL.
   // They are embeddable only when Share to Team preserved a registered type

@@ -49,6 +49,8 @@ import type { CommentsConfig } from './commenting/types';
 import type { FloatingTextToolbarAction } from './plugins/FloatingTextFormatToolbarPlugin/types';
 import { SelectionAlwaysOnDisplay } from './plugins/SelectionAlwaysOnDisplayPlugin';
 import ListEnterFormatClearPlugin from './plugins/ListEnterFormatClearPlugin';
+import PageMarkEditorPlugin, { getPageMarkToolbarActions } from './plugins/PageMarkPlugin/PageMarkEditorPlugin';
+import { CitationSourcesLine } from './plugins/CitationPlugin/CitationSourcesLine';
 import ContentEditable from './ui/ContentEditable';
 import { AnchorProvider } from './context/AnchorContext';
 import { useRuntimeSettings } from './context/RuntimeSettingsContext';
@@ -229,7 +231,11 @@ export default function Editor({ config = DEFAULT_EDITOR_CONFIG }: EditorProps):
   // AIChatIntegrationPlugin, TrackerPlugin, etc.). Each is registered via
   // `registerExtensionEditorComponent` at app startup.
   const extensionEditorComponents = useExtensionEditorComponents();
-  const floatingTextToolbarActions = useCommentToolbarActions(config.comments, editor);
+  const commentToolbarActions = useCommentToolbarActions(config.comments, editor);
+  const floatingTextToolbarActions = useMemo(
+    () => [...commentToolbarActions, ...getPageMarkToolbarActions(editor)],
+    [commentToolbarActions, editor],
+  );
 
   return (
     <>
@@ -283,6 +289,7 @@ export default function Editor({ config = DEFAULT_EDITOR_CONFIG }: EditorProps):
                   {config.documentHeader}
                   <div className="editor">
                     <ContentEditable placeholder={placeholder} />
+                    <CitationSourcesLine />
                     {config.collaboration && (
                       <div
                         ref={cursorsContainerRef as React.RefObject<HTMLDivElement>}
@@ -296,6 +303,7 @@ export default function Editor({ config = DEFAULT_EDITOR_CONFIG }: EditorProps):
             />
             <MarkdownShortcutPlugin />
             <ListEnterFormatClearPlugin />
+            <PageMarkEditorPlugin />
             {isCodeHighlighted && (
               <Suspense fallback={null}>
                 <CodeHighlightPlugin />

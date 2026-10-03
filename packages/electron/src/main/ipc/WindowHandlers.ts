@@ -12,6 +12,7 @@ import { hasFocusedWindow } from '../services/analytics/dailyActiveHeartbeat';
 import { getPackageRoot } from '../utils/appPaths';
 import { resolveImageExtension } from '../utils/imageFormat';
 import { resolveWorkspaceAttachmentStagingDirectory } from '../services/attachments/attachmentStagingRoot';
+import { registerConsoleLinkHandlers, routeConsoleLink } from '../services/consoleLinks/consoleLinkHandlers';
 
 /** Timestamp of last app_foregrounded event, used to throttle to once per 30 minutes */
 let lastForegroundedEventAt = 0;
@@ -61,9 +62,14 @@ export function registerWindowHandlers() {
         };
     });
 
-    // Open external URL in default browser
+    registerConsoleLinkHandlers();
+
+    // Open external URL in default browser. A console link to a page, typed
+    // page, type, view or citation goes to the window first, which opens it
+    // in the app when it can.
     safeHandle('open-external', async (event, url: string) => {
         if (url && typeof url === 'string') {
+            if (routeConsoleLink(url, event.sender)) return;
             await shell.openExternal(url);
         }
     });

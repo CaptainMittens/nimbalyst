@@ -8,11 +8,18 @@
  * document's version history is the undo: the agent edit path records a
  * revision of the pre-edit content first.
  *
+ * Personal pages (`personal-doc://`, the editor path of a `personal://` tab)
+ * follow the shared pages they sit beside: agent edits to pages land directly
+ * and the page's local history is the undo.
+ *
  * Files on disk keep the pending diff, because the person who asked for the
  * edit is the one reviewing it.
  */
 import { isCollabUri } from '@nimbalyst/collab-protocol';
 
+const PERSONAL_PAGE_EDITOR_PREFIX = 'personal-doc://';
+
 export function agentEditsApplyDirectly(documentPath: string | null | undefined): boolean {
-  return typeof documentPath === 'string' && isCollabUri(documentPath);
+  return typeof documentPath === 'string'
+    && (isCollabUri(documentPath) || documentPath.startsWith(PERSONAL_PAGE_EDITOR_PREFIX));
 }

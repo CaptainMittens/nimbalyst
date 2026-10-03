@@ -63,12 +63,13 @@ function renderDocsUIWithHost(
   children: React.ReactNode,
   typePlacements: SharedTypePlacement[] = [],
   pageTree?: { documents: SharedDocument[]; itemPlacements: SharedItemPlacement[] },
+  types: readonly unknown[] = documentTypes,
 ) {
   const docs = pageTree?.documents ?? documents;
   const host = {
     surface: 'web_console',
     documents: {
-      documentTypes: () => documentTypes,
+      documentTypes: () => types,
       onDocumentTypesChanged: () => () => undefined,
     },
     getMembers: async () => [{ memberId: 'member-self', email: 'self@example.test', name: 'Self' }],
@@ -112,6 +113,7 @@ function renderDocsUIWithHost(
     removeItemPlacement: vi.fn(async () => ({ ok: true })),
     updateDocumentTitle: vi.fn(async () => undefined),
     removePage: vi.fn(),
+    createDocument: vi.fn(async () => undefined),
   } as unknown as CollabDocsSession;
 
   const result = render(
@@ -386,6 +388,63 @@ describe('one page tree', () => {
     await waitFor(() => expect(session.removePage).toHaveBeenCalledWith('arch'));
     expect(confirmSpy).not.toHaveBeenCalled();
     confirmSpy.mockRestore();
+  });
+
+  // A new page from empty space, a section header or an empty tree lands at
+  // the section root even while a page is selected.
+  it('offers New page and Place type at the section root from empty space, the header and an empty tree', async () => {
+    const markdown = {
+      documentType: 'markdown', displayName: 'Markdown', defaultExtension: '.md', icon: 'description',
+      editor: { kind: 'lexical' }, capabilities: { localCreate: true, sharedCreate: true }, creation: { defaultContent: '' },
+    };
+    const types = [markdown];
+    const typeResolver = {
+      typeName: () => 'Modules',
+      itemsOfType: () => [],
+      listedTypes: () => [{ typeId: 'module', name: 'Modules' }],
+    };
+    const createPage = async (open: () => Promise<void>, session: CollabDocsSession, name: string) => {
+      await open();
+      const input = await found(() => document.querySelector<HTMLInputElement>('[data-testid="collab-create-name-input"]'));
+      fireEvent.change(input, { target: { value: name } });
+      fireEvent.click(document.querySelector<HTMLElement>('.collab-create-confirm')!);
+      await waitFor(() => expect(session.createDocument).toHaveBeenLastCalledWith(
+        expect.objectContaining({ requestedName: name, parentFolderId: null }),
+      ));
+    };
+    const menuEntries = () => [...document.querySelectorAll('.collab-section-menu button')].map((button) => button.textContent);
+
+    const { container, session } = renderDocsUIWithHost(
+      <CollabSidebar typeResolver={typeResolver} sectionTitle="Team" />,
+      [],
+      { documents: [page('arch', 'Architecture', null)], itemPlacements: [] },
+      types,
+    );
+    fireEvent.click(await found(() => [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture')));
+
+    const tree = container.querySelector<HTMLElement>('.collab-sidebar-tree')!;
+    await createPage(async () => {
+      fireEvent.contextMenu(tree);
+      expect(menuEntries()).toEqual(['New page', 'Place type...']);
+      fireEvent.click(document.querySelector<HTMLElement>('.collab-section-new-page')!);
+    }, session, 'From empty space');
+
+    fireEvent.contextMenu(tree);
+    fireEvent.click(document.querySelector<HTMLElement>('.collab-section-place-type')!);
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-place-type-option')));
+    expect(session.placeType).toHaveBeenCalledWith('module', null, undefined);
+
+    await createPage(async () => {
+      fireEvent.contextMenu(container.querySelector<HTMLElement>('.collab-sidebar-section-header')!);
+      expect(menuEntries()).toEqual(['New page', 'Place type...']);
+      fireEvent.click(document.querySelector<HTMLElement>('.collab-section-new-page')!);
+    }, session, 'From the header');
+
+    cleanup();
+    const empty = renderDocsUIWithHost(<CollabSidebar sectionTitle="Personal" />, [], { documents: [], itemPlacements: [] }, types);
+    await createPage(async () => {
+      fireEvent.click(await found(() => empty.container.querySelector<HTMLElement>('.collab-empty-new-page')));
+    }, empty.session, 'First page');
   });
 
   it('places a type under a page, moves a type from its menu, and reorders types by edge drop', async () => {

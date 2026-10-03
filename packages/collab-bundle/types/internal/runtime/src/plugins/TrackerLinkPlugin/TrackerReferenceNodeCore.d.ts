@@ -7,9 +7,10 @@
  * {@link TrackerReferenceResolver}, so editing or closing the item elsewhere
  * updates every chip pointing at it with no document edit.
  *
- * Serializes to a portable markdown link `[NIM-123](nimbalyst://NIM-123)` via
- * {@link TrackerReferenceTransformer}, so the document stays valid markdown and
- * degrades to a plain link in any other viewer.
+ * Serializes to a portable markdown link via {@link TrackerReferenceTransformer}:
+ * a console link (`https://console.nimbalyst.com/.../trackers/item/NIM-123`) for
+ * references created once the host registered one, `nimbalyst://NIM-123` for
+ * older ones, which keep the form they were written in.
  *
  * React-free: `./TrackerReferenceNode.tsx` registers the React decorator and
  * re-exports this module; headless graphs (collab worker, CLI) import this one
@@ -29,16 +30,22 @@ export type SerializedTrackerReferenceNode = Spread<{
     view?: TrackerReferenceView;
     /** Predicate id of the named relation this link states; absent = plain link. */
     relation?: string | null;
+    /**
+     * The link as written, when it is not `nimbalyst://<referenceKey>`: a
+     * console link. Kept so the body round-trips byte for byte.
+     */
+    href?: string | null;
 }, SerializedLexicalNode>;
 export declare const TrackerReferenceNodeDecorator: import("../../editor/nodes/nodeDecoratorSlot").NodeDecoratorSlot<TrackerReferenceNode>;
 export declare class TrackerReferenceNode extends DecoratorNode<JSX.Element | null> {
     __referenceKey: string;
     __view: TrackerReferenceView;
     __relation: string | null;
+    __href: string | null;
     static getType(): string;
     static clone(node: TrackerReferenceNode): TrackerReferenceNode;
     static importJSON(serializedNode: SerializedTrackerReferenceNode): TrackerReferenceNode;
-    constructor(referenceKey: string, key?: NodeKey, view?: TrackerReferenceView, relation?: string | null);
+    constructor(referenceKey: string, key?: NodeKey, view?: TrackerReferenceView, relation?: string | null, href?: string | null);
     exportJSON(): SerializedTrackerReferenceNode;
     createDOM(config: EditorConfig): HTMLElement;
     updateDOM(prev: TrackerReferenceNode): boolean;
@@ -52,7 +59,16 @@ export declare class TrackerReferenceNode extends DecoratorNode<JSX.Element | nu
     getView(): TrackerReferenceView;
     setView(view: TrackerReferenceView): this;
     getRelation(): string | null;
+    /** The link as written, or null for the `nimbalyst://<referenceKey>` form. */
+    getHref(): string | null;
     setRelation(relation: string | null): this;
 }
-export declare function $createTrackerReferenceNode(referenceKey: string, view?: TrackerReferenceView, relation?: string | null): TrackerReferenceNode;
+/**
+ * `href` is the link as read from markdown or JSON (null for the
+ * `nimbalyst://KEY` form). Leave it undefined for a reference created now: it
+ * then gets the host's link for the key (see `setTrackerReferenceHrefBuilder`),
+ * fixed at creation so every later export, headless ones included, writes the
+ * same link.
+ */
+export declare function $createTrackerReferenceNode(referenceKey: string, view?: TrackerReferenceView, relation?: string | null, href?: string | null): TrackerReferenceNode;
 export declare function $isTrackerReferenceNode(node: LexicalNode | null | undefined): node is TrackerReferenceNode;

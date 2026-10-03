@@ -45,6 +45,10 @@
       "types": "./src/quick-open/index.ts",
       "default": "./src/quick-open/index.ts"
     },
+    "./pages": {
+      "types": "./src/pages/index.ts",
+      "default": "./src/pages/index.ts"
+    },
     "./feedback-ui": {
       "types": "./src/feedback-ui/index.ts",
       "default": "./src/feedback-ui/index.ts"

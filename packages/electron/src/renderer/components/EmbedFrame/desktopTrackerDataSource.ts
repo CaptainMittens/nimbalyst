@@ -25,6 +25,7 @@
  */
 
 import type {
+  TrackerBatchUpdateInput,
   TrackerDataChange,
   TrackerDataCommand,
   TrackerDataCommandResult,
@@ -79,10 +80,15 @@ function canWriteLinks(record: SourceLike): boolean {
 
 function refusal(result: unknown): string | null {
   if (!result || typeof result !== 'object') return null;
-  const answer = result as { success?: unknown; error?: unknown };
+  const answer = result as { success?: unknown; error?: unknown; results?: Array<{ success?: unknown; error?: unknown }> };
   if (answer.success !== false) return null;
-  return typeof answer.error === 'string' && answer.error ? answer.error : 'The change was not saved';
+  // A batch answers per item; the first refused item says why.
+  const error = answer.results?.find((entry) => entry.success === false)?.error ?? answer.error;
+  return typeof error === 'string' && error ? error : 'The change was not saved';
 }
+
+/** Board order is never item content, so it stays in the store even for a file-backed item. */
+const SORT_ORDER_FIELD = 'kanbanSortOrder';
 
 /** The records that differ between two maps, by identity. */
 function diffTrackerRecordMaps(
@@ -111,21 +117,51 @@ export function createDesktopTrackerDataSource({
     return model ? model.sharing ?? 'personal' : hint;
   };
 
+  const assertLinksWritable = (record: TrackerRecord | undefined, itemId: string, updates: Record<string, unknown>) => {
+    if (!isFileBackedRecord(record) || canWriteLinks(record)) return;
+    const fields = registry.get(record!.primaryType)?.fields ?? [];
+    if (Object.keys(updates).some((name) => fields.find((field) => field.name === name)?.type === 'relationship')) {
+      throw new Error(`Links on "${record!.fields.title ?? itemId}" are kept in ${record!.system.documentPath}; edit them there.`);
+    }
+  };
+
+  /** A view's cell edits: each entry routed the way `update-item` routes one item, sent as one call. */
+  const dispatchBatch = async (input: TrackerBatchUpdateInput): Promise<TrackerDataCommandResult> => {
+    const items = store.get(trackerItemsMapAtom);
+    const entries = input.entries.map((entry) => {
+      const record = items.get(entry.itemId);
+      const model = record ? registry.get(record.primaryType) : undefined;
+      const lane = { sharing: laneOf(record?.primaryType, entry.sharing), draftByDefault: model?.draftByDefault ?? entry.draftByDefault ?? false };
+      if (!isFileBackedRecord(record) || !entry.storeUpdates) return { ...entry, ...lane };
+      const { [SORT_ORDER_FIELD]: sortOrder, ...fields } = entry.storeUpdates;
+      assertLinksWritable(record, entry.itemId, fields);
+      return {
+        itemId: entry.itemId,
+        ...(Object.keys(fields).length > 0 || entry.fileUpdates ? { fileUpdates: { ...entry.fileUpdates, ...fields } } : {}),
+        ...(sortOrder !== undefined ? { storeUpdates: { [SORT_ORDER_FIELD]: sortOrder } } : {}),
+        ...lane,
+      };
+    });
+    const outcome = await writer.command({ type: 'update-items', input: { entries } });
+    if (!refusal(outcome.result)) {
+      const invoker = ipc ?? window.electronAPI;
+      void invoker.invoke('document-service:tracker-item-reindex-relationships', { itemIds: entries.map((entry) => entry.itemId) }).catch(() => {});
+    }
+    return outcome;
+  };
+
   const dispatch = async (command: TrackerDataCommand): Promise<TrackerDataCommandResult> => {
     if (command.type === 'create-item') {
       const sharing = laneOf(command.item.type, command.item.sharing);
       return writer.command({ ...command, item: { ...command.item, ...(sharing ? { sharing } : {}) } });
     }
+    if (command.type === 'update-items') return dispatchBatch(command.input);
     if (command.type !== 'update-item') return writer.command(command);
 
     const { itemId, updates } = command.input;
     const record = store.get(trackerItemsMapAtom).get(itemId);
     if (isFileBackedRecord(record)) {
-      const fields = registry.get(record!.primaryType)?.fields ?? [];
-      const writesLink = Object.keys(updates).some((name) => fields.find((field) => field.name === name)?.type === 'relationship');
-      if (writesLink && !canWriteLinks(record)) {
-        throw new Error(`Links on "${record!.fields.title ?? itemId}" are kept in ${record!.system.documentPath}; edit them there.`);
-      }
+      assertLinksWritable(record, itemId, updates);
       const invoker = ipc ?? window.electronAPI;
       const result = await invoker.invoke('document-service:tracker-item-update-in-file', { itemId, updates });
       // The tracker detail pane refreshes backlinks after a file write too.

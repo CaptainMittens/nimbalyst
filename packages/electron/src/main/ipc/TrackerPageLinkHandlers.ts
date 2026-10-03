@@ -1,6 +1,7 @@
 /**
  * IPC for a page's Links section (body links and relationship fields, both
- * directions), plus the remote-body indexer that keeps teammates' links current.
+ * directions), the cross-page marks list, plus the remote-body indexer that
+ * keeps teammates' links current.
  */
 
 import { globalRegistry } from '@nimbalyst/tracker-schema';
@@ -10,6 +11,8 @@ import { safeHandle } from '../utils/ipcRegistry';
 import { onTrackerItemApplied } from '../services/TrackerSyncManager';
 import { readHeadlessBodyMarkdown } from '../services/MainBodyDocService';
 import { startRemoteBodyLinkIndexing } from '../services/tracker/trackerRemoteBodyLinks';
+import { queryPageMarks } from '../services/pageMarks/pageMarksQuery';
+import type { PageMarksQuery } from '@nimbalyst/collab-client/pages';
 
 export function registerTrackerPageLinkHandlers(): void {
   // Workspace-scoped: `workspacePath` is required and every read is constrained
@@ -29,6 +32,19 @@ export function registerTrackerPageLinkHandlers(): void {
         database as any,
       );
       return { success: true, links };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  // Decision and open-question marks across the pages readable locally.
+  safeHandle('page-marks:list', async (_event, payload: { workspacePath?: unknown; query?: PageMarksQuery }) => {
+    if (typeof payload?.workspacePath !== 'string' || !payload.workspacePath) {
+      return { success: false, error: 'workspacePath is required' };
+    }
+    try {
+      const marks = await queryPageMarks(database as any, payload.workspacePath, payload.query ?? {});
+      return { success: true, marks };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }

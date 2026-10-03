@@ -51,6 +51,10 @@
    "types": "./types/quick-open.d.ts",
    "import": "./dist/quick-open.js"
   },
+  "./pages": {
+      "types": "./types/pages.d.ts",
+      "import": "./dist/pages.js"
+    },
   "./inbox": {
       "types": "./types/inbox.d.ts",
       "import": "./dist/inbox.js"

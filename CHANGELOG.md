@@ -10,7 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 <!-- New features go here -->
-- Pages mode: pages nest inside pages, and a tracker type placed in the tree opens as a page with its own prose above a table of every item of that type. Typed pages open as document pages with a header of single-valued fields and can hold their own child pages; pages and typed pages can be moved or reordered by drag, and a plain page, children included, can be given a type in place. A tracker type can extend another type and nests inside it. The Team and Personal sections collapse. Hovering a link in a page offers the named relations allowed between the two pages' types, and a Links section at the bottom lists each relation on one line, incoming ones under their inverse name, with the sentence that made the link.
+- Pages mode: pages nest inside pages, and a tracker type placed in the tree opens as a page with its own prose above a table of every item of that type. Typed pages open as document pages with a header of single-valued fields and can hold their own child pages; pages and typed pages can be moved or reordered by drag, and a plain page, children included, can be given a type in place. A tracker type can extend another type and nests inside it. The Team and Personal sections collapse. Hovering a link in a page offers the named relations allowed between the two pages' types, and a Links section at the bottom lists each relation on one line, incoming ones under their inverse name, with the sentence that made the link. Each section starts with an editable Home page, and New page is offered from a right-click on empty space or a section header.
+- Pages: a sentence can be marked as decided or as an open question, with who and when; a page can cite a person's prompt, answer or comment, or a web source, with a Sources line under the page; and a type's editable table, a 2x2 chart, or a list of decisions and open questions across pages can be placed in any page.
+- Agents can list, create, place, reorder, retype and edit pages in both the Team and Personal sections and cite what you said in the session; each page an agent edits gets a line in the transcript.
 - Pages mode has a Personal section that works with no account or team: personal pages and tracker types are stored on this device.
 
 ### Changed
@@ -19,6 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Confirmations and error messages across the desktop app (deleting files, pages and tracker items, emptying Trash, overwrite and restore prompts, settings) use in-app dialogs and notifications instead of system dialogs.
 - Agent edits to shared pages and typed page bodies now apply directly instead of waiting for Keep or Revert; a version is saved to the page's history before an agent starts editing.
 - Shared Docs mode is now called Pages.
+- New links in pages are console.nimbalyst.com links that open in the desktop app when it can show the page.
+- The Knowledge extension's skills now write pages, typed pages and linked relations instead of claim and finding items.
 - Enlarged transcript images can be zoomed with a two-finger pinch on touch screens or a trackpad pinch.
 - iOS: the session list and session header take less space, with search and filters in the toolbar and the prompt list in the session title's popover.
 

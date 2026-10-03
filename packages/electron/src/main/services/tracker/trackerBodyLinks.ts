@@ -2,12 +2,15 @@
  * Body links as relationship edges.
  *
  * A typed page's body carries links of the form
- * `[label](nimbalyst://KEY "view=card rel=built-on")`. Each distinct
+ * `[label](https://console.nimbalyst.com/org/<org>/project/<p>/trackers/item/KEY "view=card rel=built-on")`
+ * (or `/app/item/KEY` for a local item), and older bodies the Phase 3 form
+ * `[label](nimbalyst://KEY "...")`; both are read. Each distinct
  * (target, relation) becomes one row in the local relationship index with
  * `source_field_id = 'body:<rel>'` (or `'body:link'` for a link with no `rel=`),
  * so the Links section can list a page's relations and the linked page can list
  * them under the inverse name. Pure: the index store resolves keys and persists.
  */
+import { CONSOLE_LINK_ORIGIN, parseConsoleLink } from '@nimbalyst/collab-protocol';
 import type { RelationshipEdge } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 
 /** Prefix that marks a body-derived row; field-derived rows never start with it. */
@@ -19,14 +22,27 @@ export const BODY_LINK_FIELD_PREFIX = 'body:';
  * to main. Keep the two in sync: any run of characters that is not a slash,
  * closing paren, whitespace or quote, excluding a bare reserved host.
  */
-const RESERVED_LINK_HOSTS = ['action', 'auth', 'doc', 'folder', 'install', 'tracker'];
+const RESERVED_LINK_HOSTS = ['action', 'auth', 'console', 'doc', 'folder', 'install', 'tracker'];
 const KEY_PATTERN = `(?!(?:${RESERVED_LINK_HOSTS.join('|')})(?=[)\\s]|$))[^)\\s/"]+`;
 
 /**
- * `[label](nimbalyst://KEY)` or `[label](nimbalyst://KEY "k=v k=v")`. The
- * lookbehind skips a backslash-escaped `\[`, which markdown renders as text.
+ * Candidate console item links; `parseConsoleLink` decides. Mirrors
+ * `TRACKER_REFERENCE_CONSOLE_HREF_PATTERN` in `trackerReferenceHref.ts`.
  */
-const LINK_RE = new RegExp(`(?<!\\\\)\\[([^\\]]*)\\]\\(nimbalyst://(${KEY_PATTERN})(?:\\s+"([^"]*)")?\\)`, 'g');
+const CONSOLE_ITEM_PATTERN = `${CONSOLE_LINK_ORIGIN.replace(/\./g, '\\.')}/(?:org/[^/\\s()"?#]+/project/[^/\\s()"?#]+/trackers/item|app/item)/[^/\\s()"?#]+(?:[?#][^\\s()"]*)?`;
+
+/**
+ * `[label](<console item link or nimbalyst://KEY>)` with an optional
+ * `"k=v k=v"` title. The lookbehind skips a backslash-escaped `\[`, which
+ * markdown renders as text.
+ */
+const LINK_RE = new RegExp(`(?<!\\\\)\\[([^\\]]*)\\]\\((?:nimbalyst://(${KEY_PATTERN})|(${CONSOLE_ITEM_PATTERN}))(?:\\s+"([^"]*)")?\\)`, 'g');
+const LINK_HINT_RE = /nimbalyst:\/\/|console\.nimbalyst\.com\//;
+
+function consoleItemKey(href: string): string | null {
+  const target = parseConsoleLink(href);
+  return target?.kind === 'item' ? target.itemRef : null;
+}
 /** Inline code spans: a run of backticks closed by a run of the same length. */
 const INLINE_CODE_RE = /(`+)[\s\S]*?\1/g;
 /** Fence opener/closer: up to 3 spaces of indent, then 3+ backticks or tildes. */
@@ -83,7 +99,7 @@ function clip(text: string): string {
  */
 export function parseBodyLinks(markdown: string): ParsedBodyLink[] {
   const links: ParsedBodyLink[] = [];
-  if (!markdown || !markdown.includes('nimbalyst://')) return links;
+  if (!markdown || !LINK_HINT_RE.test(markdown)) return links;
   // A link written as an example (fenced block, inline code) is not a relation.
   let fence: string | null = null;
   for (const rawLine of markdown.split(/\r?\n/)) {
@@ -96,7 +112,7 @@ export function parseBodyLinks(markdown: string): ParsedBodyLink[] {
       fence = fenceMatch[1];
       continue;
     }
-    if (!rawLine.includes('nimbalyst://')) continue;
+    if (!LINK_HINT_RE.test(rawLine)) continue;
     // Match against a copy with code spans blanked (same length, so offsets
     // hold); render the sentence from the original text.
     const line = stripLineMarker(rawLine);
@@ -108,10 +124,12 @@ export function parseBodyLinks(markdown: string): ParsedBodyLink[] {
     const found: Array<{ key: string; rel: string | null; at: number }> = [];
     LINK_RE.lastIndex = 0;
     for (let m = LINK_RE.exec(matchable); m; m = LINK_RE.exec(matchable)) {
+      const key = m[2] ?? consoleItemKey(m[3]);
+      if (!key) continue;
       rendered += line.slice(cursor, m.index).replace(OTHER_LINK_RE, '$1');
-      found.push({ key: m[2], rel: relOf(m[3]), at: rendered.length });
+      found.push({ key, rel: relOf(m[4]), at: rendered.length });
       // The reader sees the label; a link with none shows its key.
-      rendered += line.slice(m.index + 1, m.index + 1 + m[1].length).trim() || m[2];
+      rendered += line.slice(m.index + 1, m.index + 1 + m[1].length).trim() || key;
       cursor = m.index + m[0].length;
     }
     rendered += line.slice(cursor).replace(OTHER_LINK_RE, '$1');

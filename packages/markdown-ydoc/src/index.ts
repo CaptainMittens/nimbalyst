@@ -13,13 +13,17 @@ import {
   lexicalYDocToMarkdown,
   markdownToLexicalYUpdate,
 } from '../../runtime/src/sync/markdownYDoc';
+// Decision and open-question marks: the same scanner the editor and the
+// desktop marks list use, so the worker's marks index cannot drift from them.
+import { findPageMarks } from '../../runtime/src/core/pageMarkSyntax';
 
 // The published types are hand-written; fail the typecheck if they drift.
 const _typesMatch: {
   markdownToLexicalYUpdate: typeof Api.markdownToLexicalYUpdate;
   lexicalYDocToMarkdown: typeof Api.lexicalYDocToMarkdown;
-} = { markdownToLexicalYUpdate, lexicalYDocToMarkdown };
+  findPageMarks: typeof Api.findPageMarks;
+} = { markdownToLexicalYUpdate, lexicalYDocToMarkdown, findPageMarks };
 void _typesMatch;
 
-export { lexicalYDocToMarkdown, markdownToLexicalYUpdate };
-export type { MarkdownToLexicalYUpdateOptions } from '../types/index';
+export { findPageMarks, lexicalYDocToMarkdown, markdownToLexicalYUpdate };
+export type { MarkdownToLexicalYUpdateOptions, PageMarkKind, PageMarkOccurrence } from '../types/index';

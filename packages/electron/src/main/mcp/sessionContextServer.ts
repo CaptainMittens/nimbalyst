@@ -23,6 +23,11 @@ import {
   deriveCoachingSignals,
   type CoachingMessageRow,
 } from "./sessionCoachingSignals";
+import {
+  LIST_CITABLE_INPUTS_TOOL_NAME,
+  LIST_CITABLE_INPUTS_TOOL_SCHEMA,
+} from "../services/pageCitations/listCitableInputs";
+import { handleListCitableInputs } from "../services/pageCitations/listCitableInputsHandler";
 
 // ─── Utilities ──────────────────────────────────────────────────────
 
@@ -884,6 +889,7 @@ export const SESSION_CONTEXT_TOOL_SCHEMAS = [
       required: ["sessionId"],
     },
   },
+  LIST_CITABLE_INPUTS_TOOL_SCHEMA,
 ];
 
 /**
@@ -1018,6 +1024,11 @@ export async function dispatchSessionContextTool(
           content: [{ type: "text", text: result }],
           isError: result.startsWith("Error:"),
         };
+      }
+
+      case LIST_CITABLE_INPUTS_TOOL_NAME: {
+        const result = await handleListCitableInputs(args, aiSessionId, workspaceId);
+        return { content: [{ type: "text", text: result }], isError: false };
       }
 
       case "update_session_board": {

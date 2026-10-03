@@ -35,6 +35,7 @@
 import {
   $createParagraphNode,
   $createTextNode,
+  $getNodeByKey,
   $getRoot,
   $getSelection,
   $isElementNode,
@@ -233,6 +234,17 @@ export function $rescanForEmbedUpgrade(): void {
   }
 }
 
+/** The upgrade rule over the direct link children of the given elements only. */
+function $upgradeLinksIn(keys: readonly string[]): void {
+  for (const key of keys) {
+    const node = $getNodeByKey(key);
+    if (!$isParagraphNode(node)) continue;
+    for (const child of node.getChildren()) {
+      if ($isLinkNode(child)) $upgradeParagraphIsolatedLinkToEmbed(child);
+    }
+  }
+}
+
 export const EmbedExtension = defineExtension({
   name: NAME,
   nodes: [EmbeddedFileNode],
@@ -243,13 +255,21 @@ export const EmbedExtension = defineExtension({
     // Collapse bursts onto a trailing timer instead, and skip entirely when
     // no extension has registered an embeddable type (nothing can upgrade).
     let collabRescanTimer: ReturnType<typeof setTimeout> | null = null;
-    const scheduleCollabRescan = () => {
+    // With no file type registered (the browser editor), only a placed view
+    // can upgrade, so walk just the elements remote transactions touched.
+    const dirtyKeys = new Set<string>();
+    const scheduleCollabRescan = (dirty: Iterable<string>) => {
+      const fullWalk = getEmbeddableExtensions().length > 0;
+      if (!fullWalk) for (const key of dirty) dirtyKeys.add(key);
       if (collabRescanTimer !== null) return;
-      if (getEmbeddableExtensions().length === 0) return;
+      if (!fullWalk && dirtyKeys.size === 0) return;
       collabRescanTimer = setTimeout(() => {
         collabRescanTimer = null;
+        const keys = [...dirtyKeys];
+        dirtyKeys.clear();
         editor.update(() => {
-          $rescanForEmbedUpgrade();
+          if (getEmbeddableExtensions().length > 0) $rescanForEmbedUpgrade();
+          else $upgradeLinksIn(keys);
         });
       }, COLLAB_RESCAN_DEBOUNCE_MS);
     };
@@ -258,6 +278,7 @@ export const EmbedExtension = defineExtension({
       () => {
         if (collabRescanTimer !== null) clearTimeout(collabRescanTimer);
         collabRescanTimer = null;
+        dirtyKeys.clear();
       },
       editor.registerNodeTransform(LinkNode, (node) => {
         $upgradeParagraphIsolatedLinkToEmbed(node);
@@ -282,8 +303,8 @@ export const EmbedExtension = defineExtension({
       // inserts and the paragraph ends up duplicated. The debounce narrows
       // the window but does not close it; converging on a single writer needs
       // the embed import to happen at seed time.
-      editor.registerUpdateListener(({ tags }) => {
-        if (tags.has(COLLABORATION_TAG)) scheduleCollabRescan();
+      editor.registerUpdateListener(({ tags, dirtyElements }) => {
+        if (tags.has(COLLABORATION_TAG)) scheduleCollabRescan(dirtyElements.keys());
       }),
       editor.registerCommand(
         KEY_TAB_COMMAND,

@@ -536,6 +536,8 @@ export interface WorkspaceState {
   remoteSessionDrafts?: Record<string, { text: string; options?: import("@nimbalyst/runtime/sync/types").RemoteTurnOptions; attachments: import("@nimbalyst/runtime/ai/server/types").ChatAttachment[] }>;
   /** Explicit Cloudflare choices for this project; authentication stays in Wrangler. */
   cloudflareSandboxSelection?: { profileName: string; accountId: string | null };
+  /** When the Personal Home page was seeded; set once so a removed Home stays removed. */
+  personalPagesHomeSeededAt?: number;
   workspacePath: string;
   /**
    * Additional top-level folders attached to this workspace, as absolute paths.

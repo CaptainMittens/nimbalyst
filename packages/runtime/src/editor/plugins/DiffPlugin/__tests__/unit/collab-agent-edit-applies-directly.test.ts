@@ -95,6 +95,13 @@ describe('agent edits by document kind', () => {
     expect(states).toContain('removed');
   });
 
+  it('an open Personal page gets final text, like a shared page', () => {
+    const editor = applyAgentEdit('personal-doc://ideas');
+
+    expect(diffStates(editor)).toEqual([]);
+    expect(markdown(editor)).toContain('Ship the beta on Monday.');
+  });
+
   it('a markdown file on disk still gets pending diff nodes for review', () => {
     const editor = applyAgentEdit('/workspace/notes/plan.md');
 

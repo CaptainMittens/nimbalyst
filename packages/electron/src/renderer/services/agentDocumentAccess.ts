@@ -35,6 +35,9 @@ import {
   revisionSourceFromAcquisition,
   revisionSourceFromOpenTab,
 } from './collabAgentEditRevision';
+import { applyPersonalPageAgentEdit, readPersonalPageForAgent } from './personalAgentEdit';
+import { isPersonalPageUri } from '../../shared/personalPageUri';
+import { agentPageTitle } from '../utils/agentEditedPage';
 
 export type CollabDocAccessRoute = 'mounted' | 'headless';
 
@@ -47,6 +50,8 @@ export interface AgentDiffResult {
   success: boolean;
   error?: string;
   code?: string;
+  /** The edited page's title, when it is a page this window can name. */
+  title?: string;
 }
 
 export interface AgentDiffOptions {
@@ -67,6 +72,9 @@ export async function readCollabDocForAgent(
   documentUri: string,
   workspacePath: string | null | undefined,
 ): Promise<CollabDocReadResult> {
+  if (isPersonalPageUri(documentUri)) {
+    return { content: await readPersonalPageForAgent(documentUri, workspacePath), route: 'headless' };
+  }
   if (editorRegistry.has(documentUri)) {
     return { content: editorRegistry.getContent(documentUri), route: 'mounted' };
   }
@@ -128,6 +136,23 @@ export async function applyAgentDiff(
   replacements: TextReplacement[],
   options: AgentDiffOptions = {},
 ): Promise<AgentDiffResult> {
+  const result = await applyAgentDiffToTarget(targetFilePath, replacements, options);
+  if (!result.success || !(isCollabUri(targetFilePath) || isPersonalPageUri(targetFilePath))) return result;
+  const title = agentPageTitle(targetFilePath, options.workspacePath);
+  return title ? { ...result, title } : result;
+}
+
+async function applyAgentDiffToTarget(
+  targetFilePath: string,
+  replacements: TextReplacement[],
+  options: AgentDiffOptions,
+): Promise<AgentDiffResult> {
+  if (isPersonalPageUri(targetFilePath)) {
+    return applyPersonalPageAgentEdit(targetFilePath, replacements, {
+      workspacePath: options.workspacePath,
+      requestId: options.requestId,
+    });
+  }
   const isCollab = isCollabUri(targetFilePath);
   if (!isCollab && !targetFilePath.endsWith('.md')) {
     return {

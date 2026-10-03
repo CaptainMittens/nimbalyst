@@ -15,10 +15,13 @@
  * future `nimbalyst://action` with no path cannot be mistaken for a key.
  */
 
+import { CONSOLE_LINK_ORIGIN, parseConsoleLink } from '@nimbalyst/collab-protocol';
+
 /** Hosts owned by the deep-link router; never tracker keys. */
 const RESERVED_LINK_HOSTS = new Set([
   'action',
   'auth',
+  'console',
   'doc',
   'folder',
   'install',
@@ -39,4 +42,52 @@ const TRACKER_REFERENCE_KEY_RE = new RegExp(
 export function isTrackerReferenceKey(value: string): boolean {
   if (!TRACKER_REFERENCE_KEY_RE.test(value)) return false;
   return !RESERVED_LINK_HOSTS.has(value.toLowerCase());
+}
+
+const URN_SCHEME = 'nimbalyst://';
+const URL_SEGMENT = String.raw`[^/\s()"?#]+`;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * A console link to a typed page, the form new references are written in:
+ * `https://console.nimbalyst.com/org/<org>/project/<project>/trackers/item/<KEY>`
+ * for a team item, `https://console.nimbalyst.com/app/item/<KEY>` for a local
+ * one. A trailing query or hash is allowed; links to pages, types and views
+ * are not tracker references. `consoleLinks.ts` in collab-protocol owns the
+ * shape; this pattern only finds candidates, which `trackerReferenceKeyFromHref`
+ * confirms through `parseConsoleLink`.
+ */
+export const TRACKER_REFERENCE_CONSOLE_HREF_PATTERN = `${escapeRegExp(CONSOLE_LINK_ORIGIN)}/(?:org/${URL_SEGMENT}/project/${URL_SEGMENT}/trackers/item|app/item)/${URL_SEGMENT}(?:[?#][^\\s()"]*)?`;
+
+/**
+ * The reference key a link points at: `nimbalyst://KEY` (the Phase 3 form,
+ * still read everywhere) or a console item link. Null for any other href.
+ */
+export function trackerReferenceKeyFromHref(href: string): string | null {
+  const trimmed = href.trim();
+  if (trimmed.startsWith(URN_SCHEME)) {
+    const key = trimmed.slice(URN_SCHEME.length);
+    return isTrackerReferenceKey(key) ? key : null;
+  }
+  const target = parseConsoleLink(trimmed);
+  return target?.kind === 'item' ? target.itemRef : null;
+}
+
+/**
+ * Builds the link a newly created reference is written with. The host
+ * registers it once it knows its team (the console link to the item);
+ * without one, a new reference is written as `nimbalyst://KEY`.
+ */
+let hrefBuilder: ((referenceKey: string) => string | null) | null = null;
+
+export function setTrackerReferenceHrefBuilder(builder: ((referenceKey: string) => string | null) | null): void {
+  hrefBuilder = builder;
+}
+
+/** The href for a new reference, or null to write the `nimbalyst://KEY` form. */
+export function buildTrackerReferenceHref(referenceKey: string): string | null {
+  return hrefBuilder?.(referenceKey) ?? null;
 }

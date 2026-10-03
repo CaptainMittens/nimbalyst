@@ -9,6 +9,13 @@ import { findWindowForFilePath, findWindowIdForWorkspacePath, workspaceToWindowM
 import { compressImageIfNeeded } from "../mcpImageCompression";
 import { requestFromRenderer } from "../rendererRequest";
 import { isFileInWorkspaceOrWorktree } from "../../utils/workspaceDetection";
+import {
+  describeTypedPage,
+  isAgentPageUri,
+  pageUpdatedText,
+  personalTypedPageError,
+  typedPageItemId,
+} from "./agentPageTargets";
 
 type McpToolResult = {
   content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
@@ -52,14 +59,14 @@ export function getEditorToolSchemas(sessionId: string | undefined) {
     {
       name: "readCollabDoc",
       description:
-        "Read the current contents of a shared collaborative document (collab:// URI). Use this whenever you need to see the document text — the filesystem Read tool does NOT work for collab:// URIs because the document lives in Yjs, not on disk. Works whether or not the document is open in a tab; the content comes from the shared document itself, so it reflects what every collaborator currently has.",
+        "Read the current contents of a shared collaborative document (collab:// URI). Use this whenever you need to see the document text — the filesystem Read tool does NOT work for collab:// URIs because the document lives in Yjs, not on disk. Works whether or not the document is open in a tab; the content comes from the shared document itself, so it reflects what every collaborator currently has. Also reads Personal pages: personal://<documentId>, and a Personal typed page's body at personal://tracker-content/<itemId>.",
       inputSchema: {
         type: "object",
         properties: {
           filePath: {
             type: "string",
             description:
-              "The collab:// URI of the shared document to read (e.g. 'collab://org:abc:doc:xyz').",
+              "The collab:// URI of the shared document to read (e.g. 'collab://org:abc:doc:xyz'), or a personal:// Personal page URI.",
           },
           includeDecisionState: {
             type: "boolean",
@@ -72,14 +79,14 @@ export function getEditorToolSchemas(sessionId: string | undefined) {
     {
       name: "applyCollabDocEdit",
       description:
-        "Apply text replacements to a collaborative shared document (collab:// URI). Use this when the target is a shared/collaborative document — filesystem Edit/Write will NOT propagate via Yjs and will not reach other collaborators. Works whether or not the document is open in a tab, and other connected users see the change in realtime. Call readCollabDoc first to see the current content before editing.",
+        "Apply text replacements to a collaborative shared document (collab:// URI). Use this when the target is a shared/collaborative document — filesystem Edit/Write will NOT propagate via Yjs and will not reach other collaborators. Works whether or not the document is open in a tab, and other connected users see the change in realtime. Also edits Personal pages: personal://<documentId>, and a Personal typed page's body at personal://tracker-content/<itemId>. Call readCollabDoc first to see the current content before editing.",
       inputSchema: {
         type: "object",
         properties: {
           filePath: {
             type: "string",
             description:
-              "The collab:// URI of the shared document to modify (e.g. 'collab://org:abc:doc:xyz').",
+              "The collab:// URI of the shared document to modify (e.g. 'collab://org:abc:doc:xyz'), or a personal:// Personal page URI.",
           },
           replacements: {
             type: "array",
@@ -291,15 +298,21 @@ export async function handleApplyDiff(
     };
   }
 
-  // A shared document is addressable whether or not it is on screen; a file on
-  // disk still has to be resolved through the window that owns it.
-  const targetWindow = isCollabUri(targetFilePath)
+  const personalError = await personalTypedPageError(targetFilePath, workspacePath);
+  if (personalError) {
+    return { content: [{ type: "text", text: personalError }], isError: true };
+  }
+
+  // A page is addressable whether or not it is on screen; a file on disk still
+  // has to be resolved through the window that owns it.
+  const isPage = isAgentPageUri(targetFilePath);
+  const targetWindow = isPage
     ? await resolveCollabDocWindow(targetFilePath, workspacePath)
     : await findWindowForFilePath(targetFilePath);
   if (targetWindow) {
-    // applyDiff supports markdown files on disk (.md) and collaborative
-    // shared documents addressed by collab:// URIs.
-    if (!targetFilePath.endsWith(".md") && !isCollabUri(targetFilePath)) {
+    // applyDiff supports markdown files on disk (.md), collaborative shared
+    // documents (collab://) and Personal pages (personal://).
+    if (!targetFilePath.endsWith(".md") && !isPage) {
       return {
         content: [
           {
@@ -322,7 +335,7 @@ export async function handleApplyDiff(
       }
     }
 
-    const outcome = await requestFromRenderer<{ success?: boolean; error?: string }>(
+    const outcome = await requestFromRenderer<{ success?: boolean; error?: string; title?: string }>(
       targetWindow,
       "mcp:applyDiff",
       {
@@ -341,12 +354,20 @@ export async function handleApplyDiff(
     }
 
     const success = outcome.response?.success ?? false;
+    let successText = `Successfully applied diff to ${targetFilePath}`;
+    if (success && isPage) {
+      // The transcript's "Updated <page>" line reads the title from this text.
+      const typedItemId = typedPageItemId(targetFilePath);
+      const title = outcome.response?.title
+        ?? (typedItemId ? (await describeTypedPage(typedItemId, workspacePath).catch(() => null))?.title : undefined);
+      successText = pageUpdatedText(targetFilePath, title);
+    }
     return {
       content: [
         {
           type: "text",
           text: success
-            ? `Successfully applied diff to ${targetFilePath}`
+            ? successText
             : `Failed to apply diff: ${outcome.response?.error || "Unknown error"}`,
         },
       ],
@@ -393,12 +414,12 @@ export async function handleReadCollabDoc(
   workspacePath?: string,
 ): Promise<McpToolResult> {
   const targetFilePath = args?.filePath;
-  if (!isCollabUri(targetFilePath)) {
+  if (!isAgentPageUri(targetFilePath)) {
     return {
       content: [
         {
           type: "text",
-          text: `Error: readCollabDoc requires a collab:// URI. Got: ${targetFilePath ?? "(missing)"}.`,
+          text: `Error: readCollabDoc requires a collab:// or personal:// URI. Got: ${targetFilePath ?? "(missing)"}.`,
         },
       ],
       isError: true,
@@ -458,12 +479,12 @@ export async function handleApplyCollabDocEdit(
   workspacePath?: string,
 ): Promise<McpToolResult> {
   const targetFilePath = args?.filePath;
-  if (!isCollabUri(targetFilePath)) {
+  if (!isAgentPageUri(targetFilePath)) {
     return {
       content: [
         {
           type: "text",
-          text: `Error: applyCollabDocEdit requires a collab:// URI. Got: ${targetFilePath ?? "(missing)"}. For filesystem files, use Edit instead.`,
+          text: `Error: applyCollabDocEdit requires a collab:// or personal:// URI. Got: ${targetFilePath ?? "(missing)"}. For filesystem files, use Edit instead.`,
         },
       ],
       isError: true,

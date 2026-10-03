@@ -220,6 +220,8 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       await expect(page.getByTestId('collab-sidebar-section-personal')).toContainText('Personal');
       await expect(page.getByTestId('pages-sidebar-team-note')).toBeVisible();
       await expect(page.getByTestId('collab-sidebar-section-team')).toHaveCount(0);
+      // The seeded Personal Home page.
+      await expect(namedPageRow(page, 'Home')).toBeVisible({ timeout: 10_000 });
       // Give a failed scope resolution time to surface before asserting its absence.
       await page.waitForTimeout(1_500);
       await expect(page.locator('.error-toast--error')).toHaveCount(0);
@@ -284,6 +286,8 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       const box = await tree.boundingBox();
       if (!box) throw new Error('Personal tree has no box');
       await page.mouse.click(box.x + box.width / 2, box.y + box.height - 12, { button: 'right' });
+      // Empty tree space opens New page / Place type...
+      await page.locator('.collab-section-place-type').click();
       const menu = page.locator('.collab-place-type-menu');
       await expect(menu).toBeVisible();
       const options = await menu.locator('.collab-place-type-option').allInnerTexts();

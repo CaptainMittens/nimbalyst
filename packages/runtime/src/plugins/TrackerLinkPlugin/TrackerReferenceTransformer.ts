@@ -1,10 +1,14 @@
 /**
  * Markdown transformer for tracker references.
  *
- * Exports `TrackerReferenceNode` as a portable markdown link
- * `[NIM-123](nimbalyst://NIM-123)` and imports any `nimbalyst://<key>` link
- * back into a `TrackerReferenceNode`. The label is display-only; the canonical
- * reference key is the URN path after `nimbalyst://`.
+ * Exports `TrackerReferenceNode` as a portable markdown link and imports two
+ * link forms back into a `TrackerReferenceNode`: a console item link
+ * (`https://console.nimbalyst.com/org/<org>/project/<p>/trackers/item/NIM-123`,
+ * or `/app/item/<key>` for a local item), which new references are written
+ * as, and `[NIM-123](nimbalyst://NIM-123)`, which older bodies keep until the
+ * reference is replaced. The node keeps the link it was read with, so either
+ * form round-trips byte for byte. The label is display-only; the reference
+ * key comes from the link.
  * The title attribute holds space-separated `k=v` tokens: `view=` (omitted for
  * the default chip) then `rel=<predicateId>` (omitted for a plain link), e.g.
  * `[NIM-1](nimbalyst://NIM-1 "view=card rel=built-on")`. Import accepts either
@@ -24,10 +28,14 @@ import {
   normalizeTrackerReferenceRelation,
   normalizeTrackerReferenceView,
 } from './TrackerReferenceNodeCore';
-import { TRACKER_REFERENCE_KEY_PATTERN } from './trackerReferenceHref';
+import {
+  TRACKER_REFERENCE_CONSOLE_HREF_PATTERN,
+  TRACKER_REFERENCE_KEY_PATTERN,
+  trackerReferenceKeyFromHref,
+} from './trackerReferenceHref';
 
 const TRACKER_REFERENCE_IMPORT_REGEXP = new RegExp(
-  String.raw`(?<!!)\[([^\]]+)\]\(nimbalyst:\/\/(${TRACKER_REFERENCE_KEY_PATTERN})(?:\s+(?:"([^"]*)"|'([^']*)'|\(([^()]*)\)))?\s*\)`,
+  String.raw`(?<!!)\[([^\]]+)\]\((nimbalyst:\/\/(${TRACKER_REFERENCE_KEY_PATTERN})|${TRACKER_REFERENCE_CONSOLE_HREF_PATTERN})(?:\s+(?:"([^"]*)"|'([^']*)'|\(([^()]*)\)))?\s*\)`,
 );
 function titleToken(title: string | undefined, name: string): string | undefined {
   return title?.match(new RegExp(String.raw`(?:^|\s)${name}=([^\s]+)(?:\s|$)`))?.[1];
@@ -51,18 +59,22 @@ export const TrackerReferenceTransformer: TextMatchTransformer = {
       ...(relation ? [`rel=${relation}`] : []),
     ];
     const title = tokens.length ? ` "${tokens.join(' ')}"` : '';
-    return `[${key}](${TRACKER_REFERENCE_URN_SCHEME}${key}${title})`;
+    return `[${key}](${node.getHref() ?? `${TRACKER_REFERENCE_URN_SCHEME}${key}`}${title})`;
   },
   // Match only tracker issue keys and local tracker URNs. Other nimbalyst://
   // namespaces (including action links) must remain ordinary links.
   importRegExp: TRACKER_REFERENCE_IMPORT_REGEXP,
   regExp: TRACKER_REFERENCE_REGEXP,
   replace: (textNode, match) => {
-    const [, , referenceKey, doubleQuotedTitle, singleQuotedTitle, parenthesizedTitle] = match;
+    const [, , href, urnKey, doubleQuotedTitle, singleQuotedTitle, parenthesizedTitle] = match;
+    // The console pattern only finds candidates; the parser decides.
+    const referenceKey = urnKey ?? trackerReferenceKeyFromHref(href);
+    if (!referenceKey) return;
     const title = doubleQuotedTitle ?? singleQuotedTitle ?? parenthesizedTitle;
     const view = normalizeTrackerReferenceView(titleToken(title, 'view'));
     const relation = normalizeTrackerReferenceRelation(titleToken(title, 'rel'));
-    textNode.replace($createTrackerReferenceNode(referenceKey, view, relation));
+    // null keeps the `nimbalyst://KEY` form; a console link is kept as written.
+    textNode.replace($createTrackerReferenceNode(referenceKey, view, relation, urnKey ? null : href));
   },
   trigger: ')',
   type: 'text-match',

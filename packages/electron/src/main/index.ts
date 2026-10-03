@@ -328,6 +328,7 @@ import { TrayManager } from './tray/TrayManager';
 import { pathToFileURL } from 'url';
 import { registerLinuxAppImageProtocolHandler } from './services/LinuxProtocolRegistration';
 import { installWindowOpenGuard } from './window/windowOpenGuard';
+import { openConsoleDeepLink } from './services/consoleLinks/consoleLinkHandlers';
 import { resolveClaudeConfigDir } from '@nimbalyst/runtime/ai/server/providers/claudeCode/claudeConfigDir';
 import { parseConversationDeepLink } from '../shared/conversationDeepLinks';
 import {
@@ -1052,6 +1053,9 @@ async function handleDeepLink(url: string): Promise<void> {
         // port matches the pending-flow ledger.
         if (parsed.host === 'auth' && parsed.pathname === '/callback') {
             await handleAuthCallbackUrl(url);
+        } else if (parsed.host === 'console') {
+            // A console link the web console handed back: nimbalyst://console/<console path>
+            openConsoleDeepLink(url, getMostRecentlyFocusedWorkspaceWindow());
         } else if (parsed.host === 'install' || parsed.pathname?.startsWith('/install/')) {
             // Handle extension install: nimbalyst://install/com.nimbalyst.excalidraw
             const extensionId = parsed.host === 'install'

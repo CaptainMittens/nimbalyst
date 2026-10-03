@@ -1,4 +1,6 @@
 import type { DocumentFeedbackIndexSyncMessage, DocumentFeedbackIndexSnapshotMessage } from './documentFeedbackIndex.js';
+import type { TeamPageMarksQueryMessage, TeamPageMarksResponseMessage } from './pageMarks.js';
+export * from './pageMarks.js';
 /**
  * TeamRoom wire protocol.
  *
@@ -48,7 +50,8 @@ export type TeamClientMessage =
   | TeamTypePlacementRemoveMessage
   | TeamItemPlacementIndexSyncRequestMessage
   | TeamItemPlacementSetMessage
-  | TeamItemPlacementRemoveMessage;
+  | TeamItemPlacementRemoveMessage
+  | TeamPageMarksQueryMessage;
 
 /** Request full team state snapshot */
 export interface TeamSyncRequestMessage {
@@ -310,6 +313,7 @@ export type TeamServerMessage =
   | TeamItemPlacementRemoveBroadcastMessage
   | TeamProjectAccessChangedMessage
   | TeamDocumentCommentNotifyAckMessage
+  | TeamPageMarksResponseMessage
   | TeamErrorMessage;
 
 /** Full team state snapshot */

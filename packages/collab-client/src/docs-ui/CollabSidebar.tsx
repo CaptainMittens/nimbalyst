@@ -47,6 +47,7 @@ import {
   type CollabRowDrop,
 } from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from './primitives/useFloatingMenu';
+import { CollabSectionMenu, CollabTreeEmptyState } from './CollabSectionRoot';
 
 const CYCLE_WARNING = 'A page cannot move inside one of its own child pages.';
 
@@ -233,6 +234,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     /** 'item' when the type goes under a typed page. */
     parentKind?: 'page' | 'item';
   } | null>(null);
+  // Empty tree space or the section header: New page / Place type at the root.
+  const [sectionMenu, setSectionMenu] = useState<{ x: number; y: number } | null>(null);
   // "New page inside" a typed page: it is not in the folder list the create
   // dialog picks from, so it is offered there as one extra location.
   const [createInsideItem, setCreateInsideItem] = useState<{ itemId: string; name: string } | null>(null);
@@ -510,6 +513,17 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [documentTypesRevision],
   );
+  const markdownDescriptor = sharedNewDocumentMenuItems.find(({ descriptor }) => descriptor.documentType === 'markdown')?.descriptor;
+  // A new markdown page under `parentId` (null = this section's root).
+  const startNewPage = (parentId: string | null, insideItem: { itemId: string; name: string } | null = null) => {
+    setCreateInsideItem(insideItem);
+    setCreateTargetFolderId(parentId);
+    if (markdownDescriptor) setCreateDocumentDescriptor(markdownDescriptor);
+    setContextMenu(null);
+    setSectionMenu(null);
+    // The create dialog renders with the tree, so a collapsed section opens.
+    if (collapsed) onToggleCollapsed?.();
+  };
 
   const handleMarkAllRead = useCallback(() => {
     setOverflowOpen(false);
@@ -1658,10 +1672,30 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       </span>
     </>
   ) : null;
+  const openSectionMenu = (event: React.MouseEvent) => {
+    if (!scopeAvailable) return;
+    event.preventDefault();
+    setContextMenu(null);
+    setSectionMenu({ x: event.clientX, y: event.clientY });
+  };
+  const sectionMenuElement = sectionMenu && (
+    <CollabSectionMenu
+      x={sectionMenu.x}
+      y={sectionMenu.y}
+      onNewPage={() => startNewPage(null)}
+      onPlaceType={typeResolver ? () => {
+        setSectionMenu(null);
+        if (collapsed) onToggleCollapsed?.();
+        setPlaceTypeMenu({ ...sectionMenu, parentFolderId: null });
+      } : undefined}
+      onClose={() => setSectionMenu(null)}
+    />
+  );
   const sectionHeader = sectionTitle ? (
     <div
       className="collab-sidebar-section-header flex items-center gap-2 px-3 pt-2 pb-1.5 border-b border-[var(--nim-border)] shrink-0"
       data-testid={`collab-sidebar-section-${personal ? 'personal' : 'team'}`}
+      onContextMenu={openSectionMenu}
     >
       {onToggleCollapsed ? (
         <button
@@ -1686,6 +1720,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         data-testid={personal ? 'collab-sidebar-personal' : 'collab-sidebar'}
       >
         {sectionHeader}
+        {sectionMenuElement}
       </div>
     );
   }
@@ -1750,15 +1785,11 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
       {/* Document tree */}
       <div
-        className={`flex-1 overflow-y-auto px-1.5 py-2 transition-colors ${dropTargetPath === '__root__' ? 'bg-nim-hover' : ''}`}
+        className={`collab-sidebar-tree flex-1 overflow-y-auto px-1.5 py-2 transition-colors ${dropTargetPath === '__root__' ? 'bg-nim-hover' : ''}`}
         onContextMenu={(event) => {
-          // Empty space in the tree is the root: place a type there.
-          const target = event.target as HTMLElement;
-          if (target.closest('.file-tree-directory, .file-tree-file')) return;
-          if (!scopeAvailable || !typeResolver) return;
-          event.preventDefault();
-          setContextMenu(null);
-          setPlaceTypeMenu({ x: event.clientX, y: event.clientY, parentFolderId: null });
+          // Empty space in the tree is the section root.
+          if ((event.target as HTMLElement).closest('.file-tree-directory, .file-tree-file')) return;
+          openSectionMenu(event);
         }}
         onDragOver={(event) => {
           const accepts = pageTree
@@ -1832,58 +1863,22 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               </div>
             );
           }
-          if (tree.length === 0) {
+          const emptyReason = tree.length === 0
+            ? 'empty'
+            : filteredTree.length > 0
+              ? null
+              : hasActiveSearch
+                ? 'search'
+                : effectiveTreeFilter === 'all' ? null : effectiveTreeFilter;
+          if (emptyReason) {
             return (
-              <div className="px-2 py-4 text-center">
-                <MaterialSymbol icon="cloud_sync" size={32} className="text-nim-faint mb-2" />
-                <p className="text-xs text-nim-faint m-0">
-                  {personal
-                    ? 'No personal pages yet.'
-                    : scopeAvailable
-                      ? 'No shared documents yet.'
-                      : 'No team connected to this workspace.'}
-                </p>
-                {scopeAvailable && !personal && (
-                  <p className="text-xs text-nim-faint mt-1 m-0">
-                    Create one here or share a local file to collaborate.
-                  </p>
-                )}
-              </div>
-            );
-          }
-          if (filteredTree.length === 0 && hasActiveSearch) {
-            return (
-              <div className="px-2 py-4 text-center">
-                <MaterialSymbol icon="search_off" size={32} className="text-nim-faint mb-2" />
-                <p className="text-xs text-nim-faint m-0">
-                  No shared documents match "{trimmedSearchQuery}".
-                </p>
-                <p className="text-xs text-nim-faint mt-1 m-0">
-                  Try a different file name or folder path.
-                </p>
-              </div>
-            );
-          }
-          if (filteredTree.length === 0 && effectiveTreeFilter === 'favorites') {
-            return (
-              <div className="px-2 py-4 text-center">
-                <MaterialSymbol icon="star" size={32} className="text-nim-faint mb-2" />
-                <p className="text-xs text-nim-faint m-0">No favorites yet.</p>
-                <p className="text-xs text-nim-faint mt-1 m-0">
-                  Star a document to pin it here.
-                </p>
-              </div>
-            );
-          }
-          if (filteredTree.length === 0 && effectiveTreeFilter === 'updated') {
-            return (
-              <div className="px-2 py-4 text-center">
-                <MaterialSymbol icon="mark_email_read" size={32} className="text-nim-faint mb-2" />
-                <p className="text-xs text-nim-faint m-0">You're all caught up.</p>
-                <p className="text-xs text-nim-faint mt-1 m-0">
-                  No documents changed since you last viewed them.
-                </p>
-              </div>
+              <CollabTreeEmptyState
+                reason={emptyReason}
+                personal={personal}
+                scopeAvailable={scopeAvailable}
+                searchQuery={trimmedSearchQuery}
+                onNewPage={markdownDescriptor ? () => startNewPage(null) : undefined}
+              />
             );
           }
           return <div>{renderTree(filteredTree)}</div>;
@@ -2063,11 +2058,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             <CollabItemMenu
               onNewPageInside={() => {
                 if (contextMenu.node.type !== 'item') return;
-                const markdown = sharedNewDocumentMenuItems.find(({ descriptor }) => descriptor.documentType === 'markdown');
-                setCreateInsideItem({ itemId: contextMenu.node.itemId, name: contextMenu.node.name });
-                setCreateTargetFolderId(contextMenu.node.itemId);
-                if (markdown) setCreateDocumentDescriptor(markdown.descriptor);
-                setContextMenu(null);
+                startNewPage(contextMenu.node.itemId, { itemId: contextMenu.node.itemId, name: contextMenu.node.name });
               }}
               onPlaceType={typeResolver ? () => {
                 if (contextMenu.node.type !== 'item') return;
@@ -2088,12 +2079,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             <>
               {pageTree && contextDocument ? (
                 <CollabPageMenuHead
-                  onNewPageInside={() => {
-                    const markdown = sharedNewDocumentMenuItems.find(({ descriptor }) => descriptor.documentType === 'markdown');
-                    setCreateTargetFolderId(contextDocument.documentId);
-                    if (markdown) setCreateDocumentDescriptor(markdown.descriptor);
-                    setContextMenu(null);
-                  }}
+                  onNewPageInside={() => startNewPage(contextDocument.documentId)}
                   onSetType={onSetPageType ? () => {
                     setContextMenu(null);
                     onSetPageType(contextDocument);
@@ -2332,6 +2318,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         </React.Suspense>
       )}
 
+      {sectionMenuElement}
       {placeTypeMenu && (
         <CollabPlaceTypeMenu
           x={placeTypeMenu.x}

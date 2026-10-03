@@ -180,6 +180,23 @@ export async function upsertDocument(
   );
 }
 
+/** A root markdown page with its body, unless the id is already taken (never an overwrite). */
+export async function insertDocumentIfAbsent(
+  db: PersonalPagesDb,
+  ws: string,
+  doc: { documentId: string; title: string; fileExtension: string; editorId: string; body: string },
+): Promise<void> {
+  const now = new Date();
+  await db.query(
+    `INSERT INTO personal_page_documents
+       (workspace_path, document_id, title, document_type, editor_id, file_extension,
+        metadata_version, parent_folder_id, parent_kind, sort_order, body, body_version, created_at, updated_at)
+     VALUES ($1, $2, $3, 'markdown', $4, $5, 2, NULL, 'page', NULL, $6, 1, $7, $7)
+     ON CONFLICT (workspace_path, document_id) DO NOTHING`,
+    [ws, doc.documentId, doc.title, doc.editorId, doc.fileExtension, doc.body, now],
+  );
+}
+
 export async function upsertTypePlacement(
   db: PersonalPagesDb,
   ws: string,

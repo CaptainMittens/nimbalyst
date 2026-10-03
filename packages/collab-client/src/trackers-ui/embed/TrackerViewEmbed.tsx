@@ -19,7 +19,8 @@ import { useTrackerViewRows } from '../useTrackerViewRows';
 import { resolveViewMode } from '../resolveViewMode';
 import { TrackerListView } from '../TrackerListView';
 import { TrackerBoardSurface } from '../board/TrackerBoardSurface';
-import { TrackerGridSurface, type TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
+import { TrackerGridSurface, type TrackerGridDerivedColumn, type TrackerGridUpdateEntry } from '../grid/TrackerGridSurface';
+import { isViewRecordEditable, writeViewEdits } from './viewItemEdits';
 
 const DEFAULT_BODY_HEIGHT_PX = 420;
 const MODE_LABEL: Record<string, string> = {
@@ -57,6 +58,8 @@ export interface TrackerViewEmbedProps {
    * lists its subtypes' items too. The view's type still picks the columns.
    */
   typeIds?: readonly string[];
+  /** Table cells edit their items unless this is set (or the host has no data source). */
+  readOnly?: boolean;
 }
 
 /** Draws a view the caller supplies, without looking it up among the saved views. */
@@ -68,10 +71,15 @@ export function TrackerViewEmbed({
   height,
   derivedColumns,
   typeIds,
+  readOnly,
 }: TrackerViewEmbedProps): JSX.Element {
-  const { identity, capabilities } = useTrackersUI();
+  const { identity, capabilities, dataSource } = useTrackersUI();
   const records = useTrackerDataSelector((state) => state.records);
   const loaded = useTrackerDataSelector((state) => state.loaded);
+  const writeEdits = useCallback(
+    (entries: readonly TrackerGridUpdateEntry[]) => (dataSource ? writeViewEdits(dataSource, entries) : Promise.resolve()),
+    [dataSource],
+  );
   return (
     <LoadedViewEmbed
       view={view}
@@ -85,6 +93,7 @@ export function TrackerViewEmbed({
       variant={variant}
       derivedColumns={derivedColumns}
       typeIds={typeIds}
+      onItemsUpdate={readOnly || !dataSource ? undefined : writeEdits}
     />
   );
 }
@@ -101,6 +110,7 @@ function LoadedViewEmbed({
   variant,
   derivedColumns,
   typeIds,
+  onItemsUpdate,
 }: {
   view: SavedView;
   records: TrackerRecord[];
@@ -113,6 +123,7 @@ function LoadedViewEmbed({
   variant: 'card' | 'page';
   derivedColumns?: readonly TrackerGridDerivedColumn[];
   typeIds?: readonly string[];
+  onItemsUpdate?: (entries: readonly TrackerGridUpdateEntry[]) => Promise<void>;
 }): JSX.Element {
   const { definition } = view;
   // Readiness is a property of the whole dependency graph, so it reads every record.
@@ -133,6 +144,11 @@ function LoadedViewEmbed({
   const titles = useMemo(() => new Map(records.map((record) => [record.id, getRecordTitle(record).trim()])), [records]);
   const resolveRelationshipLabel = useCallback((itemId: string) => titles.get(itemId) || undefined, [titles]);
   const openItem = useCallback((itemId: string) => onOpenItem?.(itemId), [onOpenItem]);
+  const byId = useMemo(() => new Map(records.map((record) => [record.id, record])), [records]);
+  const isRowEditable = useCallback((itemId: string) => {
+    const record = byId.get(itemId);
+    return record ? isViewRecordEditable(record) : false;
+  }, [byId]);
 
   let body: ReactNode;
   switch (mode) {
@@ -149,6 +165,8 @@ function LoadedViewEmbed({
           onOpenItem={onOpenItem}
           loaded={loaded}
           derivedColumns={derivedColumns}
+          isRowEditable={onItemsUpdate ? isRowEditable : undefined}
+          onItemsUpdate={onItemsUpdate}
         />
       );
       break;

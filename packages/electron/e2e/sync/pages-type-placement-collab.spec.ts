@@ -280,6 +280,8 @@ test("a placed team type and its items sync, open as pages, and restore", async 
         box.y + box.height - 12,
         { button: "right" }
       );
+      // Empty tree space opens New page / Place type...
+      await pageA.locator(".collab-section-place-type").click();
       const menu = pageA.locator(".collab-place-type-menu");
       await expect(menu).toBeVisible({ timeout: 5_000 });
       const option = menu.locator(".collab-place-type-option", {

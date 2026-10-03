@@ -805,6 +805,26 @@ describe('collabTree', () => {
         expect(ids(input({ arch: 3072, zeta: null, module: 2048, sync: 1024 }))).toEqual(['item:mod-sync', 'type:module', 'document:arch', 'document:zeta']);
       });
 
+      // Home is pinned first in either mode, whatever its name or order, and a
+      // reorder never renumbers it or lands a row above it.
+      it('keeps a Home page first among its siblings and out of reorders', () => {
+        const build = (homeOrder: number | null, archOrder: number | null) => buildCollabPageTree(
+          [doc('home:team-1', 'Welcome', null, { sortOrder: homeOrder }), doc('arch', 'Architecture', null, { sortOrder: archOrder }), makeDocument('zeta', 'Zeta')],
+          { resolver, typePlacements: [{ ...typePlacement('module', null), sortOrder: T }] },
+        );
+        expect(ids(build(null, null))).toEqual(['document:home:team-1', 'type:module', 'document:arch', 'document:zeta']);
+        expect(ids(build(9999, 1024))).toEqual(['document:home:team-1', 'document:arch', 'type:module', 'document:zeta']);
+
+        const plan = planPageTreeDrop(build(null, null), { kind: 'page', documentId: 'zeta' }, 'document:home:team-1', 'before');
+        expect(plan).toEqual({
+          kind: 'page', documentId: 'zeta', parentId: null, parentKind: 'page', sortOrder: 1024,
+          renumber: [
+            { kind: 'type', typeId: 'module', parentFolderId: null, parentKind: 'page', sortOrder: 2048 },
+            { kind: 'page', documentId: 'arch', parentId: null, parentKind: 'page', sortOrder: 3072 },
+          ],
+        });
+      });
+
       it('renumbers an unreordered group on its first reorder and moves pages with an order', () => {
         const tree = buildCollabPageTree(
           [makeDocument('arch', 'Architecture'), makeDocument('zeta', 'Zeta')],

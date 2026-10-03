@@ -1,6 +1,8 @@
 import { isCollabUri } from "@nimbalyst/collab-protocol";
 import { HeadlessCollabDocumentError } from "../services/HeadlessCollabDocument";
 import { readCollabDocWithDecisionState } from "../services/readCollabDecisionState";
+import { readCollabDocForAgent } from "../services/agentDocumentAccess";
+import { isPersonalPageUri } from "../../shared/personalPageUri";
 
 /** One read handler for editable source and optional read-only decision responses. */
 export function registerCollabDocumentReadHandler(
@@ -15,6 +17,15 @@ export function registerCollabDocumentReadHandler(
       includeDecisionState,
     }) => {
       try {
+        // Personal pages are local: no room, no decision blocks to project.
+        if (isPersonalPageUri(targetFilePath)) {
+          const { content } = await readCollabDocForAgent(
+            targetFilePath,
+            routedWorkspacePath ?? resolveWorkspacePath()
+          );
+          window.electronAPI.sendMcpReadCollabDocResult(resultChannel, { success: true, content });
+          return;
+        }
         if (!targetFilePath || !isCollabUri(targetFilePath)) {
           window.electronAPI.sendMcpReadCollabDocResult(resultChannel, {
             success: false,

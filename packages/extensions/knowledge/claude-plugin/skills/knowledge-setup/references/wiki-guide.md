@@ -1,70 +1,47 @@
 # How we write this wiki
 
-This wiki holds what a capable agent would need to rebuild this project from scratch, and nothing more. The code says how the project works. The wiki says what the team wants it to be, why, and what the team knew when it decided. Agents and people read this page before adding to the wiki.
+These pages hold what the people on this project said and decided, and the context they needed to decide it. Agents can look up everything else. People and agents read this page before writing here.
 
 Edit this page to fit your team. It overrides the base guide Nimbalyst ships.
 
-## The test for every page and statement
-
-Write something down only if all three are true:
-
-1. **A strong model would get it wrong without the note.** It could not infer it from the code, the repository history, or general knowledge. It is not a best practice, a library's documentation, or anything a modern model already does well.
-2. **A person chose it, or a person needed it to choose.** It records a decision, a preference, a constraint, or a judgment of quality, or the context the team weighed when making one. You don't need to know the competitors to build to the spec, but the team needed to know them to decide what the product does, and the next decision will need them too. What the code merely implies doesn't count.
-3. **It will still matter when the code has changed.** Implementation details, file layouts, and step-by-step plans expire. Intent, constraints, and reasons last.
-
-If a statement fails any test, leave it out. If an existing page fails, supersede or archive it. Deleting stale content is part of maintaining the wiki.
-
 ## What belongs here
 
-- **What the project is and who it is for.** The problem, the users, and what the project deliberately is not.
-- **Decisions and their reasons.** Especially the non-obvious ones, the rejected alternatives, and the reversals. Write the reason in a sentence; the reason is what stops a later agent from undoing the decision.
-- **Taste and quality bar.** What "good" means here, where the team departs from convention, and which trade-offs the team makes on purpose (for example, "local-first before team features" or "no curated default model list").
-- **Constraints that are not visible in the code.** Legal, security, privacy, cost, platform, and partner commitments.
-- **Hard-won lessons.** Incidents and failures a model would repeat, with the one rule each one taught. Skip the incident narrative.
-- **Decision context.** What the team weighs when it decides: customers and what they asked for, competitors and where they overlap, markets, technologies, and partners, with the facts about them the team relies on, each dated and sourced. Link decisions to the context they rested on, so a later reader can tell when a changed fact reopens a decision.
-- **Open questions.** What the team has not decided, who owns each question, and the current position.
+- **Decisions and their reasons.** What was chosen, who chose it, when, and what was not chosen. The reason is what stops a later agent from undoing the decision.
+- **What people asked for.** Preferences, constraints, taste, and the quality bar, in the words of the person who set them.
+- **Open questions.** What is not decided yet, who owns it, and where it stands.
+- **Context for the whole problem.** The modules, technologies, competitors, customers and people the team weighs when it decides, with the facts it relies on, each with a source and a date. A competitor table or a list of the libraries a module is built on belongs here when it helps a person see the problem at once.
+- **Hard-won lessons.** A failure someone would repeat, with the rule it taught. Skip the incident narrative.
 
 ## What does not belong here
 
-- Anything a model already knows: language features, framework usage, standard patterns, general engineering practice.
-- Anything the code already states: APIs, schemas, file structure, configuration values. Link to the code if a pointer helps.
-- Plans for individual features, task lists, status updates, and meeting notes. Those belong in trackers and expire when the work ships.
-- Changelogs and release notes.
-- Restatements. If a fact is on one page, link to it; do not copy it.
+- Anything a capable model already knows, or the code already says: APIs, schemas, file layouts, configuration values. Link to the code when a pointer helps.
+- Task lists, status updates, plans for single features and meeting notes. Those live in trackers and expire when the work ships.
+- Copies. If something is on one page, link to it.
+
+## How the pages fit together
+
+- **Pages nest.** Any page can hold child pages. A page with an empty body works as a folder.
+- **Some pages have a type.** A type is something the team keeps several of, such as Modules, Technologies, Competitors or People. A typed page has a few fields in its header (a status, a maturity, "in our stack") and its body is ordinary prose. Each type has its own page: a short description of the type above a table of every page of that type.
+- **Types are ours.** Add a type when the team keeps track of several things of one kind and wants them in a table. Do not add a type for a single page.
+- **Relations are links.** When a page links to another typed page, the link can carry a named relation, such as "built on" or "alternative to". Each relation has a name for the other direction ("underlies"), and both pages list it in their Links section. Use a plain link when no relation fits; do not invent a vague one like "related to".
 
 ## How to write
 
-- Short. A page is usually a few paragraphs. A decision is usually one sentence of choice and one of reason.
-- Specific. Name the thing, the date, and the person or team who decided. "We chose X over Y because Z (decided by the platform team, 2026-03)" beats "X is preferred."
-- One idea per statement. Facts about the domain go in as statements with a subject, a relationship, and a value, each with a date and a source, not buried in prose.
-- State certainty. Mark what is decided, what is observed, and what is inferred. Do not present an inference as a decision.
-- Prefer updating to appending. When something changes, supersede the old statement so its history stays visible.
-- Label every page with each label that fits, and fill in what those labels ask for. A page can be a feature and a surface at once.
-- Facts that change over time are dated statements with a source, never prose. A newer value is a new statement; the old one stays as history.
+- Short and specific. A page is usually a few paragraphs. Name the thing, the date and the person.
+- Write a decision as one sentence in the page it affects, and mark it decided with who decided it, when, and what was not chosen ("Mark decided" on the selection, or in markdown `[We store flags in Cloudflare Flagship.]{decided by="Dana Lee" email=dana@example.com on=2026-09-30 over="our own Durable Object store"}`). The email lets anyone find every decision a person made.
+- Mark an open question the same way, with who owns it: `[Do we need a mobile SDK for launch?]{open by="Dana Lee" email=dana@example.com}`. A page or a spike can own one too (`{open by="Spike 6"}`). When it is answered, mark it decided.
+- When a statement came from a person, cite them: the citation keeps their words and links to the session or comment they came from.
+- Cite web pages and documents as you write; they are listed under Sources at the bottom of the page.
+- Facts that change (pricing, maturity, limits) carry a date and a source link.
+- Mark what is decided, what was observed and what is a guess. Never present a guess as a decision.
+- Update a page rather than appending a second page about the same thing. When a decision changes, rewrite the sentence and say what it replaced and when.
 
 ## For agents
 
-- Read this page and the wiki home before writing.
-- Before adding a page, search for an existing one. Extend it or link to it.
-- Record a decision when a person makes it, in their words, attributed to them. Do not invent decisions or reasons.
-- When the wiki's structure does not fit what you need to record (a missing label, property, or relationship), propose a change instead of forcing the content into the wrong place.
-- When you are unsure whether something passes the test, leave it out and ask.
-<!-- pack:market -->
+- Read this page and the Home page before writing.
+- Search for an existing page before creating one. Extend it, or link to it.
+- Record a decision only when a person made it, in their words, attributed to them. Never invent a decision or a reason.
+- Your edits land directly, without review. Keep each edit small, never delete or rewrite what a person wrote without asking, and tell the person which pages you changed.
+- When you are unsure whether something belongs here, leave it out and ask.
 
-## Markets, makers and competitors
-
-- Every product sits in at least one market and names its maker. If the maker is unknown or an individual, say so on the page rather than inventing one.
-- Markets form a tree under the Markets area. Put a product in the most specific market that fits; mark the main one as primary.
-- Competition is a statement per market, not a folder. "We compete with Product A in note-taking, threat high" is one statement; the same product in a second market is a second statement, with its own threat.
-- Company facts (revenue, funding, headcount) go on the organization; product facts (pricing, licence, platforms, users, lifecycle) go on the product. Each has an as-of date and a source. A fact older than 90 days is stale; research a newer one before relying on it.
-<!-- /pack:market -->
-<!-- pack:spec -->
-
-## The spec
-
-- The spec is the part of the wiki someone would need to rebuild the project: subsystems, features, surfaces, requirements, invariants, data stores, integrations, and the wire protocols the project's own parts speak.
-- Every spec page points at its sources: the paths that implement it (with the commit they were checked against), the decisions that govern it, and the sessions where it was worked out. A spec page with no source is a guess; mark it as one.
-- Write the why and the rules, not the code. An invariant names the rule, the incident or decision behind it, and what enforces it. A requirement is one sentence a reviewer can check.
-- When the code moves, re-point the implementation statement rather than editing the prose. When a rule is knowingly broken, record that it is violated and link the bug.
-- Spec pages are not work items. Plans and tasks stay in trackers; the spec page links the decision they produced.
-<!-- /pack:spec -->
+Based on the Nimbalyst base guide, version 4.

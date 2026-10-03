@@ -152,6 +152,7 @@ export const HOST_TOOLS: readonly string[] = [
   'list_recent_sessions',
   'schedule_wakeup',
   'update_session_board',
+  'list_citable_inputs',
   // Child-session orchestration (was nimbalyst-meta-agent)
   'create_session',
   'spawn_session',
@@ -218,12 +219,14 @@ export const SITUATIONAL_TOOLS: readonly string[] = [
   // project canvas presence: an attention declaration, never a lock
   'declareCanvasWorkingSet',
   'releaseCanvasWorkingSet',
-  // shared-index (first-class shared folders + documents) management
+  // Pages: the Team and Personal page trees
   'createSharedDoc',
   'createSharedFolder',
   'moveSharedItem',
   'renameSharedItem',
   'deleteSharedItem',
+  'listPages',
+  'setPageType',
   // read-only organization/resource discovery for cross-user collaboration
   'findOrgMembers',
   'getResourceSharingStatus',

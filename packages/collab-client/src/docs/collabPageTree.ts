@@ -17,6 +17,7 @@ import {
   type CollabTreeTypeNode,
   type CollabTypeTreeResolver,
 } from './collabTree';
+import { isHomePageId } from './homePage';
 
 import type { CollabDocsSession } from './session';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
@@ -171,19 +172,24 @@ function nodeSortOrder(node: CollabTreeNode): number | null {
   }
 }
 
+/** Home sits above its siblings and outside their order (see `homePage.ts`). */
+const isPinnedHome = (node: CollabTreeNode): boolean => node.type === 'document' && isHomePageId(node.document.documentId);
+
 function sortSiblings(nodes: CollabTreeNode[]): void {
-  if (!isReordered(nodes.map(nodeSortOrder))) {
-    nodes.sort(compareTreeNodes);
-    return;
+  const ordered = nodes.filter((node) => !isPinnedHome(node));
+  if (!isReordered(ordered.map(nodeSortOrder))) {
+    ordered.sort(compareTreeNodes);
+  } else {
+    ordered.sort((left, right) => {
+      const a = nodeSortOrder(left);
+      const b = nodeSortOrder(right);
+      if (a !== null && b !== null && a !== b) return a - b;
+      if (a === null && b !== null) return 1;
+      if (b === null && a !== null) return -1;
+      return compareTreeNodes(left, right);
+    });
   }
-  nodes.sort((left, right) => {
-    const a = nodeSortOrder(left);
-    const b = nodeSortOrder(right);
-    if (a !== null && b !== null && a !== b) return a - b;
-    if (a === null && b !== null) return 1;
-    if (b === null && a !== null) return -1;
-    return compareTreeNodes(left, right);
-  });
+  nodes.splice(0, nodes.length, ...nodes.filter(isPinnedHome), ...ordered);
 }
 
 /** A type node's children keep their built order: subtypes, then items in the resolver's order. */
@@ -400,8 +406,11 @@ export function planPageTreeDrop(
   const anchor = zone === 'inside' ? null : target;
   const children = container ? childList(container) : tree;
   const currentParent = parents.get(draggedId) ?? null;
-  const others = children.filter((node) => node.id !== draggedId);
-  const at = anchor ? others.findIndex((node) => node.id === anchor.id) + (zone === 'after' ? 1 : 0) : others.length;
+  // A pinned Home is not part of the order: a drop beside it lands first.
+  const others = children.filter((node) => node.id !== draggedId && !isPinnedHome(node));
+  const at = !anchor ? others.length
+    : isPinnedHome(anchor) ? 0
+      : others.findIndex((node) => node.id === anchor.id) + (zone === 'after' ? 1 : 0);
 
   // Not inside itself or below itself, also when the way up passes through a
   // type node (an unplaced typed page sits under its type).

@@ -40,7 +40,12 @@ export const COLLAB_BUNDLE_EAGER_GZIP_BUDGET_BYTES = {
   // rail, keyboard map, lock/group, plus the floating-ui focus and list
   // navigation hooks their menus use). Reset with ~10% headroom.
   canvas: 160_000,
-  editor: 320_000,
+  // Measured at 322,230 gzip bytes on 2026-10-03 after decision and
+  // open-question marks, citations, the 2x2 block and console link parsing
+  // landed. Their popovers, chips and chart already load on demand; what is
+  // left (node cores, transformers, link parsers) must register before a page
+  // is read. Raised from 320,000 with ~2% headroom.
+  editor: 330_000,
   // Measured at 70,625 gzip bytes on 2026-09-08, when the list took over
   // folder browsing from the tree for the browser console (folder rows, the
   // browse scope, the row "more" action). The row context menu itself is
