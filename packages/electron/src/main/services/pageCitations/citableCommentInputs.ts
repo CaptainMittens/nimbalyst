@@ -5,11 +5,12 @@
  * which together identify a comment for as long as the page exists.
  */
 
+import type { TeamMemberId } from '@nimbalyst/runtime/auth/jwtScopes';
 import { citationMarkdown } from './citationMarkdown';
 import { shortenQuote, type CitableInput } from './citableRawRows';
 
 interface ListedComment {
-  actor?: { kind?: string; displayName?: string; userId?: string };
+  actor?: CommentActor & { kind?: string };
   body?: string;
   createdAt?: number;
   deleted?: boolean;
@@ -38,8 +39,11 @@ export function commentInputKey(documentId: string, threadId: string, commentId:
   return `${documentId}~${threadId}~${commentId}`;
 }
 
+/** A comment's author: `userId` is the author's member id in the page's team. */
+type CommentActor = { userId?: TeamMemberId; displayName?: string };
+
 export interface TeamMemberIdentity {
-  memberId: string;
+  memberId: TeamMemberId;
   name: string;
   email: string;
 }
@@ -48,7 +52,7 @@ export interface TeamMemberIdentity {
  * A commenter's email, from the team roster: by member id, else by a display
  * name only one member has. A comment stores no email of its own.
  */
-export function commenterEmailLookup(members: readonly TeamMemberIdentity[]): (actor: { userId?: string; displayName?: string }) => string | undefined {
+export function commenterEmailLookup(members: readonly TeamMemberIdentity[]): (actor: CommentActor) => string | undefined {
   const byId = new Map(members.map((member) => [member.memberId, member.email]));
   const byName = new Map<string, string | null>();
   for (const member of members) {
@@ -64,7 +68,7 @@ export function citableCommentInputs(
   pageUri: string,
   list: CommentListResult,
   sessionId: string,
-  emailFor: (actor: { userId?: string; displayName?: string }) => string | undefined = () => undefined,
+  emailFor: (actor: CommentActor) => string | undefined = () => undefined,
 ): CitableInput[] {
   const documentId = documentIdFromPageUri(list.document?.uri ?? pageUri);
   const pageTitle = list.document?.title?.trim() || 'Shared page';

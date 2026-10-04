@@ -17,6 +17,7 @@ import { SQLiteDatabase } from '../../../database/sqlite/SQLiteDatabase';
 import { listSessionCitableInputs } from '../citableSessionInputs';
 import { runListCitableInputs } from '../listCitableInputs';
 import { findCitations } from '@nimbalyst/runtime/core/citationSyntax';
+import { asTeamMemberId } from '@nimbalyst/runtime/auth/jwtScopes';
 
 const SESSION = 'session-1';
 const BASE = Date.parse('2026-09-30T10:00:00.000Z');
@@ -184,14 +185,14 @@ describe.each(['sqlite', 'pglite'] as const)('citable session inputs on %s', (ba
                 { id: 'c2', actor: { kind: 'agent', sessionId: 's', sessionName: 'Agent' }, body: 'Noted.', createdAt: BASE + 61_000, deleted: false },
                 { id: 'c3', actor: { kind: 'user', displayName: 'Ana Ruiz' }, body: 'removed', createdAt: BASE + 62_000, deleted: true },
                 // Renamed since the roster was read: found by member id.
-                { id: 'c4', actor: { kind: 'user', userId: 'member-bo', displayName: 'Bo L.' }, body: 'Keep Mantine.', createdAt: BASE + 63_000, deleted: false },
+                { id: 'c4', actor: { kind: 'user', userId: asTeamMemberId('member-bo'), displayName: 'Bo L.' }, body: 'Keep Mantine.', createdAt: BASE + 63_000, deleted: false },
               ],
             }],
           }
         : { error: 'DOCUMENT_NOT_MOUNTED' });
       const roster = [
-        { memberId: 'member-ana', name: 'Ana Ruiz', email: 'ana@example.com' },
-        { memberId: 'member-bo', name: 'Bo Lindqvist', email: 'bo@example.com' },
+        { memberId: asTeamMemberId('member-ana'), name: 'Ana Ruiz', email: 'ana@example.com' },
+        { memberId: asTeamMemberId('member-bo'), name: 'Bo Lindqvist', email: 'bo@example.com' },
       ];
       const deps = {
         db: () => db,

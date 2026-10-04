@@ -30,7 +30,7 @@ async function teamMembers(workspacePath: string): Promise<TeamMemberIdentity[]>
   const team = await findTeamForWorkspace(workspacePath);
   if (!team) return [];
   const { members } = await listMembers(team.orgId);
-  return members.map((member) => ({ memberId: String(member.memberId), name: member.name, email: member.email }));
+  return members.map((member) => ({ memberId: member.memberId, name: member.name, email: member.email }));
 }
 
 const productionDeps: ListCitableInputsDeps = {
