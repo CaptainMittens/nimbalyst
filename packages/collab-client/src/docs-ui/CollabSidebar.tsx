@@ -39,6 +39,7 @@ import {
 import type { PageTreeDestination, PageTreeDropPlan, PageTreeWrite } from '../docs/collabPageTree';
 import {
   CollabPlaceTypeMenu,
+  CollabTreeActiveContext,
   CollabTypeItemRow,
   CollabTypeTreeBranch,
   getPlaceableTypes,
@@ -48,6 +49,7 @@ import {
 } from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from './primitives/useFloatingMenu';
 import { CollabSectionMenu, CollabTreeEmptyState } from './CollabSectionRoot';
+import { revealKeysFor } from './collabTreeReveal';
 
 const CYCLE_WARNING = 'A page cannot move inside one of its own child pages.';
 
@@ -123,6 +125,9 @@ function useUnavailableLocalOrigin() {
 
 export interface CollabSidebarProps {
   activeDocumentId?: string | null;
+  /** The open typed page (item id) or type page (type id), highlighted like the open page. */
+  activeItemId?: string | null;
+  activeTypeId?: string | null;
   /** Open the discovery hub (center pane). Shown as a Home action. */
   onShowHome?: () => void;
   /** Highlight the Home action when the hub is the active surface. */
@@ -182,6 +187,8 @@ export interface CollabSidebarCreateMenu {
 
 export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   activeDocumentId,
+  activeItemId = null,
+  activeTypeId = null,
   onShowHome,
   homeActive,
   scopeName,
@@ -430,6 +437,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     () => sharedDocuments.find(document => document.documentId === activeDocumentId) ?? null,
     [activeDocumentId, sharedDocuments]
   );
+  const activeRow = useMemo(() => ({ itemId: activeItemId, typeId: activeTypeId }), [activeItemId, activeTypeId]);
 
   const folderById = useMemo(
     () => new Map(sharedFolders.map(f => [f.folderId, f])),
@@ -635,6 +643,19 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     });
   }, [activeDocument, treePathOf]);
 
+  // The same for the open typed page or type, once per target: the tree
+  // re-renders on every item edit, and a row the user closes stays closed.
+  const revealedRowRef = useRef<string | null>(null);
+  useEffect(() => {
+    const targetKey = activeItemId ? `item:${activeItemId}` : activeTypeId ? `type:${activeTypeId}` : null;
+    if (!targetKey || revealedRowRef.current === targetKey) return;
+    const keys = revealKeysFor(tree, { itemId: activeItemId, typeId: activeTypeId });
+    if (!keys) return;
+    revealedRowRef.current = targetKey;
+    if (keys.length === 0) return;
+    setExpandedFolders((current) => (keys.every((key) => current.has(key)) ? current : new Set([...current, ...keys])));
+  }, [activeItemId, activeTypeId, tree]);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, node: CollabTreeNode) => {
     e.preventDefault();
     e.stopPropagation();
@@ -676,15 +697,15 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
     if (contextMenu.node.type === 'document') {
       const { document } = contextMenu.node;
-      // Page tree: a page with children goes with its subtree, the way a
-      // folder delete works; a leaf page goes to Trash like any document.
+      // Page tree: a page with children goes to Trash with its subtree; a
+      // leaf page goes to Trash like any document.
       const childCount = pageTree ? planPageRemoval(allSharedDocuments, typePlacements, document.documentId).childCount : 0;
       if (childCount > 0) {
-        if (!canMutateMetadata('delete this page')) return;
+        if (!canMutateMetadata('move this page to Trash')) return;
         const pages = `${childCount} child page${childCount === 1 ? '' : 's'}`;
         // Counts the prose of types placed inside it, which goes too.
         setContextMenu(null);
-        void confirmDestructive('Delete page', `Delete "${pageDisplayName(contextMenu.node.name, document.documentType)}" and its ${pages}? Types and typed pages inside move back to their usual place. This cannot be undone.`).then((accepted) => {
+        void confirmDestructive('Move page to Trash', `Move "${pageDisplayName(contextMenu.node.name, document.documentType)}" and its ${pages} to Trash? Types and typed pages inside show in their usual place until you restore it.`).then((accepted) => {
           if (!accepted) return;
           session.removePage(document.documentId);
           host.trackEvent?.('collab_folder_deleted', {
@@ -1881,7 +1902,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               />
             );
           }
-          return <div>{renderTree(filteredTree)}</div>;
+          return <CollabTreeActiveContext.Provider value={activeRow}><div>{renderTree(filteredTree)}</div></CollabTreeActiveContext.Provider>;
         })()}
       </div>
 

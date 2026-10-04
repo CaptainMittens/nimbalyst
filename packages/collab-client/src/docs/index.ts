@@ -1,5 +1,6 @@
 export * from './collabDiscovery';
 export * from './collabTree';
+export * from './collabTypeResolver';
 export * from './dataSource';
 export * from './session';
 export * from './sharedHomeTab';

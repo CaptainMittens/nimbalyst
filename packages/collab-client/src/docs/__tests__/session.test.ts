@@ -413,8 +413,9 @@ describe('CollabDocsSession', () => {
       expect.objectContaining({ typeId: 'module', parentFolderId: null, sortOrder: 7, createdAt: 1 }),
       expect.objectContaining({ typeId: 'competitor', parentFolderId: 'kb', projectId: null }),
     ]);
+    // The outcome waits for the server's echo, so an agent hears about a refusal.
     expect(harness.commands).toContainEqual(
-      { type: 'set-type-placement', typeId: 'module', parentFolderId: null, sortOrder: 7 },
+      { type: 'set-type-placement', typeId: 'module', parentFolderId: null, sortOrder: 7, confirm: true },
     );
 
     // Removing the folder drops the placement inside it, as the server does.
@@ -453,8 +454,8 @@ describe('CollabDocsSession', () => {
       .toEqual([['arch', 'Architecture', null], ['overview', 'Overview', 'arch'], ['leaf', 'Leaf', 'overview']]);
 
     expect(harness.session.movePage('arch', 'leaf')).toBe(false);
-    expect(harness.session.movePage('leaf', null)).toBe(true);
-    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'leaf', parentFolderId: null });
+    await expect(harness.session.movePage('leaf', null)).resolves.toEqual({ ok: true });
+    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'leaf', parentFolderId: null, confirm: true });
 
     await harness.session.setItemPlacement('item-2', 'overview');
     expect(harness.commands).toContainEqual(expect.objectContaining({ type: 'set-item-placement', itemId: 'item-2', parentId: 'overview' }));
@@ -463,13 +464,115 @@ describe('CollabDocsSession', () => {
 
     harness.session.removePage('arch');
     expect(harness.session.getDocuments().map((doc) => doc.documentId)).toEqual(['leaf']);
-    // The placement under a removed page falls back under its type.
-    expect(harness.session.getItemPlacements()).toEqual([]);
-    expect(harness.commands).toContainEqual({ type: 'remove-folder', folderId: 'arch' });
+    // The placement under a trashed page stays, so a restore puts it back.
+    expect(harness.session.getItemPlacements().map((placement) => placement.parentId)).toEqual(['overview']);
+    expect(harness.commands).toContainEqual(expect.objectContaining({ type: 'trash-document', documentId: 'arch' }));
 
     // A later snapshot without the flag does not drop back to folders.
     harness.emitData({ type: 'snapshot', snapshot: { items: [], containers: [] } });
     expect(harness.session.isPageTree()).toBe(true);
+  });
+
+  it('moves a page and every page under it to Trash, never removing them', async () => {
+    const at = (documentId: string, parentFolderId: string | null, trashedAt: number | null = null) =>
+      ({ ...document(documentId, documentId), parentFolderId, trashedAt });
+    const harness = createHarness(SCOPE);
+    (harness.dataSource.snapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+      items: [at('arch', null), at('overview', 'arch'), at('leaf', 'overview'), at('old', 'arch', 5), at('other', null)],
+      containers: [],
+      pageTree: true,
+    });
+    await harness.session.start();
+
+    await expect(harness.session.removePage('arch')).resolves.toEqual({ ok: true });
+    const trashes = harness.commands.filter((command) => command.type === 'trash-document');
+    // One trash time for the subtree; a page already in Trash keeps its own.
+    expect(trashes.map((command) => command.documentId).sort()).toEqual(['arch', 'leaf', 'overview']);
+    expect(new Set(trashes.map((command) => command.trashedAt)).size).toBe(1);
+    expect(harness.commands.some((command) => command.type === 'remove-folder' || command.type === 'remove-document')).toBe(false);
+    expect(harness.session.getDocuments().map((doc) => doc.documentId)).toEqual(['other']);
+    expect(store.get(harness.session.atoms.trashedSharedDocuments).map((doc) => doc.documentId).sort())
+      .toEqual(['arch', 'leaf', 'old', 'overview']);
+
+    // Restoring the page brings back what went with it, not what was trashed before.
+    harness.session.restoreDocument('arch');
+    expect(harness.commands.filter((command) => command.type === 'restore-document').map((command) => command.documentId).sort())
+      .toEqual(['arch', 'leaf', 'overview']);
+    expect(harness.session.getDocuments().map((doc) => doc.documentId).sort()).toEqual(['arch', 'leaf', 'other', 'overview']);
+
+    // A legacy folder delete in a page tree is the same move to Trash.
+    harness.session.removeFolder('other');
+    expect(harness.commands).toContainEqual(expect.objectContaining({ type: 'trash-document', documentId: 'other' }));
+  });
+
+  it('answers a page tree write with the store outcome, not the optimistic state', async () => {
+    const harness = createHarness(SCOPE, { documents: [document('arch', 'Architecture'), document('leaf', 'Leaf')] });
+    (harness.dataSource.command as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Personal pages refused the write'));
+    const refused = { ok: false, error: 'Personal pages refused the write' };
+    await expect(harness.session.movePage('leaf', 'arch')).resolves.toEqual(refused);
+    await expect(harness.session.updateDocumentTitle('leaf', 'Renamed')).resolves.toEqual(refused);
+    await expect(harness.session.placeType('module', 'arch')).resolves.toEqual(refused);
+    await expect(harness.session.removeDocument('leaf')).resolves.toEqual(refused);
+    await expect(harness.session.removePage('arch')).resolves.toEqual(refused);
+    expect(harness.reportError).toHaveBeenCalledTimes(5);
+  });
+
+  it('purges only from Trash: a permanent delete and Empty Trash send purge, nothing else does', async () => {
+    const trashed = (documentId: string) => ({ ...document(documentId, documentId), trashedAt: 5 });
+    const harness = createHarness(SCOPE, { documents: [document('live', 'Live'), trashed('old-1'), trashed('old-2'), trashed('old-3')] });
+    await harness.session.start();
+    const removals = () => harness.commands.filter((command) => command.type === 'remove-document');
+
+    await harness.session.removeDocument('old-1', { purge: true });
+    expect(harness.session.emptyTrash()).toBe(2);
+    expect(removals()).toEqual([
+      { type: 'remove-document', documentId: 'old-1', purge: true },
+      { type: 'remove-document', documentId: 'old-2', purge: true },
+      { type: 'remove-document', documentId: 'old-3', purge: true },
+    ]);
+    await harness.session.removeDocument('live');
+    expect(removals().at(-1)).toEqual({ type: 'remove-document', documentId: 'live' });
+  });
+
+  it('puts a refused move back where it was and a refused removal back in the tree', async () => {
+    const harness = createHarness(SCOPE, { documents: [document('arch', 'Architecture'), { ...document('leaf', 'Leaf'), parentFolderId: 'arch', sortOrder: 4 }] });
+    await harness.session.start();
+    (harness.dataSource.command as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('read-only'));
+    const leaf = () => harness.session.getDocuments().find((doc) => doc.documentId === 'leaf');
+
+    await harness.session.moveDocument('leaf', null, { sortOrder: 9 });
+    expect(leaf()).toMatchObject({ parentFolderId: 'arch', sortOrder: 4 });
+
+    await harness.session.removeDocument('leaf');
+    expect(leaf()).toMatchObject({ parentFolderId: 'arch' });
+  });
+
+  it('does not let the echo of an earlier move revert a later one still in flight', async () => {
+    const at = (parentFolderId: string | null, sortOrder: number | null) => ({ ...document('leaf', 'Leaf'), parentFolderId, sortOrder, updatedAt: 30 });
+    const harness = createHarness(SCOPE, { documents: [document('a', 'A'), document('b', 'B'), document('c', 'C'), document('leaf', 'Leaf')] });
+    await harness.session.start();
+    const answers: Array<() => void> = [];
+    (harness.dataSource.command as ReturnType<typeof vi.fn>).mockImplementation(() =>
+      new Promise((resolve) => answers.push(() => resolve({ ok: true }))));
+    const leaf = () => harness.session.getDocuments().find((doc) => doc.documentId === 'leaf');
+
+    const first = harness.session.moveDocument('leaf', 'a', { sortOrder: 1 });
+    const second = harness.session.moveDocument('leaf', 'b', { sortOrder: 2 });
+    // The first move's broadcast lands after the second optimistic write.
+    harness.emitData({ type: 'items-upserted', items: [{ ...at('a', 1), title: 'Leaf renamed' }] });
+    expect(leaf()).toMatchObject({ parentFolderId: 'b', sortOrder: 2, title: 'Leaf renamed' });
+    answers[0]();
+    await first;
+    harness.emitData({ type: 'items-upserted', items: [at('a', 1)] });
+    expect(leaf()).toMatchObject({ parentFolderId: 'b', sortOrder: 2 });
+    answers[1]();
+    await second;
+    harness.emitData({ type: 'items-upserted', items: [at('b', 2)] });
+    expect(leaf()).toMatchObject({ parentFolderId: 'b', sortOrder: 2 });
+
+    // With nothing in flight, a teammate's move applies.
+    harness.emitData({ type: 'items-upserted', items: [at('c', 7)] });
+    expect(leaf()).toMatchObject({ parentFolderId: 'c', sortOrder: 7 });
   });
 
   it('carries typed-page parents and sibling order through page writes', async () => {
@@ -493,13 +596,13 @@ describe('CollabDocsSession', () => {
     expect(harness.session.getDocuments().find((doc) => doc.documentId === 'child')).toMatchObject({ parentKind: 'item' });
 
     harness.session.moveDocument('zeta', 'i1', { parentKind: 'item', sortOrder: 5 });
-    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'zeta', parentFolderId: 'i1', parentKind: 'item', sortOrder: 5 });
+    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'zeta', parentFolderId: 'i1', parentKind: 'item', sortOrder: 5, confirm: true });
     // arch -> i1 -> child would close a loop through the typed page.
     expect(harness.session.movePage('arch', 'child')).toBe(false);
 
-    // Removing arch drops the typed page's placement; its child stays with it.
+    // Trashing arch keeps the typed page's placement for a restore; its child stays with it.
     harness.session.removePage('arch');
-    expect(harness.session.getItemPlacements()).toEqual([]);
+    expect(harness.session.getItemPlacements().map((placement) => placement.parentId)).toEqual(['arch']);
     expect(harness.session.getDocuments().map((doc) => doc.documentId)).toEqual(expect.arrayContaining(['child', 'zeta']));
   });
 
@@ -522,20 +625,20 @@ describe('CollabDocsSession', () => {
 
     // Moving a type moves its prose document with it.
     await harness.session.moveTypePlacement('module', 'q');
-    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'type-page:module', parentFolderId: 'q' });
+    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'type-page:module', parentFolderId: 'q', confirm: true });
 
     // Removing P: the prose of a type placed outside P (module, now under Q;
     // stale, placed under Q by an older client) is moved out first; the prose of
     // a type placed inside goes with the subtree and is counted.
     expect(harness.session.pageRemovalCount('p')).toBe(2);
     harness.session.removePage('p');
-    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'type-page:stale', parentFolderId: 'q' });
+    expect(harness.commands).toContainEqual({ type: 'move-document', documentId: 'type-page:stale', parentFolderId: 'q', confirm: true });
     const remaining = harness.session.getDocuments().map((doc) => [doc.documentId, doc.parentFolderId ?? null]);
     expect(remaining).toEqual(expect.arrayContaining([['q', null], ['type-page:module', 'q'], ['type-page:stale', 'q']]));
     expect(remaining.map(([id]) => id)).not.toContain('type-page:person');
     const moveIndex = harness.commands.findIndex((c) => c.type === 'move-document' && c.documentId === 'type-page:stale');
-    const removeIndex = harness.commands.findIndex((c) => c.type === 'remove-folder');
-    expect(moveIndex).toBeLessThan(removeIndex);
+    const trashIndex = harness.commands.findIndex((c) => c.type === 'trash-document' && c.documentId === 'p');
+    expect(moveIndex).toBeLessThan(trashIndex);
   });
 
   it('reports the real outcome of an item placement and rolls back a refused one', async () => {

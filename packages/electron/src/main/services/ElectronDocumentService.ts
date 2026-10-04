@@ -18,8 +18,10 @@ import crypto from 'crypto';
 import { getCurrentIdentity } from './TrackerIdentityService';
 import { createNativeTrackerItem, type NativeTrackerCreatePayload } from './tracker/createNativeTrackerItem';
 import { assertTrackerItemFitsRoom, pushSharedTrackerItem } from './tracker/trackerItemShareGate';
+import { fileTrackerItemRowUpdateRefusal } from './tracker/fileTrackerItemSizeGate';
 import { applyCommentMutation, type CommentMutation } from './tracker/commentMutations';
 import { appendActivity } from './tracker/trackerActivity';
+import { TrackerBodyVersionConflictError } from './tracker/trackerBodyVersionConflict';
 import { COLUMN_ONLY_IDENTITY_KEYS, extractItemCustomFields } from './tracker/trackerRowCustomFields';
 import { fromDbBoolean } from './tracker/trackerDbValue';
 import {
@@ -1426,6 +1428,15 @@ export class ElectronDocumentService implements DocumentService {
     return await this.findRowForFrontmatterFile(parsed.relativePath, parsed.trackerType);
   }
 
+  /**
+   * The `tracker_items` row a public id names, resolving `fm:<type>:<path>`
+   * aliases to the stable row the way `updateTrackerItemInFile` does. Never
+   * creates a projection row.
+   */
+  async findTrackerRowForPublicId(itemId: string): Promise<any | null> {
+    return this.resolveTrackerRowForPublicId(itemId, { createProjectionForFullDocument: false });
+  }
+
   private async findRowForFrontmatterFile(
     relativePath: string,
     trackerType: string,
@@ -2301,8 +2312,12 @@ export class ElectronDocumentService implements DocumentService {
 
   /**
    * Update the rich content (Lexical editor state) of a tracker item.
+   *
+   * With `expectedBodyVersion`, the write lands only while `body_version` is
+   * still that value, and otherwise throws `TrackerBodyVersionConflictError`
+   * carrying the current version. Without it the write is unconditional.
    */
-  async updateTrackerItemContent(itemId: string, content: any): Promise<void> {
+  async updateTrackerItemContent(itemId: string, content: any, expectedBodyVersion?: number): Promise<void> {
     const row = await this.resolveTrackerRowForPublicId(itemId, { createProjectionForFullDocument: true });
     if (!row) {
       throw new Error(`Tracker item not found: ${itemId}`);
@@ -2324,16 +2339,26 @@ export class ElectronDocumentService implements DocumentService {
     // tracker_items.body_version bumped but tracker_body_cache without
     // the new row -- on next save the bump re-fires and the cache row
     // gets a fresher version anyway, so we don't end up wedged.
+    const guarded = expectedBodyVersion !== undefined;
     const updateResult = await database.query<any>(
       `UPDATE tracker_items
          SET content = $1,
              data = $2,
              body_version = COALESCE(body_version, 0) + 1,
              updated = NOW()
-       WHERE id = $3
+       WHERE id = $3${guarded ? ' AND COALESCE(body_version, 0) = $4' : ''}
        RETURNING *`,
-      [contentJson, JSON.stringify(data), row.id]
+      guarded
+        ? [contentJson, JSON.stringify(data), row.id, expectedBodyVersion]
+        : [contentJson, JSON.stringify(data), row.id]
     );
+    if (guarded && updateResult.rows.length === 0) {
+      const current = await database.query<{ body_version: string | number | null }>(
+        `SELECT body_version FROM tracker_items WHERE id = $1`,
+        [row.id]
+      );
+      throw new TrackerBodyVersionConflictError(itemId, Number(current.rows[0]?.body_version ?? 0));
+    }
     const newBodyVersion = Number(updateResult.rows[0]?.body_version ?? 0);
 
     if (contentJson !== null && newBodyVersion > 0) {
@@ -3949,9 +3974,11 @@ export function setupDocumentServiceHandlers(resolver: DocumentServiceResolver) 
   safeHandle('document-service:tracker-item-update-content', async (event, payload: {
     itemId: string;
     content: any;
+    /** Write only while the stored body is at this version; see updateTrackerItemContent. */
+    expectedBodyVersion?: number;
   }) => {
     try {
-      await requireDocumentService(event).updateTrackerItemContent(payload.itemId, payload.content);
+      await requireDocumentService(event).updateTrackerItemContent(payload.itemId, payload.content, payload.expectedBodyVersion);
 
       // Trigger sync; the new sync engine orders writes by server-assigned syncId.
       try {
@@ -3973,6 +4000,9 @@ export function setupDocumentServiceHandlers(resolver: DocumentServiceResolver) 
 
       return { success: true };
     } catch (error) {
+      if (error instanceof TrackerBodyVersionConflictError) {
+        return { success: false, conflict: true, bodyVersion: error.bodyVersion, error: error.message };
+      }
       console.error('[DocumentService] tracker-item-update-content failed:', error);
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
@@ -4075,11 +4105,21 @@ export function setupDocumentServiceHandlers(resolver: DocumentServiceResolver) 
       // Capture pre-update relationship values so inverse propagation (below) can
       // diff added/dropped targets. Same best-effort read as the non-file update
       // handler: no old row means we skip propagation rather than guess.
+      // Resolved the way the write resolves it, so an `fm:<type>:<path>` alias
+      // reaches the same row (and the size check below) as its stable id.
       let oldData: Record<string, unknown> = {};
+      let oldRowValue: any = null;
       try {
-        const oldRow = await database.query<any>(`SELECT data FROM tracker_items WHERE id = $1`, [payload.itemId]);
-        if (oldRow.rows[0]) oldData = parseJsonColumn<Record<string, unknown>>(oldRow.rows[0].data) ?? {};
+        oldRowValue = await svc.findTrackerRowForPublicId(payload.itemId);
+        if (oldRowValue) oldData = parseJsonColumn<Record<string, unknown>>(oldRowValue.data) ?? {};
       } catch { /* skip inverse propagation if old data is unavailable */ }
+
+      // A shared item its room would refuse is refused here, before the file is
+      // written. With no row there is nothing the room holds for it yet.
+      if (oldRowValue?.workspace) {
+        const refusal = fileTrackerItemRowUpdateRefusal(oldRowValue, payload.updates);
+        if (refusal) return { success: false, error: refusal };
+      }
 
       const item = await svc.updateTrackerItemInFile(payload.itemId, payload.updates);
       const policy = getEffectiveTrackerSharingPolicy(item.workspace, item.type);

@@ -39,6 +39,7 @@ vi.mock('../collabAgentEditRevision', () => ({
 import { SQLiteDatabase } from '../../../main/database/sqlite/SQLiteDatabase';
 import { PersonalPagesService, personalDocHistoryKey } from '../../../main/services/PersonalPagesService';
 import { applyAgentDiff, readCollabDocForAgent } from '../agentDocumentAccess';
+import { applyPersonalPageAgentEdit, type PersonalPageIo } from '../personalAgentEdit';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../../../main/database/sqlite/schemas');
 const WS = '/ws/personal-agent-edit';
@@ -128,6 +129,51 @@ describe('agent edits to Personal pages', () => {
 
     expect(result).toMatchObject({ success: true });
     expect((await service.getBody(WS, 'ideas'))?.content).toBe('# Ideas\n\nTables: one shared DataTable.\n\nTyped meanwhile.\n');
+  });
+
+  it('re-applies a closed typed page edit on top of text saved between its read and its write', async () => {
+    const stored = { content: '# Idea\n\nTables: undecided.\n', version: 3 };
+    let beforeWrite: (() => void) | null = () => {
+      stored.content += '\nTyped meanwhile.\n';
+      stored.version += 1;
+    };
+    const io = {
+      getTypedPageBody: vi.fn(async () => ({ ...stored })),
+      setTypedPageBody: vi.fn(async (_itemId: string, content: string, expectedVersion: number) => {
+        const hook = beforeWrite;
+        beforeWrite = null;
+        hook?.();
+        if (expectedVersion !== stored.version) return { conflict: true as const, version: stored.version, content: stored.content };
+        stored.content = content;
+        stored.version += 1;
+        return { version: stored.version };
+      }),
+      liveTypedPage: () => null,
+    } as unknown as PersonalPageIo;
+
+    const result = await applyPersonalPageAgentEdit('personal://tracker-content/idea_1', [
+      { oldText: 'Tables: undecided.', newText: 'Tables: one shared DataTable.' },
+    ], {}, io);
+
+    expect(result).toMatchObject({ success: true });
+    expect(stored.content).toBe('# Idea\n\nTables: one shared DataTable.\n\nTyped meanwhile.\n');
+
+    // No cached text at the current version: the first write is refused, and
+    // the version it reports is paired with a fresh read.
+    const writes: number[] = [];
+    io.getTypedPageBody = async () => ({ content: stored.content, version: null });
+    io.setTypedPageBody = async (_itemId, content, expectedVersion) => {
+      writes.push(expectedVersion);
+      if (expectedVersion !== stored.version) return { conflict: true, version: stored.version };
+      stored.content = content;
+      return { written: true };
+    };
+    const retried = await applyPersonalPageAgentEdit('personal://tracker-content/idea_1', [
+      { oldText: 'Typed meanwhile.', newText: 'Typed meanwhile, then edited.' },
+    ], {}, io);
+    expect(retried).toMatchObject({ success: true });
+    expect(writes).toEqual([0, stored.version]);
+    expect(stored.content).toContain('Typed meanwhile, then edited.');
   });
 
   it('reports text that is not on the page instead of writing anything', async () => {

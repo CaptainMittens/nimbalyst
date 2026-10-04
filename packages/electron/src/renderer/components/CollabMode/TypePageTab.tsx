@@ -2,12 +2,10 @@
  * A tracker type opened as a page in Pages mode (`type://<typeId>`), laid out
  * like a document tab: the crumb (where the type sits in the tree), the type's
  * name, one row of facts about the type, its prose (`TypePageProse`), then the
- * table of every item of the type, wherever each item's page lives -- the
- * Where column says which page that is.
+ * table of every item of the type (collab-client's `TypePageTable`).
  *
- * The table is the shared view embed fed a built-in "All" view, so it reads
- * the same tracker atoms Tracker mode does and writes through the same IPC
- * paths. Named views are created on purpose; none are derived here.
+ * The table reads the same tracker atoms Tracker mode does and writes through
+ * the same IPC paths, through the desktop tracker data source given to it.
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -15,18 +13,12 @@ import { atom, useAtomValue, useStore, type Atom } from 'jotai';
 import type { CollabScope } from '@nimbalyst/collab-client/core';
 import type { SharedDocument } from '@nimbalyst/collab-client/docs';
 import { DESKTOP_TRACKER_UI_CAPABILITIES, TrackersUIProvider } from '@nimbalyst/collab-client/trackers-ui';
-import {
-  TrackerViewEmbed,
-  createItemWhereResolver,
-  createTypePageView,
-  typeWithSubtypes,
-  type TrackerGridDerivedColumn,
-} from '@nimbalyst/collab-client/trackers-ui/embed';
+import { TypePageTable, crumbItemLookup, trackerPageCrumbFolders, typePageTypeIds } from '@nimbalyst/collab-client/trackers-ui/page';
+import '@nimbalyst/collab-client/trackers-ui/page.css';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { resolveColumnsForType } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerColumns';
 import { trackerItemCountByTypeAtom, trackerItemsMapAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
-import { resolveRoleFieldName } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
 import { ElectronTrackerDataSource } from '../../services/ElectronTrackerDataSource';
 import {
   getElectronCollabDocsSession,
@@ -36,10 +28,8 @@ import {
 import { createDesktopTrackerDataSource } from '../EmbedFrame/desktopTrackerDataSource';
 import { useDesktopTrackerIdentity } from '../EmbedFrame/useDesktopTrackerIdentity';
 import { isTeamTrackerSharing } from '../Settings/panels/trackerConfigUpgrade';
-import { crumbItemLookup, trackerPageCrumbFolders } from '../TrackerMode/TrackerPageView';
 import { typePageTitle } from './collabPageTabs';
 import { TypePageProse } from './TypePageProse';
-import '../TrackerMode/TrackerPageView.css';
 import './TypePageTab.css';
 
 type Lane = 'team' | 'personal';
@@ -98,7 +88,6 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
     () => createDesktopTrackerDataSource({ workspacePath, store, writer }),
     [workspacePath, store, writer],
   );
-  const view = useMemo(() => createTypePageView(typeId), [typeId]);
   // `TrackerIdentity.email` is nullable; the provider's "me" needs one to stamp `by` on an edit.
   const trackerIdentity = identity?.email ? identity : null;
 
@@ -113,10 +102,7 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
   const pages = useAtomValue<readonly PageRow[]>(session?.atoms.sharedFolders ?? NO_PAGES);
   const documents = useAtomValue<readonly SharedDocument[]>(session?.atoms.allSharedDocuments ?? NO_DOCUMENTS);
   // The type and every type that extends it: the tree row counts them all, so the table lists them all.
-  const typeIds = useMemo(() => typeWithSubtypes(typeId, {
-    typeExtends: (id) => globalRegistry.get(id)?.extends ?? null,
-    listedTypes: () => globalRegistry.getListed().map((listed) => ({ typeId: listed.type, name: listed.displayName })),
-  }), [typeId, model]);
+  const typeIds = useMemo(() => typePageTypeIds(typeId), [typeId, model]);
   const itemCountAtom = useMemo(
     () => atom((get) => typeIds.reduce((total, id) => total + get(trackerItemCountByTypeAtom(id)), 0)),
     [typeIds],
@@ -135,19 +121,7 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
   );
   const parentFolderId = typePlacements.find((placement) => placement.typeId === typeId)?.parentFolderId ?? null;
   const fieldLabels = useMemo(() => typeFieldLabels(typeId), [typeId, model]);
-  const derivedColumns = useMemo((): TrackerGridDerivedColumn[] => {
-    const where = createItemWhereResolver({
-      placements: itemPlacements,
-      pages,
-      typeLabel: typeName,
-      rootLabel: lane === 'personal' ? 'Personal' : 'Team',
-      itemTitle: (itemId) => itemLookup(itemId)?.title ?? null,
-    });
-    // Right after the title column (the type's title-role field): past the
-    // field columns it falls off-screen at a normal width.
-    const after = resolveRoleFieldName(typeId, 'title');
-    return [{ id: '__where', label: 'Where', width: 220, after, value: (row) => where(row.id) }];
-  }, [itemPlacements, pages, typeName, lane, typeId, model, itemLookup]);
+  const itemTitle = useMemo(() => (itemId: string) => itemLookup(itemId)?.title ?? null, [itemLookup]);
 
   return (
     <div className="type-page-tab tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="type-page-tab" data-type-id={typeId}>
@@ -192,14 +166,17 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
             parentFolderId={parentFolderId}
             documents={documents}
           />
-          <div className="type-page-tab-table flex flex-col" data-testid="type-page-table">
-            <div className="type-page-tab-views flex items-center gap-1 border-b border-nim text-xs">
-              <span className="-mb-px border-b-2 border-[var(--nim-primary)] px-2.5 py-[7px] text-nim">All</span>
-            </div>
-            <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
-              <TrackerViewEmbed view={view} variant="page" onOpenItem={onOpenItem} derivedColumns={derivedColumns} typeIds={typeIds} />
-            </TrackersUIProvider>
-          </div>
+          <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
+            <TypePageTable
+              typeId={typeId}
+              typeLabel={typeName}
+              rootLabel={lane === 'personal' ? 'Personal' : 'Team'}
+              itemPlacements={itemPlacements}
+              pages={pages}
+              itemTitle={itemTitle}
+              onOpenItem={onOpenItem}
+            />
+          </TrackersUIProvider>
         </div>
       </div>
     </div>

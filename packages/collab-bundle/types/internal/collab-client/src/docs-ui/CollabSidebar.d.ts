@@ -3,6 +3,9 @@ import './collabSidebarTree.css';
 import { type SharedDocument, type CollabTypeTreeResolver } from '../docs/index';
 export interface CollabSidebarProps {
     activeDocumentId?: string | null;
+    /** The open typed page (item id) or type page (type id), highlighted like the open page. */
+    activeItemId?: string | null;
+    activeTypeId?: string | null;
     /** Open the discovery hub (center pane). Shown as a Home action. */
     onShowHome?: () => void;
     /** Highlight the Home action when the hub is the active surface. */

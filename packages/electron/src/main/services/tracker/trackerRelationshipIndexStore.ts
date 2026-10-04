@@ -17,6 +17,7 @@ import { logger } from '../../utils/logger';
 import { flattenDataForRead } from './relationshipFieldStorage';
 import {
   BODY_LINK_FIELD_PREFIX,
+  bodyLinkHomeScope,
   bodyLinkKeys,
   bodyMarkdownOf,
   deriveBodyLinkEdges,
@@ -166,8 +167,10 @@ export async function reindexItemBodyLinks(
     const db = dbOverride ?? (getDatabase() as RelationshipIndexDb | null);
     if (!db) return;
     const markdown = bodyMarkdownOf(body);
-    const targets = await resolveLinkTargets(workspace, bodyLinkKeys(markdown), db);
-    const edges = deriveBodyLinkEdges(sourceItemId, markdown, (key) => targets.get(key));
+    // Another team project's links never resolve to this workspace's items.
+    const scope = { homeScope: bodyLinkHomeScope(workspace) };
+    const targets = await resolveLinkTargets(workspace, bodyLinkKeys(markdown, scope), db);
+    const edges = deriveBodyLinkEdges(sourceItemId, markdown, (key) => targets.get(key), scope);
     await db.query(
       `DELETE FROM tracker_relationship_index
        WHERE workspace = $1 AND source_item_id = $2 AND source_field_id LIKE '${BODY_LINK_FIELD_PREFIX}%'`,

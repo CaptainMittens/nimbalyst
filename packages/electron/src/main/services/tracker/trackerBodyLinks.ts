@@ -2,15 +2,21 @@
  * Body links as relationship edges.
  *
  * A typed page's body carries links of the form
- * `[label](https://console.nimbalyst.com/org/<org>/project/<p>/trackers/item/KEY "view=card rel=built-on")`
- * (or `/app/item/KEY` for a local item), and older bodies the Phase 3 form
+ * `[label](https://console.nimbalyst.com/org/<org>/project/<p>/page/item/KEY "view=card rel=built-on")`
+ * (older links `.../trackers/item/KEY`, or `/app/item/KEY` for a local item), and older bodies the Phase 3 form
  * `[label](nimbalyst://KEY "...")`; both are read. Each distinct
  * (target, relation) becomes one row in the local relationship index with
  * `source_field_id = 'body:<rel>'` (or `'body:link'` for a link with no `rel=`),
  * so the Links section can list a page's relations and the linked page can list
  * them under the inverse name. Pure: the index store resolves keys and persists.
+ *
+ * A console link names its team project, and an issue key is only unique
+ * within one: given the workspace's own team project (`homeScope`), a link to
+ * another project's NIM-123 is skipped rather than resolved to this project's
+ * NIM-123. With no known team project every team link is skipped. It stays a
+ * link in the body, opened through the console.
  */
-import { CONSOLE_LINK_ORIGIN, parseConsoleLink } from '@nimbalyst/collab-protocol';
+import { CONSOLE_LINK_ORIGIN, parseConsoleLink, type ConsoleTeamScope } from '@nimbalyst/collab-protocol';
 import type { RelationshipEdge } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 
 /** Prefix that marks a body-derived row; field-derived rows never start with it. */
@@ -29,7 +35,7 @@ const KEY_PATTERN = `(?!(?:${RESERVED_LINK_HOSTS.join('|')})(?=[)\\s]|$))[^)\\s/
  * Candidate console item links; `parseConsoleLink` decides. Mirrors
  * `TRACKER_REFERENCE_CONSOLE_HREF_PATTERN` in `trackerReferenceHref.ts`.
  */
-const CONSOLE_ITEM_PATTERN = `${CONSOLE_LINK_ORIGIN.replace(/\./g, '\\.')}/(?:org/[^/\\s()"?#]+/project/[^/\\s()"?#]+/trackers/item|app/item)/[^/\\s()"?#]+(?:[?#][^\\s()"]*)?`;
+const CONSOLE_ITEM_PATTERN = `${CONSOLE_LINK_ORIGIN.replace(/\./g, '\\.')}/(?:org/[^/\\s()"?#]+/project/[^/\\s()"?#]+/(?:page|trackers)/item|app/item)/[^/\\s()"?#]+(?:[?#][^\\s()"]*)?`;
 
 /**
  * `[label](<console item link or nimbalyst://KEY>)` with an optional
@@ -39,9 +45,39 @@ const CONSOLE_ITEM_PATTERN = `${CONSOLE_LINK_ORIGIN.replace(/\./g, '\\.')}/(?:or
 const LINK_RE = new RegExp(`(?<!\\\\)\\[([^\\]]*)\\]\\((?:nimbalyst://(${KEY_PATTERN})|(${CONSOLE_ITEM_PATTERN}))(?:\\s+"([^"]*)")?\\)`, 'g');
 const LINK_HINT_RE = /nimbalyst:\/\/|console\.nimbalyst\.com\//;
 
-function consoleItemKey(href: string): string | null {
+export interface BodyLinkScopeOptions {
+  /**
+   * The workspace's team project; null or undefined when it has none or it is
+   * not known yet (signed out, offline). Without one, only `nimbalyst://KEY`
+   * and `/app/item/` links are read as this workspace's.
+   */
+  homeScope?: ConsoleTeamScope | null;
+}
+
+/**
+ * Each workspace's team project, recorded when its tracker room is set up:
+ * the room its team items live in, so the project their keys belong to.
+ */
+const homeScopes = new Map<string, ConsoleTeamScope>();
+
+export function setBodyLinkHomeScope(workspace: string, scope: ConsoleTeamScope): void {
+  homeScopes.set(workspace, scope);
+}
+
+/** Undefined until the workspace's room is set up (offline, signed out, no team yet). */
+export function bodyLinkHomeScope(workspace: string): ConsoleTeamScope | undefined {
+  return homeScopes.get(workspace);
+}
+
+/** The item key a console link names, or null when it is not an item link or names another team project. */
+function consoleItemKey(href: string, { homeScope }: BodyLinkScopeOptions): string | null {
   const target = parseConsoleLink(href);
-  return target?.kind === 'item' ? target.itemRef : null;
+  if (target?.kind !== 'item') return null;
+  // With no known team project, a team link cannot be shown to be this workspace's.
+  if (target.scope !== 'local' && (!homeScope || homeScope.orgId !== target.scope.orgId || homeScope.projectId !== target.scope.projectId)) {
+    return null;
+  }
+  return target.itemRef;
 }
 /** Inline code spans: a run of backticks closed by a run of the same length. */
 const INLINE_CODE_RE = /(`+)[\s\S]*?\1/g;
@@ -97,7 +133,7 @@ function clip(text: string): string {
  * the reader sees it: every link renders as its label (a tracker link with an
  * empty label as its KEY).
  */
-export function parseBodyLinks(markdown: string): ParsedBodyLink[] {
+export function parseBodyLinks(markdown: string, options: BodyLinkScopeOptions = {}): ParsedBodyLink[] {
   const links: ParsedBodyLink[] = [];
   if (!markdown || !LINK_HINT_RE.test(markdown)) return links;
   // A link written as an example (fenced block, inline code) is not a relation.
@@ -124,7 +160,8 @@ export function parseBodyLinks(markdown: string): ParsedBodyLink[] {
     const found: Array<{ key: string; rel: string | null; at: number }> = [];
     LINK_RE.lastIndex = 0;
     for (let m = LINK_RE.exec(matchable); m; m = LINK_RE.exec(matchable)) {
-      const key = m[2] ?? consoleItemKey(m[3]);
+      const key = m[2] ?? consoleItemKey(m[3], options);
+      // Not ours (another project's link): it reads as its label, like any other link.
       if (!key) continue;
       rendered += line.slice(cursor, m.index).replace(OTHER_LINK_RE, '$1');
       found.push({ key, rel: relOf(m[4]), at: rendered.length });
@@ -165,9 +202,10 @@ export function deriveBodyLinkEdges(
   sourceItemId: string,
   markdown: string,
   resolve: (key: string) => ResolvedLinkTarget | null | undefined,
+  options: BodyLinkScopeOptions = {},
 ): RelationshipEdge[] {
   const byEdge = new Map<string, RelationshipEdge & { metadata: { sentence: string; count: number } }>();
-  for (const link of parseBodyLinks(markdown)) {
+  for (const link of parseBodyLinks(markdown, options)) {
     const target = resolve(link.key);
     if (!target || target.itemId === sourceItemId) continue;
     const sourceFieldId = `${BODY_LINK_FIELD_PREFIX}${link.rel ?? 'link'}`;
@@ -191,6 +229,6 @@ export function deriveBodyLinkEdges(
 }
 
 /** Distinct keys a body references, for a single resolution query. */
-export function bodyLinkKeys(markdown: string): string[] {
-  return [...new Set(parseBodyLinks(markdown).map((link) => link.key))];
+export function bodyLinkKeys(markdown: string, options: BodyLinkScopeOptions = {}): string[] {
+  return [...new Set(parseBodyLinks(markdown, options).map((link) => link.key))];
 }

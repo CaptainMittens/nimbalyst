@@ -1,15 +1,16 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import type { TrackerDataModel } from '@nimbalyst/tracker-schema';
-import { buildPlacedViewCommands, placedViewScopeForDocument } from '../placedViewCommands';
+import { buildPlacedViewCommandEntries } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/placedViewCommandEntries';
+import { placedViewReachForDocument, placedViewScopeForDocument } from '../placedViewCommands';
 
 function model(type: string, plural: string, fields: TrackerDataModel['fields']): TrackerDataModel {
   return { type, displayName: type, displayNamePlural: plural, fields } as TrackerDataModel;
 }
 
-describe('buildPlacedViewCommands', () => {
+describe('buildPlacedViewCommandEntries', () => {
   it('offers a table per type, a 2x2 for types with two number fields, and the marks lists', () => {
-    const commands = buildPlacedViewCommands([
+    const commands = buildPlacedViewCommandEntries([
       model('competitor', 'Competitors', [
         { name: 'title', type: 'string' },
         { name: 'devFirst', type: 'number' },
@@ -47,5 +48,17 @@ describe('placedViewScopeForDocument', () => {
   it('writes no scope it cannot name', () => {
     expect(placedViewScopeForDocument(null, { team, ...lanes })).toBeUndefined();
     expect(placedViewScopeForDocument('collab://org:o:doc:d1', { team: null, ...lanes })).toBeUndefined();
+  });
+});
+
+describe('placedViewReachForDocument', () => {
+  const team = { orgId: 'org-1', projectId: 'tp-1' };
+  const lanes = { itemLane: () => 'personal' as const, typeLane: () => 'personal' as const };
+
+  it('reaches the window team, and local only on a page of the author\'s own', () => {
+    expect(placedViewReachForDocument('collab://org:o:doc:d1', { team, ...lanes })).toEqual({ team, local: false });
+    expect(placedViewReachForDocument('personal://doc-1', { team, ...lanes })).toEqual({ team, local: true });
+    expect(placedViewReachForDocument(null, { team, ...lanes })).toEqual({ team, local: false });
+    expect(placedViewReachForDocument(null, { team: null, ...lanes })).toEqual({ team: null, local: true });
   });
 });

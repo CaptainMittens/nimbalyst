@@ -168,9 +168,9 @@ export {
   getAllExtensionTransformers,
   getAllExtensionDynamicOptions,
   subscribeToExtensionContributions,
-  useExtensionUserCommands,
   type EditorExtensionContributions,
 } from './extensions/extensionContributionsStore';
+export { useExtensionUserCommands } from './extensions/useExtensionUserCommands';
 
 // Lexical-extension contributions from Nimbalyst extensions. The
 // electron-side bridge writes here; `NimbalystEditor` reads from here

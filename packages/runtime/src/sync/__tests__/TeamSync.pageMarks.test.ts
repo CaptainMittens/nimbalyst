@@ -1,7 +1,8 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { asTeamJwt, asTeamMemberId } from '../../auth/jwtScopes';
 import { TeamSyncProvider } from '../TeamSync';
+import { onTeamPageMarksChanged } from '../teamPageMarks';
 import type { PageMarkEntry } from '@nimbalyst/collab-protocol';
 
 function fakeSocket(readyState: number) {
@@ -16,6 +17,7 @@ function fakeSocket(readyState: number) {
       addEventListener: (type: string, fn: (event: any) => void) => listeners.set(type, [...(listeners.get(type) ?? []), fn]),
     },
     deliver: (message: unknown) => listeners.get('message')?.forEach((fn) => fn({ data: JSON.stringify(message) })),
+    open: () => listeners.get('open')?.forEach((fn) => fn({})),
   };
 }
 
@@ -59,5 +61,17 @@ describe('TeamSyncProvider page marks', () => {
     const silent = await connected();
     await expect(silent.provider.queryPageMarks({}, 20)).resolves.toBeNull();
     silent.provider.destroy();
+  });
+
+  it('tells marks lists to ask again when the server says marks changed and when the socket (re)opens', async () => {
+    const { provider, deliver, open } = await connected();
+    const changed = vi.fn();
+    const unsubscribe = onTeamPageMarksChanged(changed);
+    deliver({ type: 'pageMarksChanged' });
+    expect(changed).toHaveBeenCalledTimes(1);
+    open();
+    expect(changed).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    provider.destroy();
   });
 });

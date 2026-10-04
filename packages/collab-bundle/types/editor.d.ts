@@ -195,6 +195,20 @@ export interface CollabEditorCommentsOptions {
   onReply?: (recipientUserIds: string[], payload: CommentReplyPayload) => void;
 }
 
+/** The part of a type definition the placed-view slash entries read. */
+export interface PlacedViewTypeOption {
+  type: string;
+  displayName?: string;
+  displayNamePlural?: string;
+  fields: ReadonlyArray<{ name: string; type: string }>;
+}
+
+/** The host's live list of types, for the placed-view slash entries. */
+export interface PlacedViewTypeSource {
+  list(): readonly PlacedViewTypeOption[];
+  subscribe(listener: () => void): () => void;
+}
+
 export interface CollabEditorMountOptions {
   element: HTMLElement;
   source: CollabEditorSource;
@@ -208,6 +222,20 @@ export interface CollabEditorMountOptions {
    * card and statements references render their full views.
    */
   trackerReferences?: TrackerReferenceResolver;
+  /** How inline references render in prose: the key-and-title chip, or the quiet title link. */
+  trackerReferenceAppearance?: 'chip' | 'quiet';
+  /**
+   * The typed page this body belongs to; its links then offer the relations
+   * the pair of types allows. Read when the editor mounts.
+   */
+  trackerReferenceSource?: { itemId: string; type: string };
+  /**
+   * The project's types a page can place a view of. With it, a team-room
+   * mount's slash menu offers "Table: <type>", "2x2: <type>" and the
+   * decisions and open questions lists, written as this project's console
+   * view links. Omit it and the menu offers no placed views.
+   */
+  placedViewTypes?: PlacedViewTypeSource;
   onStateChange?(state: CollabEditorState): void;
   onPresenceChange?(presence: CollabEditorPresence): void;
   onWriteRejected?(rejection: CollabEditorWriteRejection): void;
@@ -301,7 +329,67 @@ export interface InstallEditorBridgeOptions {
 
 export declare function mountCollabEditor(options: CollabEditorMountOptions): CollabEditorHandle;
 export declare function resolveCollabEditorUser(user: CollabEditorUser): ResolvedCollabEditorUser;
+
+/**
+ * What a host renders for a placed view in a page; null falls back to the
+ * "shows in the desktop app" note. `target` is the parsed link, `attrs` the
+ * definition from its title.
+ */
+export type BrowserPlacedViewRenderer = (view: {
+  nodeKey: string;
+  src: string;
+  label: string;
+  target: PlacedViewTarget;
+  attrs: Readonly<Record<string, string>>;
+}) => ReactNode | null;
+/** What a placed-view link shows: a type's items, or the team's marks. */
+export type PlacedViewTarget =
+  | { kind: 'type'; typeId: string; scope?: { orgId: string; projectId: string } | 'local' }
+  | { kind: 'marks'; marks: 'all' | 'decided' | 'open'; scope?: { orgId: string; projectId: string } | 'local' };
+export interface PlacedViewEmbedProps {
+  target: PlacedViewTarget;
+  label: string;
+  attrs: Readonly<Record<string, string>>;
+  /** The scopes the host's items serve; a link naming any other shows its link instead. */
+  reach?: { team: { orgId: string; projectId: string } | null; local: boolean };
+  onOpenItem?: (itemId: string) => void;
+  onOpenAsTable?: (view: unknown) => void;
+  onOpenPage?: (uri: string) => void;
+  onOpenLink?: (href: string) => void;
+}
+/**
+ * Installs the host's placed-view renderer for every editor this bundle
+ * mounts (null removes it). Returns a function that removes this renderer.
+ */
+export declare function setBrowserPlacedViewRenderer(renderer: BrowserPlacedViewRenderer | null): () => void;
+/** The live placed view a host renders in that slot, inside its own `TrackersUIProvider`. */
+export declare const loadPlacedViewEmbed: () => Promise<{
+  PlacedViewEmbed: ComponentType<PlacedViewEmbedProps>;
+}>;
 export declare function installCollabEditorBridge(options: InstallEditorBridgeOptions): () => void;
+
+/** Who a new decision or open-question mark is by; `name` is written as `by`. */
+export interface PageMarkAuthor {
+  name?: string | null;
+  email?: string | null;
+}
+/** Sets who new page marks are attributed to by default; undefined clears it. */
+export declare function setPageMarkAuthorProvider(provider: (() => PageMarkAuthor | null | undefined) | undefined): void;
+/** What a citation chip can open on this host. With nothing set, it shows its snapshot only. */
+export interface CitationHost {
+  canOpenHumanCitation?: (citation: unknown) => boolean;
+  openHumanCitation?: (citation: unknown) => void;
+  /** Opens a web URL or a document reference. */
+  openSource?: (target: string) => void;
+}
+export declare function setCitationHost(next: CitationHost | undefined): void;
+/** Returns true when the host opened the link itself. */
+export type ConsoleLinkOpener = (href: string) => boolean;
+/**
+ * How this host opens a console link met in a document (a chip for someone's
+ * Personal page): routed in its own tab. Returns the uninstall.
+ */
+export declare function setConsoleLinkOpener(next: ConsoleLinkOpener): () => void;
 
 interface CollabLexicalProviderOptions {
   deferInitialSync?: boolean;
@@ -674,3 +762,15 @@ export type {
   TrackerBodySeeder,
 } from './internal/collab-client/src/trackers/browser/trackerBodyRoom';
 export declare const seedTrackerBody: import('./internal/collab-client/src/trackers/browser/trackerBodyRoom').TrackerBodySeeder;
+/** A team document room opened headlessly, for reading it back without an editor. */
+export interface BrowserDocumentRoomOptions {
+  serverUrl: string;
+  orgId: string;
+  documentId: string;
+  teamMemberId: TeamMemberId;
+  getTeamJwt: () => Promise<TeamJwt>;
+  createWebSocket?: (url: string) => WebSocket;
+}
+export declare function openBrowserDocumentRoom(options: BrowserDocumentRoomOptions): import('./internal/collab-client/src/trackers/browser/trackerBodyRoom').TrackerBodyRoom;
+/** The room's text as markdown once synced ('' with no history); throws when unreadable. Closes the room. */
+export declare function readDocumentRoomMarkdown(room: import('./internal/collab-client/src/trackers/browser/trackerBodyRoom').TrackerBodyRoom, timeoutMs?: number): Promise<string>;

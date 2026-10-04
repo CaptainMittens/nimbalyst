@@ -20,9 +20,12 @@ export type CollabDocsCommand = {
     type: 'update-document-title';
     documentId: string;
     title: string;
-} | {
+}
+/** `purge` permanently deletes a page in Trash; only Trash's permanent delete sets it. */
+ | {
     type: 'remove-document';
     documentId: string;
+    purge?: true;
 } | {
     type: 'trash-document';
     documentId: string;

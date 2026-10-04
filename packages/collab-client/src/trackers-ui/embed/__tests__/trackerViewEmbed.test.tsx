@@ -198,6 +198,46 @@ describe('PlacedViewEmbed', () => {
     expect(screen.getByText('Braze')).toBeDefined();
     expect(screen.getByText('Us').closest('g')!.getAttribute('data-pinned')).toBe('true');
   });
+
+  const projectA = { orgId: 'org-1', projectId: 'proj-a' };
+  const projectB = { orgId: 'org-1', projectId: 'proj-b' };
+
+  it.each([
+    ['another team project', projectA, { team: projectB, local: true }],
+    ['a local view on a team page', 'local' as const, { team: projectB, local: false }],
+    ['a team view in a window with no team', projectB, { team: null, local: true }],
+  ])('never draws or edits the items of %s; it offers the link instead', async (_name, scope, reach) => {
+    const source = fakeSource();
+    const onOpenLink = vi.fn();
+    render(
+      <TrackersUIProvider dataSource={source} identity={null}>
+        <PlacedViewEmbed
+          target={{ kind: 'type', typeId: 'ev-target', scope }}
+          label="Targets"
+          attrs={{}}
+          reach={reach}
+          onOpenLink={onOpenLink}
+        />
+      </TrackersUIProvider>,
+    );
+    const note = await screen.findByTestId('placed-view-out-of-scope');
+    expect(note.textContent).toContain('another project');
+    expect(screen.queryByText('Braze')).toBeNull();
+    expect(document.querySelector('revo-grid')).toBeNull();
+    fireEvent.click(screen.getByTestId('placed-view-open-link'));
+    expect(onOpenLink).toHaveBeenCalledWith(expect.stringMatching(/^https:\/\/console\.nimbalyst\.com\/.*\/view\/type\/ev-target$/));
+    expect(source.command).not.toHaveBeenCalled();
+  });
+
+  it('draws a view whose scope this window reaches', async () => {
+    render(
+      <TrackersUIProvider dataSource={fakeSource()} identity={null}>
+        <PlacedViewEmbed target={{ kind: 'type', typeId: 'ev-target', scope: projectB }} label="Targets" attrs={{}} reach={{ team: projectB, local: false }} />
+      </TrackersUIProvider>,
+    );
+    await screen.findByText('1 item');
+    expect(screen.queryByTestId('placed-view-out-of-scope')).toBeNull();
+  });
 });
 
 describe('MarksListEmbed', () => {

@@ -59,6 +59,7 @@
       }
     ],
     "pageTree": true,
+    "authorWriteEcho": true,
     "typePlacements": [
       {
         "typeId": "bug",

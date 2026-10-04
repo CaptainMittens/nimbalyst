@@ -1,6 +1,8 @@
 import type { DocumentFeedbackIndexSyncMessage, DocumentFeedbackIndexSnapshotMessage } from './documentFeedbackIndex.js';
-import type { TeamPageMarksQueryMessage, TeamPageMarksResponseMessage } from './pageMarks.js';
+import type { TeamPageMarksChangedMessage, TeamPageMarksQueryMessage, TeamPageMarksResponseMessage } from './pageMarks.js';
+import type { TeamPageLinksChangedMessage, TeamPageLinksQueryMessage, TeamPageLinksResponseMessage } from './pageLinks.js';
 export * from './pageMarks.js';
+export * from './pageLinks.js';
 /**
  * TeamRoom wire protocol.
  *
@@ -51,7 +53,8 @@ export type TeamClientMessage =
   | TeamItemPlacementIndexSyncRequestMessage
   | TeamItemPlacementSetMessage
   | TeamItemPlacementRemoveMessage
-  | TeamPageMarksQueryMessage;
+  | TeamPageMarksQueryMessage
+  | TeamPageLinksQueryMessage;
 
 /** Request full team state snapshot */
 export interface TeamSyncRequestMessage {
@@ -115,6 +118,14 @@ export interface TeamDocIndexUpdateMessage {
 export interface TeamDocIndexRemoveMessage {
   type: 'docIndexRemove';
   documentId: string;
+  /** Echoed on the `error` frame if the server refuses this message. */
+  requestId?: string;
+  /**
+   * Permanently delete a page already in Trash; only Trash's "Delete
+   * permanently" and "Empty Trash" send it. Without it a server that knows
+   * the field never permanently deletes. Older servers ignore it.
+   */
+  purge?: true;
 }
 
 /** Move a document into recoverable Trash without changing its folder. */
@@ -147,6 +158,8 @@ export interface TeamDocMoveMessage {
   /** What `newParentFolderId` names. Absent = `'page'`. */
   parentKind?: PageParentKind;
   sortOrder?: number | null;
+  /** Echoed on the `error` frame if the server refuses this message. */
+  requestId?: string;
 }
 
 /** Request the full folder list (first-class folders). */
@@ -196,6 +209,8 @@ export interface TeamFolderMoveMessage {
 export interface TeamFolderRemoveMessage {
   type: 'folderRemove';
   folderId: string;
+  /** Echoed on the `error` frame if the server refuses this message. */
+  requestId?: string;
 }
 
 /** Request every tracker-type placement in the page tree. */
@@ -314,6 +329,9 @@ export type TeamServerMessage =
   | TeamProjectAccessChangedMessage
   | TeamDocumentCommentNotifyAckMessage
   | TeamPageMarksResponseMessage
+  | TeamPageMarksChangedMessage
+  | TeamPageLinksResponseMessage
+  | TeamPageLinksChangedMessage
   | TeamErrorMessage;
 
 /** Full team state snapshot */
@@ -499,6 +517,12 @@ export interface TeamErrorMessage {
   type: 'error';
   code: string;
   message: string;
+  /**
+   * The refused message's `requestId` (`docMove`, `docIndexRemove`,
+   * `folderRemove`), so a client waiting to confirm that write can fail it.
+   * Absent when the message carried none.
+   */
+  requestId?: string;
 }
 
 // ============================================================================
@@ -641,6 +665,12 @@ export interface TeamState {
    * the parent page id) and ignores `folders`.
    */
   pageTree?: true;
+  /**
+   * Set when the server sends the author its own `docMove`, `docIndexRemove`
+   * and `folderRemove` broadcasts and echoes their `requestId` on a refusal,
+   * so a client can wait for the echo to confirm such a write.
+   */
+  authorWriteEcho?: true;
   /** Tracker-type placements in the page tree (omitted by older servers). */
   typePlacements?: TypePlacementNode[];
   /** Tracker-item placements in the page tree (omitted by older servers). */

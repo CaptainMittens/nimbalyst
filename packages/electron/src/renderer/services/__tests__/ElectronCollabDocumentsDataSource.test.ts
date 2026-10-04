@@ -227,7 +227,11 @@ describe('ElectronCollabDocumentsDataSource', () => {
         getTypePlacements: vi.fn(() => null),
         getItemPlacements: vi.fn(() => null),
         isPageTree: vi.fn(() => true),
+        // A server that sends the author its own page writes says so.
+        echoesAuthorWrites: vi.fn(() => true),
         moveDocument: vi.fn(),
+        removeDocument: vi.fn(),
+        removeFolder: vi.fn(),
         setTypePlacement: vi.fn(),
         destroy: vi.fn(),
       };
@@ -240,6 +244,40 @@ describe('ElectronCollabDocumentsDataSource', () => {
         },
       });
       const settled = (promise: Promise<unknown>) => promise.then(() => 'ok', (error: Error) => error.message);
+      const refuse = (requestId: string, message: string) =>
+        (config as { onWriteRefused?: (id: string, error: { code: string; message: string }) => void })
+          .onWriteRefused?.(requestId, { code: 'forbidden', message });
+      const lastRequestId = (method: ReturnType<typeof vi.fn>) => {
+        const args = method.mock.calls.at(-1)!;
+        return (args[args.length - 1] as { requestId: string }).requestId;
+      };
+
+      // A delete waits for the author's own removal broadcast, or its refusal by request id.
+      const removed = settled(source.command({ type: 'remove-document', documentId: 'page-1' }));
+      await vi.advanceTimersByTimeAsync(0);
+      config.onDocumentRemoved?.('page-1');
+      expect(await removed).toBe('ok');
+      // A server that moves a live page to Trash instead answers with the trashed row.
+      const trashedInstead = settled(source.command({ type: 'remove-document', documentId: 'page-5' }));
+      await vi.advanceTimersByTimeAsync(0);
+      config.onDocumentChanged?.({
+        documentId: 'page-5', projectId: 'p', title: 't', documentType: 'markdown', createdBy: 'm', createdAt: 1, updatedAt: 2, trashedAt: 2,
+      } as never);
+      expect(await trashedInstead).toBe('ok');
+      const subtree = settled(source.command({ type: 'remove-folder', folderId: 'page-2' }));
+      await vi.advanceTimersByTimeAsync(0);
+      config.onFoldersRemoved?.(['page-2'], ['page-2', 'page-3']);
+      expect(await subtree).toBe('ok');
+      const forbidden = settled(source.command({ type: 'remove-document', documentId: 'page-4' }));
+      await vi.advanceTimersByTimeAsync(0);
+      refuse('another-request', 'Not yours');
+      refuse(lastRequestId(provider.removeDocument), 'Viewers cannot delete pages');
+      expect(await forbidden).toMatch(/refused.*Viewers cannot delete pages/);
+      const movedAway = settled(source.command({ type: 'move-document', documentId: 'page-1', parentFolderId: 'mod_3', confirm: true }));
+      await vi.advanceTimersByTimeAsync(0);
+      refuse(lastRequestId(provider.moveDocument), 'Parent not found');
+      expect(await movedAway).toMatch(/refused.*Parent not found/);
+
       const doc = (parentFolderId: string | null, parentKind: 'page' | 'item') => ({
         documentId: 'page-1', projectId: 'p', title: 't', documentType: 'markdown', createdBy: 'm', createdAt: 1, updatedAt: 1,
         parentFolderId, parentKind, sortOrder: null,
@@ -271,6 +309,44 @@ describe('ElectronCollabDocumentsDataSource', () => {
       await vi.advanceTimersByTimeAsync(0);
       config.onTypePlacementsLoaded?.([typeRow('mod_1', 'item')] as never);
       expect(await refused).toMatch(/refused/);
+      source.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not wait for an echo from a server that never sends the author its page writes', async () => {
+    vi.useFakeTimers();
+    try {
+      const provider = {
+        connect: vi.fn(async () => undefined),
+        getStatus: vi.fn(() => 'connected' as const),
+        getDocuments: vi.fn(() => []),
+        getFolders: vi.fn(() => []),
+        getTypePlacements: vi.fn(() => null),
+        getItemPlacements: vi.fn(() => null),
+        isPageTree: vi.fn(() => true),
+        moveDocument: vi.fn(),
+        removeDocument: vi.fn(),
+        removeFolder: vi.fn(),
+        destroy: vi.fn(),
+      };
+      const source = new ElectronCollabDocumentsDataSource({
+        scope,
+        getJwt: async () => asTeamJwt('team-jwt'),
+        createProvider: () => provider as any,
+      });
+      const outcome = (promise: Promise<unknown>) => promise.then(() => 'ok', (error: Error) => error.message);
+      const moved = outcome(source.command({ type: 'move-document', documentId: 'page-1', parentFolderId: 'mod_1', parentKind: 'item', confirm: true }));
+      const removed = outcome(source.command({ type: 'remove-document', documentId: 'page-2' }));
+      const purged = outcome(source.command({ type: 'remove-document', documentId: 'page-3', purge: true }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await moved).toBe('ok');
+      expect(await removed).toBe('ok');
+      expect(await purged).toBe('ok');
+      // Only Trash's permanent delete carries purge onto the wire.
+      expect(provider.removeDocument.mock.calls).toEqual([['page-2'], ['page-3', { purge: true }]]);
+      expect(provider.moveDocument).toHaveBeenCalledWith('page-1', 'mod_1', { parentKind: 'item' });
       source.dispose();
     } finally {
       vi.useRealTimers();

@@ -3,8 +3,9 @@
  * Round-trip tests for tracker reference markdown handling.
  *
  * A tracker reference is stored as `[NIM-123](nimbalyst://NIM-123)` and must:
- *  - import into a TrackerReferenceNode carrying ONLY the reference key,
- *  - export back to the same markdown,
+ *  - import into a TrackerReferenceNode carrying the reference key (and the
+ *    written label when it is not the key),
+ *  - export back to the same markdown, label included,
  *  - not be captured by the document-link transformer (which excludes `://`).
  */
 
@@ -23,7 +24,7 @@ import {
   $isTrackerReferenceNode,
 } from '../TrackerReferenceNode';
 import { TrackerReferenceTransformer } from '../TrackerReferenceTransformer';
-import { setTrackerReferenceHrefBuilder } from '../trackerReferenceHref';
+import { acquireConsoleReferenceScope, getTrackerReferenceHomeScope, setTrackerReferenceHrefBuilder } from '../trackerReferenceHref';
 
 function getTestTransformers(): Transformer[] {
   return [TrackerReferenceTransformer, ...CORE_TRANSFORMERS];
@@ -96,7 +97,7 @@ describe('TrackerReferenceTransformer', () => {
       expect($isTrackerReferenceNode(node)).toBe(true);
       expect((node as TrackerReferenceNode).getView()).toBe(view);
       const expectedTitle = view === 'chip' ? '' : ` "view=${view}"`;
-      expect($convertToMarkdownString(getTestTransformers())).toBe(`[NIM-123](nimbalyst://NIM-123${expectedTitle})`);
+      expect($convertToMarkdownString(getTestTransformers())).toBe(`[label](nimbalyst://NIM-123${expectedTitle})`);
     }, { discrete: true });
   });
 
@@ -112,8 +113,25 @@ describe('TrackerReferenceTransformer', () => {
       const node = $getRoot().getFirstDescendant() as TrackerReferenceNode;
       expect(node.getView()).toBe(view);
       expect(node.getRelation()).toBe(relation);
-      expect($convertToMarkdownString(getTestTransformers())).toBe(`[NIM-123](nimbalyst://NIM-123 ${expectedTitle})`);
+      expect($convertToMarkdownString(getTestTransformers())).toBe(`[label](nimbalyst://NIM-123 ${expectedTitle})`);
     }, { discrete: true });
+  });
+
+  it('keeps the written label of a nimbalyst:// link, storing nothing extra when it is the key', () => {
+    for (const [markdown, label] of [
+      ['[the sync engine](nimbalyst://NIM-12 "rel=built-on") carries every edit.', 'the sync engine'],
+      ['[NIM-12](nimbalyst://NIM-12 "rel=built-on") carries every edit.', null],
+    ] as const) {
+      editor.update(() => {
+        $getRoot().clear();
+        $convertFromEnhancedMarkdownString(markdown, getTestTransformers());
+        const node = $getRoot().getFirstDescendant() as TrackerReferenceNode;
+        expect(node.getLabel()).toBe(label);
+        expect(node.getHref()).toBeNull();
+        if (label === null) expect(node.exportJSON()).not.toHaveProperty('label');
+        expect($convertToMarkdownString(getTestTransformers())).toBe(markdown);
+      }, { discrete: true });
+    }
   });
 
   it('carries the relation through JSON, clone and setRelation, omitting it for a plain link', () => {
@@ -236,6 +254,21 @@ describe('TrackerReferenceTransformer', () => {
       expect(exported).toBe(markdown);
     });
 
+    it('keeps the written label of a console link through markdown, JSON and clone', () => {
+      const markdown = '[the sync engine](https://console.nimbalyst.com/org/o/project/p/page/item/NIM-12 "rel=built-on") carries every edit.';
+      const { exported, node } = roundTrip(markdown);
+      expect(exported).toBe(markdown);
+      editor.update(() => {
+        const json = node!.exportJSON();
+        expect(json.label).toBe('the sync engine');
+        expect(TrackerReferenceNode.importJSON(json).getLabel()).toBe('the sync engine');
+        expect(TrackerReferenceNode.clone(node!).getLabel()).toBe('the sync engine');
+      }, { discrete: true });
+      // A label that is just the key stores nothing extra.
+      expect(roundTrip(`[NIM-123](${TEAM})`).node).not.toBeNull();
+      editor.read(() => expect(($getRoot().getFirstDescendant() as TrackerReferenceNode).exportJSON()).not.toHaveProperty('label'));
+    });
+
     it('reads the key, view and relation from a console item link', () => {
       const { node } = roundTrip(`[label](https://console.nimbalyst.com/org/o/project/p/trackers/item/NIM%2D9 "view=card rel=built-on")`);
       editor.read(() => {
@@ -264,6 +297,26 @@ describe('TrackerReferenceTransformer', () => {
         exported = $convertToMarkdownString(getTestTransformers());
       }, { discrete: true });
       expect(exported).toBe('[NIM-5](https://console.nimbalyst.com/org/o/project/p/trackers/item/NIM-5 "rel=built-on")');
+    });
+
+    it('writes new references for the team project a mounted editor is in, until it releases it', () => {
+      const exportNew = () => {
+        let exported = '';
+        editor.update(() => {
+          $getRoot().clear().append($createParagraphNode().append($createTrackerReferenceNode('NIM-5')));
+          exported = $convertToMarkdownString(getTestTransformers());
+        }, { discrete: true });
+        return exported;
+      };
+      const releaseA = acquireConsoleReferenceScope({ orgId: 'o', projectId: 'a' });
+      const releaseB = acquireConsoleReferenceScope({ orgId: 'o', projectId: 'b' });
+      expect(exportNew()).toBe('[NIM-5](https://console.nimbalyst.com/org/o/project/b/page/item/NIM-5)');
+      expect(getTrackerReferenceHomeScope()).toEqual({ orgId: 'o', projectId: 'b' });
+      releaseB();
+      expect(exportNew()).toBe('[NIM-5](https://console.nimbalyst.com/org/o/project/a/page/item/NIM-5)');
+      releaseA();
+      expect(exportNew()).toBe('[NIM-5](nimbalyst://NIM-5)');
+      expect(getTrackerReferenceHomeScope()).toBeUndefined();
     });
 
     it('carries the href through JSON and clone without asking the host again', () => {

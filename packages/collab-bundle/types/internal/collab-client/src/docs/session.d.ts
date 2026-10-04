@@ -10,7 +10,11 @@ export interface CollabPageMoveOptions {
     sortOrder?: number | null;
 }
 export type CollabTreeFilter = 'all' | 'favorites' | 'updated';
-/** Outcome of a placement write, once the store has confirmed or refused it. */
+/**
+ * Outcome of a tree write (a placement, move, rename or removal), once the
+ * data source answered: `ok: false` when the store refused it or the send
+ * failed. The optimistic local state is never the answer.
+ */
 export type CollabPlacementWriteResult = {
     ok: true;
 } | {
@@ -184,12 +188,20 @@ export interface CollabDocsSession {
             editorId: string;
         };
     }): Promise<boolean>;
-    updateDocumentTitle(documentId: string, title: string): Promise<void>;
-    removeDocument(documentId: string): void;
-    trashDocument(documentId: string): void;
+    updateDocumentTitle(documentId: string, title: string): Promise<CollabPlacementWriteResult>;
+    /**
+     * Removes the index row. Only with `purge` (Trash's "Delete permanently" and
+     * "Empty Trash") does a page already in Trash go for good; a server that
+     * knows the flag never permanently deletes without it.
+     */
+    removeDocument(documentId: string, options?: {
+        purge?: true;
+    }): Promise<CollabPlacementWriteResult>;
+    /** Recoverable: the page leaves the tree for Trash, keeping its body and place. */
+    trashDocument(documentId: string): Promise<CollabPlacementWriteResult>;
     restoreDocument(documentId: string): void;
     emptyTrash(): number;
-    moveDocument(documentId: string, parentFolderId: string | null, options?: CollabPageMoveOptions): void;
+    moveDocument(documentId: string, parentFolderId: string | null, options?: CollabPageMoveOptions): Promise<CollabPlacementWriteResult>;
     createFolder(name: string, parentFolderId: string | null): Promise<string>;
     renameFolder(folderId: string, name: string): Promise<void>;
     renameLegacyFolder(path: string, name: string): Promise<number>;
@@ -197,23 +209,25 @@ export interface CollabDocsSession {
     removeFolder(folderId: string): void;
     refreshFolders(): Promise<boolean>;
     /** Place a tracker type in the page tree; an already placed type moves. */
-    placeType(typeId: string, parentFolderId: string | null, parentKind?: SharedParentKind): Promise<void>;
-    moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number, parentKind?: SharedParentKind): Promise<void>;
+    placeType(typeId: string, parentFolderId: string | null, parentKind?: SharedParentKind): Promise<CollabPlacementWriteResult>;
+    moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number, parentKind?: SharedParentKind): Promise<CollabPlacementWriteResult>;
     removeTypePlacement(typeId: string): Promise<void>;
     /** True once the snapshot said the tree is the one page tree. */
     isPageTree(): boolean;
     /**
      * Page tree: move a page under a page or a typed page (null = root). Refuses
-     * a cycle through pages and placed typed pages.
+     * a cycle through pages and placed typed pages with `false`; otherwise the
+     * move is applied and the store's outcome follows.
      */
-    movePage(documentId: string, parentId: string | null, options?: CollabPageMoveOptions): boolean;
+    movePage(documentId: string, parentId: string | null, options?: CollabPageMoveOptions): false | Promise<CollabPlacementWriteResult>;
     /**
-     * Page tree: remove a page and every page below it, the way a folder delete
-     * worked (types and items placed under them fall back, nothing else goes).
-     * The prose of a type placed outside the subtree is moved out first.
+     * Page tree: move a page and every page below it to Trash, where each can be
+     * restored to its place. Types and typed pages placed under them show in
+     * their usual place meanwhile. The prose of a type placed outside the
+     * subtree is moved out first.
      */
-    removePage(documentId: string): void;
-    /** How many documents besides the page itself `removePage` would remove. */
+    removePage(documentId: string): Promise<CollabPlacementWriteResult>;
+    /** How many documents besides the page itself `removePage` would move to Trash. */
     pageRemovalCount(documentId: string): number;
     /**
      * Place a typed page (tracker item) under a page, or at root with null.

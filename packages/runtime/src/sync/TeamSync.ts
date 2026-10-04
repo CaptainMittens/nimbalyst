@@ -48,6 +48,7 @@ import { appendSyncClientParams } from './syncClientInfo';
 import { TeamTypePlacementCache, typePlacementQueueKey } from './teamTypePlacements';
 import { TeamItemPlacementCache, itemPlacementQueueKey } from './teamItemPlacements';
 import { TeamPageMarksRequests, type TeamPageMarksFilters, type TeamPageMarksResult } from './teamPageMarks';
+import { TeamPageLinksRequests, type TeamPageLinksFilters, type TeamPageLinksResult } from './teamPageLinks';
 
 // ============================================================================
 // TeamSyncProvider
@@ -99,9 +100,13 @@ export class TeamSyncProvider {
 
   /** Open `pageMarksQuery` requests. */
   private readonly pageMarkRequests = new TeamPageMarksRequests();
+  /** Open `pageLinksQuery` requests. */
+  private readonly pageLinkRequests = new TeamPageLinksRequests();
 
   /** Set by a snapshot from a TeamRoom whose folders were converted into documents. */
   private pageTree = false;
+  /** Set by a snapshot from a TeamRoom that echoes the author's page writes back to it. */
+  private authorWriteEcho = false;
 
   /**
    * Resolvers waiting for a `docIndexRegistered` ack, keyed by document id.
@@ -158,6 +163,9 @@ export class TeamSyncProvider {
       this.reconnectAttempt = 0;
       this.setStatus('syncing');
       this.send({ type: 'teamSync' });
+      // Marks lists and Links sections that went unanswered while offline ask again.
+      this.pageMarkRequests.changed();
+      this.pageLinkRequests.changed();
     });
 
     ws.addEventListener('message', (event) => {
@@ -202,6 +210,7 @@ export class TeamSyncProvider {
     this.typePlacementEntries.destroy();
     this.itemPlacementEntries.destroy();
     this.pageMarkRequests.cancelAll();
+    this.pageLinkRequests.cancelAll();
     const registerWaiters = [...this.registerAckWaiters.values()].flat();
     this.registerAckWaiters.clear();
     // Unconfirmed, not confirmed-failed: a destroyed provider says nothing
@@ -314,10 +323,11 @@ export class TeamSyncProvider {
     });
   }
 
-  removeDocument(documentId: string): void {
+  /** `purge` permanently deletes a page in Trash; only Trash's permanent delete sends it. */
+  removeDocument(documentId: string, options: { requestId?: string; purge?: true } = {}): void {
     this.localEntries.delete(documentId);
     this.send({
-      type: 'docIndexRemove', documentId,
+      type: 'docIndexRemove', documentId, ...requestIdField(options.requestId), ...(options.purge ? { purge: true } : {}),
     });
   }
 
@@ -348,7 +358,11 @@ export class TeamSyncProvider {
    * 'item'`, a tracker item. The same parent with a new `sortOrder` is a
    * reorder. Content untouched.
    */
-  moveDocument(documentId: string, newParentFolderId: string | null, placement: DocumentPlacementOptions = {}): void {
+  moveDocument(
+    documentId: string,
+    newParentFolderId: string | null,
+    placement: DocumentPlacementOptions & { requestId?: string } = {},
+  ): void {
     const existing = this.localEntries.get(documentId);
     if (existing) {
       const parentKind = newParentFolderId ? placement.parentKind ?? 'page' : 'page';
@@ -359,7 +373,7 @@ export class TeamSyncProvider {
       this.localEntries.set(documentId, { ...existing, parentFolderId: newParentFolderId, parentKind, sortOrder });
     }
     this.send({
-      type: 'docMove', documentId, newParentFolderId, ...placementFields(placement),
+      type: 'docMove', documentId, newParentFolderId, ...placementFields(placement), ...requestIdField(placement.requestId),
     });
   }
 
@@ -428,10 +442,10 @@ export class TeamSyncProvider {
   }
 
   /** Delete a folder recursively (folder + descendants + their documents). */
-  removeFolder(folderId: string): void {
+  removeFolder(folderId: string, options: { requestId?: string } = {}): void {
     this.folderEntries.delete(folderId);
     this.send({
-      type: 'folderRemove', folderId,
+      type: 'folderRemove', folderId, ...requestIdField(options.requestId),
     });
   }
 
@@ -507,6 +521,15 @@ export class TeamSyncProvider {
   }
 
   /**
+   * True once a snapshot said the server sends the author its own `docMove`,
+   * `docIndexRemove` and `folderRemove` broadcasts and echoes `requestId` on a
+   * refusal, so a write sent with a `requestId` can wait to be confirmed.
+   */
+  echoesAuthorWrites(): boolean {
+    return this.authorWriteEcho;
+  }
+
+  /**
    * Place an item (or move its placement). `parentId` is a page id, or an item
    * id with `parentKind: 'item'`; null = root level. The server refuses a
    * parent inside the item's own subtree.
@@ -541,6 +564,19 @@ export class TeamSyncProvider {
    */
   queryPageMarks(filters: TeamPageMarksFilters, timeoutMs = 8000): Promise<TeamPageMarksResult | null> {
     return this.pageMarkRequests.request((message) => {
+      if (this.ws?.readyState !== WebSocket.OPEN) return false;
+      this.send(message);
+      return true;
+    }, filters, timeoutMs);
+  }
+
+  /**
+   * Links out of and into one page of a team project, read from the server's
+   * page links index (pages this member can read, typed pages that still
+   * exist). Null while offline or when the server does not answer in time.
+   */
+  queryPageLinks(filters: TeamPageLinksFilters, timeoutMs = 8000): Promise<TeamPageLinksResult | null> {
+    return this.pageLinkRequests.request((message) => {
       if (this.ws?.readyState !== WebSocket.OPEN) return false;
       this.send(message);
       return true;
@@ -628,6 +664,15 @@ export class TeamSyncProvider {
         case 'pageMarksResponse':
           this.pageMarkRequests.receive(message);
           break;
+        case 'pageMarksChanged':
+          this.pageMarkRequests.changed();
+          break;
+        case 'pageLinksResponse':
+          this.pageLinkRequests.receive(message);
+          break;
+        case 'pageLinksChanged':
+          this.pageLinkRequests.changed();
+          break;
         case 'documentCommentNotifyAck':
           // Fire-and-forget: nothing in the client waits on this. Surfacing a
           // fully-suppressed fanout keeps a silently-dropped mention debuggable.
@@ -642,6 +687,13 @@ export class TeamSyncProvider {
           break;
         case 'error':
           console.error('[TeamSync] Server error:', message.code, message.message);
+          if (message.requestId) {
+            this.config.onWriteRefused?.(message.requestId, { code: message.code, message: message.message });
+            // The refused docMove/docIndexRemove/folderRemove already changed the
+            // local index; re-read server truth so a later snapshot cannot replay it.
+            this.send({ type: 'docIndexSync' });
+            this.send({ type: 'folderIndexSync' });
+          }
           // A refused placement mutation would otherwise leave the author's
           // optimistic row in place; the re-read replaces it with server truth.
           if (this.typePlacementEntries.takeUnconfirmed()) this.send({ type: 'typePlacementIndexSync' });
@@ -656,6 +708,7 @@ export class TeamSyncProvider {
   private async handleTeamSyncResponse(msg: TeamSyncResponseMessage): Promise<void> {
     const server: ServerTeamState = msg.team;
     this.pageTree = server.pageTree === true;
+    this.authorWriteEcho = server.authorWriteEcho === true;
 
     // Decrypt document titles. NIM-910: in server-managed mode this teamSync
     // path returns titles RAW (DEK-ciphertext the client cannot read); the
@@ -1096,6 +1149,11 @@ export class TeamSyncProvider {
       this.scheduleReconnect();
     });
   }
+}
+
+/** A write's `requestId`, off the wire when there is none. */
+function requestIdField(requestId: string | undefined): { requestId?: string } {
+  return requestId ? { requestId } : {};
 }
 
 /** Wire fields for a document placement; absent options stay off the wire for older servers. */

@@ -24,6 +24,7 @@ import { isNativeItem, resolveTrackerContentMode } from './trackerContentMode';
 import { useTrackerContentCollab } from '../../hooks/useTrackerContentCollab';
 import { useColdPaintFallback } from '../../hooks/useColdPaintFallback';
 import { useCollabSyncCurtain } from '../../hooks/useCollabSyncCurtain';
+import { registerLiveTypedPageEditor } from '../../services/personalAgentEdit';
 
 /** How this item's body is edited -- see `resolveTrackerContentMode`. */
 export type TrackerContentMode = 'file-backed' | 'local-pglite' | 'collaborative';
@@ -347,6 +348,13 @@ export function useTrackerItemBody({
   const bodyEditorReadyRef = useRef(onBodyEditorReady);
   bodyEditorReadyRef.current = onBodyEditorReady;
   useEffect(() => () => bodyEditorReadyRef.current?.(null), [itemId]);
+  // A local body editor takes agent edits itself while mounted, so its pending
+  // autosave cannot write over them (see personalAgentEdit).
+  const unregisterLiveEditorRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => {
+    unregisterLiveEditorRef.current?.();
+    unregisterLiveEditorRef.current = null;
+  }, [itemId]);
 
   useColdPaintFallback({
     collabStatus,
@@ -499,9 +507,14 @@ export function useTrackerItemBody({
       onEditorReady: (editor: any) => {
         setRecoveryEditor(editor);
         bodyEditorReadyRef.current?.(editor);
+        unregisterLiveEditorRef.current?.();
+        unregisterLiveEditorRef.current = registerLiveTypedPageEditor(itemId, {
+          editor,
+          getContent: () => getContentFnRef.current?.() ?? contentMarkdown ?? '',
+        });
       },
     };
-  }, [contentMode, contentLoaded, contentMarkdown, forceFloatingToolbar, saveContent]);
+  }, [itemId, contentMode, contentLoaded, contentMarkdown, forceFloatingToolbar, saveContent]);
 
   /** Editor config for collaborative mode (team-synced native items) */
   const collabEditorConfig = useMemo((): EditorConfig | null => {

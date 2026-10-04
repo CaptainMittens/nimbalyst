@@ -6,7 +6,9 @@
 
 import React, { useState } from 'react';
 import type { CollabScope } from '@nimbalyst/collab-client/core';
+import type { PageTypeLane } from '@nimbalyst/collab-client/docs/pageTypes';
 import { CollabSidebar, type CollabSidebarCreateMenu } from '@nimbalyst/collab-client/docs-ui';
+import { SetPageTypeDialog } from '@nimbalyst/collab-client/docs-ui/setPageType';
 import {
   getElectronCollabDocsSession,
   getPersonalCollabDocsSession,
@@ -14,8 +16,6 @@ import {
 } from '../../store/atoms/collabDocuments';
 import { ElectronCollabDocsUIRoot } from './ElectronCollabDocsUIProvider';
 import { useCollabTypeResolver } from './useCollabTypeResolver';
-import { SetPageTypeDialog } from './SetPageTypeDialog';
-import type { PageTypeLane } from './setPageType';
 import { useSetPageType } from './useSetPageType';
 import { usePagesSidebarCollapse } from './usePagesSidebarCollapse';
 
@@ -25,6 +25,8 @@ interface PagesSidebarSectionsProps {
   personalScope: CollabScope;
   activeTeamDocumentId: string | null;
   activePersonalDocumentId: string | null;
+  /** The open typed page or type; either section marks it if its tree holds it. */
+  activeRow: { itemId: string | null; typeId: string | null };
   onShowHome: () => void;
   homeActive: boolean;
   registerTeamCreateMenu: (menu: CollabSidebarCreateMenu | null) => void;
@@ -37,6 +39,7 @@ export function PagesSidebarSections({
   personalScope,
   activeTeamDocumentId,
   activePersonalDocumentId,
+  activeRow,
   onShowHome,
   homeActive,
   registerTeamCreateMenu,
@@ -73,6 +76,8 @@ export function PagesSidebarSections({
             <CollabSidebar
               sectionTitle="Team"
               activeDocumentId={activeTeamDocumentId}
+              activeItemId={activeRow.itemId}
+              activeTypeId={activeRow.typeId}
               onShowHome={onShowHome}
               homeActive={homeActive}
               registerCreateMenu={registerTeamCreateMenu}
@@ -96,6 +101,8 @@ export function PagesSidebarSections({
           <CollabSidebar
             sectionTitle="Personal"
             activeDocumentId={activePersonalDocumentId}
+            activeItemId={activeRow.itemId}
+            activeTypeId={activeRow.typeId}
             registerCreateMenu={registerPersonalCreateMenu}
             typeResolver={personalTypeResolver}
             collapsed={collapsed.personal}

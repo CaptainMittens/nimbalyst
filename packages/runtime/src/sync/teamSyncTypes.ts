@@ -159,6 +159,13 @@ export interface TeamSyncConfig extends TypePlacementCallbacks, ItemPlacementCal
   onFoldersRemoved?: (folderIds: string[], documentIds: string[]) => void;
 
   /**
+   * The server refused a write sent with a `requestId` (`moveDocument`,
+   * `removeDocument`, `removeFolder`). Writes it accepts are confirmed by
+   * their echo through the callbacks above, when `echoesAuthorWrites()`.
+   */
+  onWriteRefused?: (requestId: string, error: { code: string; message: string }) => void;
+
+  /**
    * Called when a member's project-scoped access changed (Epic H1). `projectRole`
    * is the new role, or `null` when access was revoked. The host writes this
    * through to the local org/project projection so `canAccess` stays live.

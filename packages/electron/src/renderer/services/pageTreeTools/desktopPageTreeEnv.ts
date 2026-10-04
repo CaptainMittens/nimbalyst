@@ -10,7 +10,7 @@
 import { store } from '@nimbalyst/runtime/store';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { trackerItemsMapAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
-import { buildCollabUri } from '@nimbalyst/collab-protocol';
+import { buildCollabUri, isCollabUri, parseCollabUri } from '@nimbalyst/collab-protocol';
 import type { CollabScope } from '@nimbalyst/collab-client/core';
 import type { CollabDocsSession, SharedDocument } from '@nimbalyst/collab-client/docs';
 import {
@@ -25,7 +25,8 @@ import { buildSetPageTypeDependencies, type SetPageTypeContext } from '../../com
 import { PERSONAL_PAGE_TAB_PREFIX } from '../../contexts/TabsContext';
 import { createCollaborativeDocument } from '../collaborativeDocumentCreationOrchestrator';
 import { getCollaborativeDocumentTypeCatalog } from '../CollaborativeDocumentTypeCatalog';
-import type { PageTreeSection, PageTreeToolEnv } from './pageTreeToolCore';
+import type { PageTreeSection, PageTreeToolEnv } from '@nimbalyst/collab-client/docs/pageTreeToolCore';
+import { pagesTabStrip, type PagesTabStrip } from './pagesTabStrip';
 
 function teamScope(): CollabScope {
   const scope = store.get(activeCollabScopeAtom);
@@ -35,15 +36,27 @@ function teamScope(): CollabScope {
 
 /**
  * Set type looks for an open tab of the page so it can flush that editor's
- * unsent edits before copying the body. The agent has no tab strip, so it
- * hands over the page's own uri as the only "tab": an open editor of the page
- * is still found in the replica cache and flushed, and nothing else is read.
+ * unsent edits before copying the body. For that flush the agent hands over
+ * the page's own uri as the only "tab": an open editor of the page is still
+ * found in the replica cache and flushed, and nothing else is read.
  */
 function pageOnlyTabs(filePath: string): SetPageTypeContext['tabsActions'] {
   const tab = { id: 'agent-set-page-type', filePath };
   return {
     getSnapshot: () => ({ tabs: new Map([[tab.id, tab]]), tabOrder: [tab.id] }),
   } as unknown as SetPageTypeContext['tabsActions'];
+}
+
+function hasPageTab(strip: PagesTabStrip, section: PageTreeSection, documentId: string): boolean {
+  return [...strip.getSnapshot().tabs.values()].some((tab) => {
+    if (section === 'personal') return tab.filePath === `${PERSONAL_PAGE_TAB_PREFIX}${documentId}`;
+    if (!isCollabUri(tab.filePath)) return false;
+    try {
+      return parseCollabUri(tab.filePath).documentId === documentId;
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function createDesktopPageTreeEnv(payloadWorkspacePath: string | undefined): PageTreeToolEnv {
@@ -66,6 +79,9 @@ export function createDesktopPageTreeEnv(payloadWorkspacePath: string | undefine
 
     resolver: (section) => buildCollabTypeResolver(globalRegistry, store.get(trackerItemsMapAtom), section),
 
+    // The core types sessions narrowly (pageTreeSession.ts); this env only ever gets its own back.
+    typePlacements: (session: CollabDocsSession) => store.get(session.atoms.typePlacements),
+
     findItem: (ref) => {
       const records = store.get(trackerItemsMapAtom);
       const record = records.get(ref) ?? [...records.values()].find((candidate) => candidate.issueKey === ref);
@@ -73,7 +89,7 @@ export function createDesktopPageTreeEnv(payloadWorkspacePath: string | undefine
       return { itemId: record.id, typeId: record.primaryType, ...(record.issueKey ? { issueKey: record.issueKey } : {}) };
     },
 
-    createPage: async (_section, session, input) => {
+    createPage: async (_section, session: CollabDocsSession, input) => {
       const catalog = getCollaborativeDocumentTypeCatalog();
       const resolution = catalog.resolveMetadata(input.documentType, catalog.inferFileExtension(input.documentType, input.title));
       if (resolution.state !== 'ready') throw new Error(resolution.reason);
@@ -103,6 +119,13 @@ export function createDesktopPageTreeEnv(payloadWorkspacePath: string | undefine
         teamScope: scope,
         tabsActions: pageOnlyTabs(uri),
       };
+      // An open tab of the page gives its place to the typed page, so nobody
+      // keeps typing into a page in Trash; the agent opens nothing else.
+      const openItem = (itemId: string, pageId: string) => {
+        const strip = pagesTabStrip(context.workspacePath);
+        if (!strip || !hasPageTab(strip, section, pageId)) return;
+        buildSetPageTypeDependencies({ ...context, tabsActions: strip }, title).openItem(itemId, pageId);
+      };
       return setPageType(
         {
           lane: section,
@@ -116,8 +139,7 @@ export function createDesktopPageTreeEnv(payloadWorkspacePath: string | undefine
             sortOrder: page.sortOrder ?? null,
           },
         },
-        // The person's tab, if any, stays where it is; the agent opens nothing.
-        { ...buildSetPageTypeDependencies(context, title), openItem: () => undefined },
+        { ...buildSetPageTypeDependencies(context, title), openItem },
       );
     },
 

@@ -194,6 +194,14 @@ describe('markdownYDoc parity with MarkdownCollabContentAdapter', () => {
     expect(MarkdownCollabContentAdapter.exportToFile(adapterDoc(markdown))).toBe(markdown);
   });
 
+  it('keeps the written label of a console item link through the Y.Doc', () => {
+    const markdown = 'Sync runs on [the sync engine](https://console.nimbalyst.com/org/o/project/p/page/item/NIM-12 "rel=built-on") today.';
+    const update = markdownToLexicalYUpdate(markdown);
+    expect(JSON.stringify(rootShape(docFromUpdate(update)))).toContain('"__type":"tracker-reference"');
+    expect(lexicalYDocToMarkdown(update)).toBe(markdown);
+    expect(MarkdownCollabContentAdapter.exportToFile(adapterDoc(markdown))).toBe(markdown);
+  });
+
   it('replaces an existing body the way applyFromFile does', () => {
     const prior = adapterDoc('# Old\n\n- stale item\n\nOld paragraph.');
     const reference = docFromUpdate(Y.encodeStateAsUpdate(prior));

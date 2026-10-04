@@ -2,7 +2,8 @@
  * Renderer side of the page tree MCP tools (`collabIndexToolHandlers.ts` in
  * main). Each tool arrives on its channel with a one-shot `resultChannel`; the
  * listener runs the tool and replies once. The tools themselves live in
- * `services/pageTreeTools/pageTreeToolCore.ts`.
+ * `@nimbalyst/collab-client/docs/pageTreeToolCore`, shared with the collab
+ * worker's remote Pages tools.
  */
 import { createDesktopPageTreeEnv } from './desktopPageTreeEnv';
 import { trackDocumentAction } from '../../utils/collabIndexAnalytics';
@@ -15,7 +16,7 @@ import {
   setPageTypeTool,
   type PageTreeToolEnv,
   type PageTreeToolResult,
-} from './pageTreeToolCore';
+} from '@nimbalyst/collab-client/docs/pageTreeToolCore';
 
 type ToolPayload = Record<string, unknown> & { resultChannel?: string; workspacePath?: string };
 

@@ -15,6 +15,9 @@ import type {
 } from '@nimbalyst/collab-client/docs';
 import { FloatingPortal, useFloatingMenu, virtualElement } from './primitives/useFloatingMenu';
 
+/** The open typed page or type page, whose row reads as the open page's does. */
+export const CollabTreeActiveContext = React.createContext<{ itemId: string | null; typeId: string | null }>({ itemId: null, typeId: null });
+
 export interface PlaceableType {
   typeId: string;
   name: string;
@@ -71,7 +74,7 @@ export const CollabTypeNodeRow: React.FC<{
 }> = ({ node, indent, expanded, onToggle, onOpen, onContextMenu, onDragStart, onDragEnd, drop }) => (
   <button
     type="button"
-    className={`collab-tree-type-row w-full flex items-center text-left file-tree-directory${drop?.className ?? ''}`}
+    className={`collab-tree-type-row w-full flex items-center text-left file-tree-directory${React.useContext(CollabTreeActiveContext).typeId === node.typeId ? ' active' : ''}${drop?.className ?? ''}`}
     style={{ paddingLeft: indent }}
     data-testid="collab-tree-type-row"
     data-type-id={node.typeId}
@@ -128,10 +131,11 @@ export const CollabTypeItemRow: React.FC<{
   const drop = actions?.rowDrop?.(node);
   const hasChildren = (node.children?.length ?? 0) > 0 && !!actions?.renderChildren;
   const expanded = hasChildren && (actions?.isExpanded?.(node) ?? false);
+  const active = React.useContext(CollabTreeActiveContext).itemId === node.itemId;
   const row = (
   <button
     type="button"
-    className={`collab-tree-item-row w-full flex items-center text-left file-tree-file${drop?.className ?? ''}`}
+    className={`collab-tree-item-row w-full flex items-center text-left file-tree-file${active ? ' active' : ''}${drop?.className ?? ''}`}
     style={{ paddingLeft: indent }}
     data-testid="collab-tree-item-row"
     data-item-id={node.itemId}

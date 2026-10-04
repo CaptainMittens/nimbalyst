@@ -10,9 +10,8 @@ export const ExitCode = {
   SCHEMA_INCOMPATIBLE: 4,
   WRITE_NOT_PERMITTED: 5,
   /**
-   * `nim wiki` only: the item's fields were written but its page text failed.
-   * Not retryable as-is: re-sending the call writes the fields again and hits
-   * the same page-text failure. Fix the text, or edit the page directly.
+   * Retired with `nim wiki` (fields written, page text failed); nothing
+   * returns it now. Kept so the number is never given another meaning.
    */
   PARTIAL_WRITE: 6,
 } as const;

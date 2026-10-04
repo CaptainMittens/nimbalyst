@@ -74,6 +74,7 @@ function renderList(props: React.ComponentProps<typeof SharedDocsListView>) {
       pendingFolder: atom(null),
       unreadDocument: () => notUnread,
     },
+    isPageTree: () => false,
     trashDocument: vi.fn(),
     removeFolder: vi.fn(),
     moveDocument: vi.fn(),

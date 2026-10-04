@@ -83,6 +83,7 @@ import { AnalyticsService } from './analytics/AnalyticsService';
 import { sendTeamAnalyticsEvent } from './analytics/TeamAnalytics';
 import { CollaborationHealthAttemptTracker } from '../../shared/analytics/collaborationHealth';
 import { bucketItemCount, categorizeTeamAnalyticsError, toStableAnalyticsCategory } from '../../shared/analytics/teamAnalytics';
+import { setBodyLinkHomeScope } from './tracker/trackerBodyLinks';
 
 // ============================================================================
 // Engine registry (per workspace)
@@ -535,6 +536,8 @@ async function doInitializeTrackerSync(workspacePath: string): Promise<void> {
   logger.main.info('[TrackerSyncManager] creating engine for', workspacePath, 'roomId:', `org:${team.orgId}:tracker:${team.teamProjectId}`);
 
   const engine = new TrackerSyncEngine(config);
+  // Body links to another team project are not this workspace's relations.
+  setBodyLinkHomeScope(workspacePath, { orgId: team.orgId, projectId: team.teamProjectId });
   engines.set(workspacePath, {
     workspacePath,
     orgId: team.orgId,
@@ -1026,6 +1029,7 @@ export function registerTrackerSyncHandlers(): void {
         };
 
         const engine = new TrackerSyncEngine(config);
+        setBodyLinkHomeScope(workspacePath, { orgId: payload.orgId, projectId: payload.teamProjectId });
         engines.set(workspacePath, {
           workspacePath,
           orgId: payload.orgId,

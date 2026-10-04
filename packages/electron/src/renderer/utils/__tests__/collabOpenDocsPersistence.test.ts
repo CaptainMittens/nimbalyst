@@ -21,7 +21,7 @@ import {
   readEntriesFromState,
   readTabEntriesFromState,
 } from '../collabOpenDocsPersistence';
-import { openPageTab, toPersistedPageEntry } from '../../components/CollabMode/collabPageTabs';
+import { activePageRow, openPageTab, toPersistedPageEntry } from '../../components/CollabMode/collabPageTabs';
 
 const TEST_SCOPE = {
   scopeKey: '/ws',
@@ -203,6 +203,13 @@ describe('collabOpenDocsPersistence', () => {
     expect(await loadOpenCollabDocs(TEST_SCOPE)).toEqual([tabs[1]]);
     expect(harness.getState().openCollabDocumentIds).toEqual(['doc-1']);
     expect(await getPersistedCollabDocMetadata(TEST_SCOPE, 'item-flags')).toBeUndefined();
+  });
+
+  it('names the tree row an open item or type page tab stands for', () => {
+    expect(activePageRow('tracker://item-flags')).toEqual({ itemId: 'item-flags', typeId: null });
+    expect(activePageRow('type://module')).toEqual({ itemId: null, typeId: 'module' });
+    expect(activePageRow('personal://doc-1')).toEqual({ itemId: null, typeId: null });
+    expect(activePageRow(null)).toEqual({ itemId: null, typeId: null });
   });
 
   it('restores a personal page tab across a restart, beside docs and item pages', async () => {

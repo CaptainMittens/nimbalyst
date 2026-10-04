@@ -13,7 +13,7 @@
  * rather than hiding the view.
  */
 
-import { decodeViewAttrValue } from '@nimbalyst/runtime/core/placedViewUrl';
+import { decodeViewAttrValue, type PlacedViewScope } from '@nimbalyst/runtime/core/placedViewUrl';
 import type { QuadrantPin } from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/quadrantModel';
 import type { TrackerFieldFilter } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { createDefaultViewDefinition, type SavedView } from '@nimbalyst/collab-client/trackers';
@@ -60,6 +60,27 @@ function pins(value: string | undefined): QuadrantPin[] {
 
 function label(value: string | undefined): string | undefined {
   return value ? decodeViewAttrValue(value) : undefined;
+}
+
+/**
+ * The scopes a host's data source can show and write: its team project, and
+ * whether `local` (the author's own items) means this page's items here.
+ */
+export interface PlacedViewReach {
+  team: { orgId: string; projectId: string } | null;
+  local: boolean;
+}
+
+/**
+ * Whether a view of `scope` may be drawn from (and edit) the host's items. A
+ * link without a scope predates console links and names no other project, so
+ * it reads as the host's. With no reach declared, no scoped link is drawn.
+ */
+export function placedViewInReach(scope: PlacedViewScope | undefined, reach: PlacedViewReach | undefined): boolean {
+  if (scope === undefined) return true;
+  if (!reach) return false;
+  if (scope === 'local') return reach.local;
+  return reach.team !== null && reach.team.orgId === scope.orgId && reach.team.projectId === scope.projectId;
 }
 
 export function placedViewDefinition(

@@ -7,6 +7,11 @@
  */
 import React from 'react';
 import type { CollabTreeItemNode, CollabTreeNode, CollabTreeTypeNode, CollabTypeTreeResolver } from '../docs/index';
+/** The open typed page or type page, whose row reads as the open page's does. */
+export declare const CollabTreeActiveContext: React.Context<{
+    itemId: string | null;
+    typeId: string | null;
+}>;
 export interface PlaceableType {
     typeId: string;
     name: string;

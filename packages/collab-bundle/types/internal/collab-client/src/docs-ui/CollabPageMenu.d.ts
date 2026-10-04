@@ -28,7 +28,7 @@ export declare const CollabPageMenuHead: React.FC<{
     onCopyLink: () => void;
     copyLinkDisabled?: boolean;
 }>;
-/** A page with children is deleted with its subtree; a leaf goes to Trash. */
+/** A page goes to Trash, with its subtree when it has children. */
 export declare const CollabPageDeleteEntry: React.FC<{
     childCount: number;
     onDelete: () => void;

@@ -25,7 +25,8 @@ export type CollabDocsCommand =
       metadata?: { metadataVersion: 2; fileExtension: string; editorId: string };
     }
   | { type: 'update-document-title'; documentId: string; title: string }
-  | { type: 'remove-document'; documentId: string }
+  /** `purge` permanently deletes a page in Trash; only Trash's permanent delete sets it. */
+  | { type: 'remove-document'; documentId: string; purge?: true }
   | { type: 'trash-document'; documentId: string; trashedAt: number }
   | { type: 'restore-document'; documentId: string }
   | {

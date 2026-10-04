@@ -1,8 +1,8 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { PageMarkEntry } from '@nimbalyst/collab-protocol';
-import { filterPageMarks, mergePageMarks, pageMarkRecordsFromTeamIndex, type PageMarkRecord } from '../pageMarks';
+import { filterPageMarks, mergePageMarks, PageMarksChangeFeed, pageMarkRecordsFromTeamIndex, type PageMarkRecord } from '../pageMarks';
 
 function mark(id: string, kind: PageMarkRecord['kind'], on: string | null, extra: Partial<PageMarkRecord> = {}): PageMarkRecord {
   return {
@@ -42,24 +42,46 @@ describe('pageMarkRecordsFromTeamIndex', () => {
     by: 'Ann', email: 'ann@x.io', on: '2026-10-01', over: null, line: 2, offset: 7, ...extra,
   });
 
-  it('names plain and type pages by their collab uri, and typed-page bodies only through the resolver', () => {
+  it('names plain and type pages by their collab uri, and never lists a typed-page body', () => {
     const entries = [
       entry('page-1'),
       entry('type-page:module', { title: 'Modules' }),
+      // An older server indexed these; the item may since have been deleted.
       entry('tracker-content/item-1', { projectId: null, title: null }),
-      entry('tracker-content/gone', { projectId: null, title: null }),
     ];
-    const resolveTypedPage = (itemId: string) => itemId === 'item-1' ? { title: 'Sync engine', issueKey: 'NIM-7', typeId: 'module' } : null;
-
-    const records = pageMarkRecordsFromTeamIndex(entries, { orgId: 'org-1', resolveTypedPage });
+    const records = pageMarkRecordsFromTeamIndex(entries, { orgId: 'org-1' });
     expect(records.map((r) => [r.id, r.page.kind, r.page.uri, r.page.title, r.page.typeId])).toEqual([
       ['collab://org:org-1:doc:page-1#7', 'page', 'collab://org:org-1:doc:page-1', 'Specs', null],
       ['collab://org:org-1:doc:type-page:module#7', 'type-page', 'collab://org:org-1:doc:type-page:module', 'Modules', 'module'],
-      ['tracker://item-1#7', 'typed-page', 'tracker://item-1', 'Sync engine', 'module'],
     ]);
     expect(records[0]).toMatchObject({ by: 'Ann', email: 'ann@x.io', on: '2026-10-01', line: 2, page: { scope: 'team', id: 'page-1' } });
-    // Without a resolver (the desktop reads typed pages locally) bodies are left out.
-    expect(pageMarkRecordsFromTeamIndex(entries, { orgId: 'org-1' }).map((r) => r.page.kind)).toEqual(['page', 'type-page']);
+  });
+
+  it('asks lists to load again while the team index answer is missing or partial, backing off, until it is complete', () => {
+    vi.useFakeTimers();
+    try {
+      const feed = new PageMarksChangeFeed();
+      const listener = vi.fn();
+      const unsubscribe = feed.subscribe(listener);
+      feed.settled(false);
+      feed.settled(false); // A second list's answer does not start a second timer.
+      vi.advanceTimersByTime(2000);
+      expect(listener).toHaveBeenCalledTimes(1);
+      feed.settled(false);
+      vi.advanceTimersByTime(2000);
+      expect(listener).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(2000);
+      expect(listener).toHaveBeenCalledTimes(2);
+      feed.settled(false);
+      feed.settled(true);
+      vi.advanceTimersByTime(60_000);
+      expect(listener).toHaveBeenCalledTimes(2);
+      feed.notify();
+      expect(listener).toHaveBeenCalledTimes(3);
+      unsubscribe();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('merges local and server marks without listing a page twice', () => {

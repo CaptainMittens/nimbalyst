@@ -4,7 +4,10 @@
  */
 import { store } from '@nimbalyst/runtime/store';
 import { trackerItemByReferenceKeyAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
-import { setTrackerReferenceHrefBuilder } from '@nimbalyst/runtime/plugins/TrackerLinkPlugin/trackerReferenceHref';
+import {
+  setTrackerReferenceHomeScope,
+  setTrackerReferenceHrefBuilder,
+} from '@nimbalyst/runtime/plugins/TrackerLinkPlugin/trackerReferenceHref';
 import type { CollabArtifactRef, CollabScope } from '@nimbalyst/collab-client/core';
 
 import {
@@ -50,12 +53,23 @@ function activeTeam(): { orgId: string; teamProjectId: string } | null {
 /**
  * New typed-page references in this window's editors are written as console
  * links (`trackerReferenceLinkFor`), read from the active team at the moment
- * the reference is created.
+ * the reference is created. The same team is the project references resolve
+ * in: a link to another project's item shows as an external link.
  */
 export function installTrackerReferenceLinks(): () => void {
   setTrackerReferenceHrefBuilder((referenceKey) =>
     trackerReferenceLinkFor(referenceKey, activeTeam(), store.get(trackerItemByReferenceKeyAtom(referenceKey))));
-  return () => setTrackerReferenceHrefBuilder(null);
+  const publishHomeScope = () => {
+    const team = activeTeam();
+    setTrackerReferenceHomeScope(team ? { orgId: team.orgId, projectId: team.teamProjectId } : null);
+  };
+  publishHomeScope();
+  const unsubscribe = store.sub(activeCollabScopeAtom, publishHomeScope);
+  return () => {
+    unsubscribe();
+    setTrackerReferenceHrefBuilder(null);
+    setTrackerReferenceHomeScope(undefined);
+  };
 }
 
 export function openConsoleLinkInWindow(href: string): boolean {

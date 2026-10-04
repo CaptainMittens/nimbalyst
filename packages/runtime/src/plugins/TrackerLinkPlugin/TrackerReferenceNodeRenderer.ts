@@ -19,6 +19,8 @@ export interface TrackerReferenceNodeRendererProps {
   view: TrackerReferenceView;
   /** Predicate id of the relation this link states; null for a plain link. */
   relation?: string | null;
+  /** The link as written (`nimbalyst://KEY` or a console link), for a host that treats some scopes apart. */
+  href?: string | null;
 }
 
 let trackerReferenceNodeRenderer:

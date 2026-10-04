@@ -74,6 +74,9 @@ function renderDocsUIWithHost(
     },
     getMembers: async () => [{ memberId: 'member-self', email: 'self@example.test', name: 'Self' }],
     openArtifact: vi.fn(),
+    // As in the console: page rows render as real links, which is what a
+    // right-click lands on in the browser.
+    artifactUrl: (ref: { documentId?: string }) => `/org/org-folder-test/project/project-primary/document/${ref.documentId}`,
   } as unknown as CollabHost;
   const session = {
     scope: {
@@ -245,6 +248,25 @@ describe('placed tracker types', () => {
       'sidebar',
     );
   });
+
+  it('highlights the open type, or the open typed page, as it does the open page', () => {
+    const typeResolver = {
+      typeName: (typeId: string) => (typeId === 'module' ? 'Modules' : null),
+      itemsOfType: () => [{ itemId: 'mod-1', title: 'Tracking' }, { itemId: 'mod-2', title: 'Identity' }],
+    };
+    const placement = { typeId: 'module', projectId: null, parentFolderId: null, sortOrder: 0, createdBy: 'member-self', createdAt: 1, updatedAt: 1 };
+    const activeRows = () => [...document.querySelectorAll('.collab-tree-type-row.active, .collab-tree-item-row.active')].map((row) => row.getAttribute('data-type-id') ?? row.getAttribute('data-item-id'));
+    renderDocsUIWithHost(<CollabSidebar typeResolver={typeResolver} activeTypeId="module" />, [placement]);
+    expect(activeRows()).toEqual(['module']);
+    cleanup();
+
+    // The open typed page's collapsed type opens to show it, once: collapsing
+    // the type again is left alone.
+    const { container } = renderDocsUIWithHost(<CollabSidebar typeResolver={typeResolver} activeItemId="mod-2" />, [placement]);
+    expect(activeRows()).toEqual(['mod-2']);
+    fireEvent.click(container.querySelector<HTMLElement>('.collab-tree-type-row .file-tree-chevron')!);
+    expect(activeRows()).toEqual([]);
+  });
 });
 
 describe('one page tree', () => {
@@ -296,8 +318,27 @@ describe('one page tree', () => {
     fireEvent.contextMenu(architecture);
     await waitFor(() => expect(document.querySelector('.collab-page-set-type')).not.toBeNull());
     const entries = [...document.querySelectorAll('button')].map((button) => button.textContent);
-    expect(entries).toEqual(expect.arrayContaining(['New pageinside', 'Set type', 'Rename', 'Move to...', 'Copy link', 'Delete1 child page']));
+    expect(entries).toEqual(expect.arrayContaining(['New pageinside', 'Set type', 'Rename', 'Move to...', 'Copy link', 'Move to Trash1 child page']));
     expect(document.querySelector<HTMLButtonElement>('.collab-page-set-type')!.disabled).toBe(true);
+  });
+
+  it('opens the collapsed pages above the open typed page', async () => {
+    const typeResolver = {
+      typeName: (typeId: string) => (typeId === 'module' ? 'Modules' : null),
+      typeLabel: (typeId: string) => (typeId === 'module' ? 'Module' : null),
+      itemsOfType: () => [{ itemId: 'mod-1', title: 'Sync engine' }],
+      item: (itemId: string) => (itemId === 'mod-1' ? { itemId, title: 'Sync engine', typeId: 'module' } : null),
+    };
+    renderDocsUIWithHost(
+      <CollabSidebar typeResolver={typeResolver} activeItemId="mod-1" />,
+      [{ typeId: 'module', projectId: null, parentFolderId: null, sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+      {
+        documents: [page('arch', 'Architecture', null), page('overview', 'Overview', 'arch')],
+        itemPlacements: [{ itemId: 'mod-1', projectId: null, parentId: 'overview', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
+      },
+    );
+    // Overview starts collapsed (see above); the open typed page under it shows.
+    await found(() => document.querySelector('.collab-tree-item-row.active[data-item-id="mod-1"]'));
   });
 
   it('moves a page under a typed page from the dialog, never offering a destination inside itself', async () => {

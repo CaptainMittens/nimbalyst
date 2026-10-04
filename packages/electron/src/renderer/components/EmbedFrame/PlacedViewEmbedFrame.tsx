@@ -7,19 +7,26 @@
  * second item load), and a cell edit writes through the same IPC paths as
  * Tracker mode, so editing a cell edits the item it points at. A marks list
  * reads the page-marks source the host installs at startup.
+ *
+ * Those items are this window's project's, so a view whose link names another
+ * scope (another team project, or a `local` view on a team page) is never
+ * drawn from them or edited through them: `PlacedViewEmbed` shows its link
+ * instead, which the console link router opens.
  */
 
-import React, { useCallback, useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useStore } from 'jotai';
 import type { PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
 import { DESKTOP_TRACKER_UI_CAPABILITIES, TrackersUIProvider } from '@nimbalyst/collab-client/trackers-ui';
 import { PlacedViewEmbed, PlacedViewNote } from '@nimbalyst/collab-client/trackers-ui/embed';
 import { ElectronTrackerDataSource } from '../../services/ElectronTrackerDataSource';
 import { activeWorkspacePathAtom } from '../../store/atoms/openProjects';
+import { activeCollabScopeAtom } from '../../store/atoms/collabDocuments';
 import { navigateToTrackerItem } from '../PullRequestMode/trackerNavigation';
 import { openAgentEditedPage } from '../../utils/agentEditedPage';
 import { createDesktopTrackerDataSource } from './desktopTrackerDataSource';
 import { useDesktopTrackerIdentity } from './useDesktopTrackerIdentity';
+import { windowPlacedViewReach } from './placedViewCommands';
 
 export interface PlacedViewEmbedFrameProps {
   target: PlacedViewTarget;
@@ -55,9 +62,36 @@ const WorkspacePlacedView: React.FC<PlacedViewEmbedFrameProps & { workspacePath:
   const openPage = useCallback((uri: string) => {
     void openAgentEditedPage(uri, workspacePath).catch((error) => console.warn('[PlacedViewEmbedFrame] could not open page', uri, error));
   }, [workspacePath]);
+  // The page this embed is on decides whether a `local` view reaches these items.
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const [pagePath, setPagePath] = useState<string | null | undefined>(undefined);
+  useLayoutEffect(() => {
+    setPagePath(anchorRef.current?.closest('[data-file-path]')?.getAttribute('data-file-path') ?? null);
+  }, []);
+  // Re-read the reach when the window's team changes.
+  const collabScope = useAtomValue(activeCollabScopeAtom);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const reach = useMemo(() => (pagePath === undefined ? undefined : windowPlacedViewReach(pagePath)), [pagePath, collabScope]);
   return (
-    <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
-      <PlacedViewEmbed target={target} label={label} attrs={attrs} onOpenItem={navigateToTrackerItem} onOpenPage={openPage} />
-    </TrackersUIProvider>
+    <div ref={anchorRef} className="placed-view-embed-frame">
+      {reach ? (
+        <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
+          <PlacedViewEmbed
+            target={target}
+            label={label}
+            attrs={attrs}
+            reach={reach}
+            onOpenItem={navigateToTrackerItem}
+            onOpenPage={openPage}
+            onOpenLink={openLink}
+          />
+        </TrackersUIProvider>
+      ) : null}
+    </div>
   );
+};
+
+/** Through the console link router: in this window when it holds the target, else the browser. */
+const openLink = (href: string) => {
+  void window.electronAPI.openExternal(href).catch((error: unknown) => console.warn('[PlacedViewEmbedFrame] could not open view link', href, error));
 };

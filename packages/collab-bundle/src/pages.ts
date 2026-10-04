@@ -8,5 +8,8 @@
  */
 export * from '@nimbalyst/collab-client/pages';
 // The request/response matcher the desktop's TeamSync uses for the same query.
-export { TeamPageMarksRequests } from '@nimbalyst/runtime/sync/teamPageMarks';
+export { onTeamPageMarksChanged, TeamPageMarksRequests } from '@nimbalyst/runtime/sync/teamPageMarks';
 export type { TeamPageMarksFilters, TeamPageMarksResult } from '@nimbalyst/runtime/sync/teamPageMarks';
+// And for the team's page links index (a typed page's Links section).
+export { onTeamPageLinksChanged, TeamPageLinksRequests } from '@nimbalyst/runtime/sync/teamPageLinks';
+export type { TeamPageLinksFilters, TeamPageLinksResult } from '@nimbalyst/runtime/sync/teamPageLinks';

@@ -114,6 +114,28 @@ function mapItemPlacement(placement: ItemPlacementNode): SharedItemPlacement {
   };
 }
 
+/**
+ * TeamSync's side of the author-echo contract. A server that sends the author
+ * its own page moves and removals, and names the request id in a refusal,
+ * says so in its team sync response; until one does (production before it),
+ * a page move or delete cannot be confirmed and resolves once sent, since
+ * waiting would turn every successful write into a timeout.
+ */
+interface AuthorEchoWrites {
+  echoesAuthorWrites?(): boolean;
+  moveDocument(
+    documentId: string,
+    newParentFolderId: string | null,
+    placement?: { parentKind?: SharedDocument['parentKind']; sortOrder?: number | null; requestId?: string },
+  ): void;
+  removeDocument(documentId: string, options?: { requestId?: string; purge?: true }): void;
+  removeFolder(folderId: string, options?: { requestId?: string }): void;
+}
+
+type AuthorEchoConfig = TeamSyncConfig & {
+  onWriteRefused?: (requestId: string, error: { code: string; message: string }) => void;
+};
+
 function mapMember(member: TeamMemberInfo): TeamMemberSummary {
   return {
     memberId: asTeamMemberId(member.userId),
@@ -132,6 +154,8 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
   /** Confirmed page moves and type placements (Set type moves a page's children). */
   private readonly documentConfirmations: CollabWriteConfirmations<TeamDocIndexEntry>;
   private readonly typeConfirmations: CollabWriteConfirmations<TypePlacementNode>;
+  /** Page and subtree deletes, keyed by the removed id; only when the server echoes them. */
+  private readonly removalConfirmations: CollabWriteConfirmations<true>;
   private readonly observeStatus?: ElectronCollabDocumentsDataSourceEvents['observeStatus'];
   private connectPromise: Promise<void> | null = null;
   private disposed = false;
@@ -143,14 +167,16 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     const confirmations = new ItemPlacementConfirmations(options.placementConfirmTimeoutMs);
     this.placementConfirmations = confirmations;
     const documentConfirmations = new CollabWriteConfirmations<TeamDocIndexEntry>(options.placementConfirmTimeoutMs);
-    const typeConfirmations = new CollabWriteConfirmations<TypePlacementNode>(options.placementConfirmTimeoutMs);
+    const typeConfirmations = new CollabWriteConfirmations<TypePlacementNode>(options.placementConfirmTimeoutMs, 'placement');
+    const removalConfirmations = new CollabWriteConfirmations<true>(options.placementConfirmTimeoutMs, 'delete');
     this.documentConfirmations = documentConfirmations;
     this.typeConfirmations = typeConfirmations;
+    this.removalConfirmations = removalConfirmations;
     const emitSnapshot = () => this.emit({
       type: 'snapshot',
       snapshot: this.currentSnapshot(),
     });
-    const baseConfig: TeamSyncConfig = {
+    const baseConfig: AuthorEchoConfig = {
       serverUrl: scope.indexConfig.serverUrl,
       orgId: scope.orgId,
       teamProjectId: scope.indexConfig.teamProjectId,
@@ -160,22 +186,30 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       onDocumentsLoaded: emitSnapshot,
       onDocumentChanged: (document) => {
         documentConfirmations.changed(document.documentId, document);
+        // A page-tree server moves a live page to Trash instead of deleting it,
+        // and the trashed row is its answer to the delete.
+        if (document.trashedAt != null) removalConfirmations.changed(document.documentId, true);
         this.emit({ type: 'items-upserted', items: [mapDocument(document)] });
       },
-      onDocumentRemoved: (documentId) => this.emit({
-        type: 'items-removed',
-        itemIds: [documentId],
-      }),
+      onDocumentRemoved: (documentId) => {
+        removalConfirmations.changed(documentId, true);
+        this.emit({ type: 'items-removed', itemIds: [documentId] });
+      },
       onFoldersLoaded: emitSnapshot,
       onFolderChanged: (folder) => this.emit({
         type: 'containers-upserted',
         containers: [mapFolder(folder)],
       }),
-      onFoldersRemoved: (folderIds, documentIds) => this.emit({
-        type: 'containers-removed',
-        containerIds: folderIds,
-        itemIds: documentIds,
-      }),
+      onFoldersRemoved: (folderIds, documentIds) => {
+        // A page-tree subtree delete names its root among the documents; an
+        // already-gone root, or a legacy folder, among the folders.
+        for (const id of [...folderIds, ...documentIds]) removalConfirmations.changed(id, true);
+        this.emit({ type: 'containers-removed', containerIds: folderIds, itemIds: documentIds });
+      },
+      onWriteRefused: (requestId, error) => {
+        documentConfirmations.refused(requestId, error.message);
+        removalConfirmations.refused(requestId, error.message);
+      },
       // Placement changes ride the snapshot change; see CollabDocsSnapshot.
       onTypePlacementsLoaded: (placements) => {
         typeConfirmations.loaded(new Map(placements.map((placement) => [placement.typeId, placement])));
@@ -203,6 +237,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
         confirmations.connectionChanged(status === 'connected');
         documentConfirmations.connectionChanged(status === 'connected');
         typeConfirmations.connectionChanged(status === 'connected');
+        removalConfirmations.connectionChanged(status === 'connected');
         this.emit({ type: 'status', status });
         observeStatus?.(status);
       },
@@ -297,9 +332,14 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       case 'update-document-title':
         await this.provider.updateDocumentTitle(command.documentId, command.title);
         return { ok: true };
-      case 'remove-document':
-        this.provider.removeDocument(command.documentId);
+      case 'remove-document': {
+        const requestId = this.authorEchoRequestId();
+        const confirmed = requestId ? this.removalConfirmations.expect(command.documentId, () => true, requestId) : null;
+        const options = { ...(requestId ? { requestId } : {}), ...(command.purge ? { purge: true as const } : {}) };
+        this.writes().removeDocument(command.documentId, ...(Object.keys(options).length > 0 ? [options] : []));
+        await confirmed;
         return { ok: true };
+      }
       case 'trash-document':
         this.provider.trashDocument(command.documentId, command.trashedAt);
         return { ok: true };
@@ -308,13 +348,15 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
         return { ok: true };
       case 'move-document': {
         const parentKind = command.parentFolderId ? command.parentKind ?? 'page' : 'page';
-        const confirmed = command.confirm
+        const requestId = command.confirm ? this.authorEchoRequestId() : null;
+        const confirmed = requestId
           ? this.documentConfirmations.expect(command.documentId, (row) =>
-            (row.parentFolderId ?? null) === command.parentFolderId && (row.parentKind ?? 'page') === parentKind)
+            (row.parentFolderId ?? null) === command.parentFolderId && (row.parentKind ?? 'page') === parentKind, requestId)
           : null;
-        this.provider.moveDocument(command.documentId, command.parentFolderId, {
+        this.writes().moveDocument(command.documentId, command.parentFolderId, {
           ...(command.parentKind ? { parentKind: command.parentKind } : {}),
           ...(command.sortOrder !== undefined ? { sortOrder: command.sortOrder } : {}),
+          ...(requestId ? { requestId } : {}),
         });
         await confirmed;
         return { ok: true };
@@ -333,9 +375,13 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       case 'move-folder':
         this.provider.moveFolder(command.folderId, command.parentFolderId);
         return { ok: true };
-      case 'remove-folder':
-        this.provider.removeFolder(command.folderId);
+      case 'remove-folder': {
+        const requestId = this.authorEchoRequestId();
+        const confirmed = requestId ? this.removalConfirmations.expect(command.folderId, () => true, requestId) : null;
+        this.writes().removeFolder(command.folderId, ...(requestId ? [{ requestId }] : []));
+        await confirmed;
         return { ok: true };
+      }
       case 'refresh-folders':
         return { ok: true, folders: (await this.provider.refreshFolders())?.map(mapFolder) ?? null };
       case 'set-type-placement': {
@@ -387,7 +433,17 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     this.placementConfirmations.dispose();
     this.documentConfirmations.dispose();
     this.typeConfirmations.dispose();
+    this.removalConfirmations.dispose();
     this.provider.destroy();
+  }
+
+  private writes(): AuthorEchoWrites {
+    return this.provider;
+  }
+
+  /** A request id to wait on, or null when the server will not echo the author's page writes. */
+  private authorEchoRequestId(): string | null {
+    return this.writes().echoesAuthorWrites?.() === true ? crypto.randomUUID() : null;
   }
 
   private currentSnapshot(): CollabDocsSnapshot {

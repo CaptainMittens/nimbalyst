@@ -9,6 +9,7 @@ export {
   mergePageMarks,
   onPageMarksSourceChange,
   pageMarkRecordsFromTeamIndex,
+  PageMarksChangeFeed,
   setPageMarksSource,
 } from './pageMarks';
 export type {

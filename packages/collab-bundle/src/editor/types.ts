@@ -174,6 +174,20 @@ export interface CollabEditorCommentsOptions {
   onReply?: (recipientUserIds: string[], payload: CommentReplyPayload) => void;
 }
 
+/** The part of a type definition the placed-view slash entries read. */
+export interface PlacedViewTypeOption {
+  type: string;
+  displayName?: string;
+  displayNamePlural?: string;
+  fields: ReadonlyArray<{ name: string; type: string }>;
+}
+
+/** The host's live list of types, for the placed-view slash entries. */
+export interface PlacedViewTypeSource {
+  list(): readonly PlacedViewTypeOption[];
+  subscribe(listener: () => void): () => void;
+}
+
 export interface CollabEditorMountOptions {
   element: HTMLElement;
   source: CollabEditorSource;
@@ -194,6 +208,19 @@ export interface CollabEditorMountOptions {
    * with key, kind and state in a hover peek. Presentation only.
    */
   trackerReferenceAppearance?: 'chip' | 'quiet';
+  /**
+   * The typed page this body belongs to. Its links then offer the relations
+   * the pair of types allows (the hover picker), as on the desktop. Read when
+   * the editor mounts; omit it for plain pages.
+   */
+  trackerReferenceSource?: { itemId: string; type: string };
+  /**
+   * The project's types a page can place a view of. With it, a team-room
+   * mount's slash menu offers "Table: <type>", "2x2: <type>" and the
+   * decisions and open questions lists, written as this project's console
+   * view links. Omit it and the menu offers no placed views.
+   */
+  placedViewTypes?: PlacedViewTypeSource;
   onStateChange?: (state: CollabEditorState) => void;
   onPresenceChange?: (presence: CollabEditorPresence) => void;
   onWriteRejected?: (rejection: CollabEditorWriteRejection) => void;

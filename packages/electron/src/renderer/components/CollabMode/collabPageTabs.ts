@@ -66,6 +66,20 @@ export function openPageTab(
   );
 }
 
+/**
+ * The tree row an open tab stands for, so the sidebar can highlight and reveal
+ * it. Item and type tabs name no lane: each section marks the row only if its
+ * tree holds it.
+ */
+export function activePageRow(filePath: string | null | undefined): { itemId: string | null; typeId: string | null } {
+  const kind = filePath ? pageKindOf(filePath) : null;
+  const artifactId = filePath && kind ? filePath.slice(pageTabPath(kind, '').length) || null : null;
+  return {
+    itemId: kind === 'tracker' ? artifactId : null,
+    typeId: kind === 'type' ? artifactId : null,
+  };
+}
+
 /** The persisted form of an item, type or personal page tab; null for any other tab. */
 export function toPersistedPageEntry(tab: TabData): PersistedCollabPageEntry | null {
   const kind = pageKindOf(tab.filePath);

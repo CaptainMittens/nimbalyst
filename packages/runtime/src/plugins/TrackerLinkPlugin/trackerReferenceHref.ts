@@ -15,7 +15,7 @@
  * future `nimbalyst://action` with no path cannot be mistaken for a key.
  */
 
-import { CONSOLE_LINK_ORIGIN, parseConsoleLink } from '@nimbalyst/collab-protocol';
+import { buildConsoleLink, CONSOLE_LINK_ORIGIN, parseConsoleLink, type ConsoleTeamScope } from '@nimbalyst/collab-protocol';
 
 /** Hosts owned by the deep-link router; never tracker keys. */
 const RESERVED_LINK_HOSTS = new Set([
@@ -53,14 +53,14 @@ function escapeRegExp(value: string): string {
 
 /**
  * A console link to a typed page, the form new references are written in:
- * `https://console.nimbalyst.com/org/<org>/project/<project>/trackers/item/<KEY>`
- * for a team item, `https://console.nimbalyst.com/app/item/<KEY>` for a local
+ * `https://console.nimbalyst.com/org/<org>/project/<project>/page/item/<KEY>`
+ * (older links: `.../trackers/item/<KEY>`) for a team item, `https://console.nimbalyst.com/app/item/<KEY>` for a local
  * one. A trailing query or hash is allowed; links to pages, types and views
  * are not tracker references. `consoleLinks.ts` in collab-protocol owns the
  * shape; this pattern only finds candidates, which `trackerReferenceKeyFromHref`
  * confirms through `parseConsoleLink`.
  */
-export const TRACKER_REFERENCE_CONSOLE_HREF_PATTERN = `${escapeRegExp(CONSOLE_LINK_ORIGIN)}/(?:org/${URL_SEGMENT}/project/${URL_SEGMENT}/trackers/item|app/item)/${URL_SEGMENT}(?:[?#][^\\s()"]*)?`;
+export const TRACKER_REFERENCE_CONSOLE_HREF_PATTERN = `${escapeRegExp(CONSOLE_LINK_ORIGIN)}/(?:org/${URL_SEGMENT}/project/${URL_SEGMENT}/(?:page|trackers)/item|app/item)/${URL_SEGMENT}(?:[?#][^\\s()"]*)?`;
 
 /**
  * The reference key a link points at: `nimbalyst://KEY` (the Phase 3 form,
@@ -90,4 +90,75 @@ export function setTrackerReferenceHrefBuilder(builder: ((referenceKey: string) 
 /** The href for a new reference, or null to write the `nimbalyst://KEY` form. */
 export function buildTrackerReferenceHref(referenceKey: string): string | null {
   return hrefBuilder?.(referenceKey) ?? null;
+}
+
+/**
+ * The team project this host resolves references in: an issue key is only
+ * unique within one, so a console link naming any other project must never be
+ * resolved to this project's item with the same key. Undefined until the host
+ * says (null: it has no team project), and every team link is then foreign.
+ */
+let homeScope: ConsoleTeamScope | null | undefined;
+const homeScopeListeners = new Set<() => void>();
+
+export function setTrackerReferenceHomeScope(scope: ConsoleTeamScope | null | undefined): void {
+  if (scope === homeScope || (scope && homeScope && scope.orgId === homeScope.orgId && scope.projectId === homeScope.projectId)) return;
+  homeScope = scope;
+  for (const listener of [...homeScopeListeners]) listener();
+}
+
+export function getTrackerReferenceHomeScope(): ConsoleTeamScope | null | undefined {
+  return homeScope;
+}
+
+export function subscribeTrackerReferenceHomeScope(listener: () => void): () => void {
+  homeScopeListeners.add(listener);
+  return () => homeScopeListeners.delete(listener);
+}
+
+const acquiredScopes: Array<{ scope: ConsoleTeamScope }> = [];
+
+function applyAcquiredScope(): void {
+  const top = acquiredScopes[acquiredScopes.length - 1];
+  if (!top) {
+    setTrackerReferenceHrefBuilder(null);
+    setTrackerReferenceHomeScope(undefined);
+    return;
+  }
+  const { scope } = top;
+  setTrackerReferenceHrefBuilder((referenceKey) => buildConsoleLink({ kind: 'item', scope, itemRef: referenceKey }));
+  setTrackerReferenceHomeScope(scope);
+}
+
+/**
+ * For a host whose editors each sit in one team project (the browser): new
+ * references are written as that project's console links and resolved in it
+ * until the returned release. The most recent acquisition wins; releasing it
+ * restores the one before.
+ */
+export function acquireConsoleReferenceScope(scope: ConsoleTeamScope): () => void {
+  const entry = { scope };
+  acquiredScopes.push(entry);
+  applyAcquiredScope();
+  return () => {
+    const index = acquiredScopes.indexOf(entry);
+    if (index === -1) return;
+    acquiredScopes.splice(index, 1);
+    applyAcquiredScope();
+  };
+}
+
+/**
+ * The team project a reference's link names when it is not `home`; null for a
+ * reference this host resolves (`nimbalyst://KEY`, a local link, or its own
+ * project's link).
+ */
+export function trackerReferenceForeignScope(
+  href: string | null | undefined,
+  home: ConsoleTeamScope | null | undefined = homeScope,
+): ConsoleTeamScope | null {
+  const target = parseConsoleLink(href);
+  if (target?.kind !== 'item' || target.scope === 'local') return null;
+  if (home && home.orgId === target.scope.orgId && home.projectId === target.scope.projectId) return null;
+  return target.scope;
 }

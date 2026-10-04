@@ -4,7 +4,8 @@ import {
   workspacePathFromPersonalScopeKey,
   type CollabScope,
 } from '@nimbalyst/collab-client/core';
-import { pageDisplayName, TYPE_PAGE_DOCUMENT_PREFIX, type SharedParentKind } from '@nimbalyst/collab-client/docs';
+import { pageDisplayName, type SharedParentKind } from '@nimbalyst/collab-client/docs';
+import { ensureTypePageDocument as ensureSharedTypePageDocument } from '@nimbalyst/collab-client/docs/pageTypes';
 import type { CollabDocumentConfig } from '../utils/collabDocumentOpener';
 import {
   removeCollabConfigsForDocument,
@@ -712,12 +713,9 @@ export class CollaborativeDocumentCreationOrchestrator {
 
   /**
    * The prose page of a tracker type, `type-page:<typeId>`, created on first
-   * need under the type's placement parent. It starts empty, so registering
-   * the row is the whole creation, and nothing opens: the type's tab shows it.
-   * A row that already exists (another client got there first) is returned.
-   * A same-named page beside it, or a parent that is gone, does not stop it:
-   * the tree never shows this row, so its name and place only matter to
-   * clients that predate type pages.
+   * need under the type's placement parent. The register step and its retries
+   * are collab-client's `ensureTypePageDocument`; this supplies the create.
+   * Nothing opens: the type's tab shows it.
    */
   async ensureTypePage(input: {
     scope: CollabScope;
@@ -725,32 +723,37 @@ export class CollaborativeDocumentCreationOrchestrator {
     typeName: string;
     parentFolderId: string | null;
   }): Promise<SharedDocument> {
-    const documentId = `${TYPE_PAGE_DOCUMENT_PREFIX}${input.typeId}`;
-    const existing = this.dependencies.getDocuments(input.scope).find((document) => document.documentId === documentId);
-    if (existing) return existing;
-    const resolution = this.dependencies.getCatalog().resolveMetadata('markdown', '.md');
-    if (resolution.state !== 'ready') {
-      throw new CollaborativeDocumentCreationError('invalid-descriptor', resolution.reason, documentId, documentId, false);
-    }
-    const attempt = (requestedName: string, parentFolderId: string | null, operationSuffix: string) => this.create({
-      scope: input.scope,
-      descriptor: resolution.descriptor,
-      requestedName,
-      parentFolderId,
-      documentId,
-      // The same type id exists in every workspace, so the operation is per scope.
-      operationId: `${input.scope.scopeKey}\u0000${documentId}${operationSuffix}`,
-      sourceContent: '',
-      openAfterCreate: false,
+    let resolvedDescriptor: CollaborativeDocumentTypeDescriptor | null = null;
+    return ensureSharedTypePageDocument(input, {
+      existing: (documentId) => this.dependencies.getDocuments(input.scope).find((document) => document.documentId === documentId),
+      create: ({ documentId, requestedName, parentFolderId, operationSuffix }) => {
+        let descriptor = resolvedDescriptor;
+        if (!descriptor) {
+          const resolution = this.dependencies.getCatalog().resolveMetadata('markdown', '.md');
+          if (resolution.state !== 'ready') {
+            throw new CollaborativeDocumentCreationError('invalid-descriptor', resolution.reason, documentId, documentId, false);
+          }
+          descriptor = resolvedDescriptor = resolution.descriptor;
+        }
+        return this.create({
+          scope: input.scope,
+          descriptor,
+          requestedName,
+          parentFolderId,
+          documentId,
+          // The same type id exists in every workspace, so the operation is per scope.
+          operationId: `${input.scope.scopeKey}\u0000${documentId}${operationSuffix}`,
+          sourceContent: '',
+          openAfterCreate: false,
+        });
+      },
+      refusal: (error) => {
+        if (!(error instanceof CollaborativeDocumentCreationError)) return null;
+        if (error.code === 'name-collision') return 'name-collision';
+        if (error.code === 'invalid-parent-folder') return 'invalid-parent';
+        return null;
+      },
     });
-    try {
-      return await attempt(input.typeName, input.parentFolderId, '');
-    } catch (error) {
-      if (!(error instanceof CollaborativeDocumentCreationError)) throw error;
-      if (error.code === 'name-collision') return attempt(`${input.typeName} (type)`, input.parentFolderId, ':renamed');
-      if (error.code === 'invalid-parent-folder') return attempt(input.typeName, null, ':root');
-      throw error;
-    }
   }
 
   /**

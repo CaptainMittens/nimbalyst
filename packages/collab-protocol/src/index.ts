@@ -10,6 +10,7 @@ export * from "./identityScope.js";
 export * from "./roomIds.js";
 export * from "./collabUri.js";
 export * from "./consoleLinks.js";
+export * from "./pageToolContract.js";
 export * from "./comments.js";
 export * from "./structuredInput.js";
 export * from "./feedbackRequest.js";

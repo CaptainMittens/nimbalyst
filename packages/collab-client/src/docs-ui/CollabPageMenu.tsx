@@ -64,7 +64,7 @@ export const CollabPageMenuHead: React.FC<{
   </>
 );
 
-/** A page with children is deleted with its subtree; a leaf goes to Trash. */
+/** A page goes to Trash, with its subtree when it has children. */
 export const CollabPageDeleteEntry: React.FC<{ childCount: number; onDelete: () => void }> = ({ childCount, onDelete }) => (
   <>
     <Separator />
@@ -72,7 +72,7 @@ export const CollabPageDeleteEntry: React.FC<{ childCount: number; onDelete: () 
       className="collab-page-delete"
       icon="delete"
       danger
-      label={childCount > 0 ? 'Delete' : 'Move to Trash'}
+      label="Move to Trash"
       trailing={childCount > 0 ? `${childCount} child page${childCount === 1 ? '' : 's'}` : undefined}
       onClick={onDelete}
     />

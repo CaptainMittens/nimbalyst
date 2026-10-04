@@ -4,6 +4,8 @@
  * bodies. The server extracts them when a body changes and keeps them in the
  * TeamRoom, so a client can list marks from pages it has never opened.
  *
+ * Only pages in the team's doc index are covered; a typed page's body
+ * (`tracker-content/<itemId>`) is not, so clients read those locally.
  * A member is answered only with marks from documents they can read; trashed
  * documents are never included.
  */
@@ -12,14 +14,11 @@ export type PageMarkEntryKind = 'decided' | 'open';
 
 /** One mark in a team page body. */
 export interface PageMarkEntry {
-  /**
-   * The page's document id. A typed page's body is `tracker-content/<itemId>`;
-   * the server does not know tracker items, so the client resolves those.
-   */
+  /** The page's document id in the doc index. */
   documentId: string;
-  /** Project of a page in the doc index; null for a typed page's body. */
+  /** Project of the page; null for a page outside any project. */
   projectId: string | null;
-  /** Page title from the doc index; null for a typed page's body. */
+  /** Page title from the doc index; null when it cannot be read. */
   title: string | null;
   kind: PageMarkEntryKind;
   /** The marked sentence as inline markdown. */
@@ -58,4 +57,13 @@ export interface TeamPageMarksResponseMessage {
   marks: PageMarkEntry[];
   /** `partial` until the server has indexed every page once. */
   status: 'ready' | 'partial';
+}
+
+/**
+ * TeamRoom -> every synced connection: some page's marks changed, so an open
+ * marks list asks again. Carries nothing, so it says nothing about pages a
+ * member cannot read.
+ */
+export interface TeamPageMarksChangedMessage {
+  type: 'pageMarksChanged';
 }

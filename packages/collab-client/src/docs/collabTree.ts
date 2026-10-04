@@ -89,8 +89,11 @@ export interface CollabTypeTreeResolver {
   itemsOfType(typeId: string): Array<{ itemId: string; title: string; sortKey?: string | number }>;
   /** One item by id, for an item placed outside its type; null when unknown here. */
   item?(itemId: string): { itemId: string; title: string; typeId: string } | null;
-  /** Types a user may place, for the "Place type..." menu. */
-  listedTypes?(): Array<{ typeId: string; name: string; icon?: string }>;
+  /**
+   * Types a user may place, for the "Place type..." menu. `creatable: false`
+   * marks a type that holds no new pages, which "Set type" does not offer.
+   */
+  listedTypes?(): Array<{ typeId: string; name: string; icon?: string; creatable?: boolean }>;
 }
 
 export interface CollabTypePlacementInput {

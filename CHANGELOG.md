@@ -23,11 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shared Docs mode is now called Pages.
 - New links in pages are console.nimbalyst.com links that open in the desktop app when it can show the page.
 - The Knowledge extension's skills now write pages, typed pages and linked relations instead of claim and finding items.
+- The Claude Code plugin for team knowledge is now `nimbalyst-pages` and works on Pages, and `nim wiki` is now `nim pages`.
 - Enlarged transcript images can be zoomed with a two-finger pinch on touch screens or a trackpad pinch.
 - iOS: the session list and session header take less space, with search and filters in the toolbar and the prompt list in the session title's popover.
 
 ### Fixed
 <!-- Bug fixes go here -->
+- Pages: a page deleted by an agent, or a page with child pages deleted from the sidebar, now goes to Trash instead of being deleted permanently.
 - Team trackers: sync no longer fails to start in a workspace where one item had built up a backlog of unsent edits too large to load, and an edit that would make a shared item too large to sync is refused with an error instead of appearing saved.
 - Phone sync: a project file over the size limit no longer stops the other files in the same upload from syncing; the oversized file is skipped.
 - Pages: team sync no longer stops with "Data source has been disposed" after the Pages view recovers from an error.
@@ -42,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 <!-- Removed features go here -->
+- Tracker items no longer show the earlier knowledge graph's claim statements and qualifier editors; values already stored are kept.
 
 ## [0.79.1] - 2026-09-30
 

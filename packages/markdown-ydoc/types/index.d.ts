@@ -24,6 +24,23 @@ export declare function markdownToLexicalYUpdate(
   opts?: MarkdownToLexicalYUpdateOptions,
 ): Uint8Array;
 
+export interface MarkdownTextReplacement {
+  /** Exact text in the body's markdown; never empty. */
+  oldText: string;
+  newText: string;
+}
+
+/**
+ * Apply exact text replacements to a Lexical collaborative document, as the
+ * desktop editor applies an agent's edit, and return only what changed, so a
+ * concurrent edit elsewhere and comment anchors survive. Throws when any
+ * `oldText` is empty or not in the body; nothing is applied then.
+ */
+export declare function applyMarkdownReplacementsToLexicalYUpdate(
+  state: Uint8Array,
+  replacements: readonly MarkdownTextReplacement[],
+): Uint8Array;
+
 /** Read a Lexical collaborative document's state back out as markdown. */
 export declare function lexicalYDocToMarkdown(state: Uint8Array): string;
 

@@ -19,7 +19,7 @@ import {
 } from './collabTree';
 import { isHomePageId } from './homePage';
 
-import type { CollabDocsSession } from './session';
+import type { PageTreeSession } from './pageTreeSession';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 
 export interface CollabPageTreeInput {
@@ -572,7 +572,7 @@ export function pageTreeRowDrop(context: PageTreeRowDropContext, node: CollabTre
  * happened: refused for a taken name or a cycle, nothing to do, or done.
  */
 export function movePageInTree(
-  session: CollabDocsSession,
+  session: PageTreeSession,
   tree: CollabTreeNode[],
   page: SharedDocument,
   parentId: string | null,
@@ -596,11 +596,11 @@ export type PageTreeDestination = { parentId: string | null; parentKind: SharedP
  * drops, the row menu's "Back under its type" and the move dialog.
  */
 export function moveItemInTree(
-  session: CollabDocsSession,
+  session: PageTreeSession,
   tree: CollabTreeNode[],
   itemId: string,
   destination: PageTreeDestination,
-): 'cycle' | ReturnType<CollabDocsSession['setItemPlacement']> {
+): 'cycle' | ReturnType<PageTreeSession['setItemPlacement']> {
   const under = 'underType' in destination;
   if (treeMoveRefused(tree, `item:${itemId}`, under
     ? { underOwnType: true }
@@ -613,7 +613,7 @@ export function moveItemInTree(
 }
 
 /** Apply one row's write from a drop plan through the docs session. */
-export function applyPageTreeWrite(session: CollabDocsSession, write: PageTreeWrite, onError: (error: unknown) => void): void {
+export function applyPageTreeWrite(session: PageTreeSession, write: PageTreeWrite, onError: (error: unknown) => void): void {
   if (write.kind === 'page') {
     session.movePage(write.documentId, write.parentId, { parentKind: write.parentKind, sortOrder: write.sortOrder });
   } else if (write.kind === 'type') {

@@ -26,7 +26,7 @@
  * Pure: no Lexical, React or DOM.
  */
 
-import { buildConsoleLink, parseConsoleLink } from '@nimbalyst/collab-protocol';
+import { buildConsoleLink, parseConsoleLink, type ConsoleCitationAgent } from '@nimbalyst/collab-protocol';
 
 import { forEachProseLine, maskInlineCode } from './markdownProseLines';
 
@@ -41,6 +41,8 @@ export type CitationInputKind = 'prompt' | 'answer' | 'comment';
 export const CITATION_INPUT_KINDS: readonly CitationInputKind[] = ['prompt', 'answer', 'comment'];
 
 export interface HumanCitationRef {
+  /** Absent for a Nimbalyst session; `claude-code` when `sessionId` is a terminal Claude Code session. */
+  agent?: ConsoleCitationAgent;
   sessionId: string;
   inputKind: CitationInputKind;
   /** Stable key of the input inside the session (tool call id, prompt sync id, comment id). */
@@ -156,7 +158,13 @@ export function citationInitials(name: string | undefined): string {
 
 /** The URL of a human citation: a console link. The only place one is built. */
 export function buildHumanCitationHref(ref: HumanCitationRef): string {
-  return buildConsoleLink({ kind: 'citation', sessionId: ref.sessionId, inputKind: ref.inputKind, key: ref.key });
+  return buildConsoleLink({
+    kind: 'citation',
+    ...(ref.agent ? { agent: ref.agent } : {}),
+    sessionId: ref.sessionId,
+    inputKind: ref.inputKind,
+    key: ref.key,
+  });
 }
 
 /**
@@ -167,7 +175,7 @@ export function buildHumanCitationHref(ref: HumanCitationRef): string {
 export function parseHumanCitationHref(href: string): HumanCitationRef | null {
   const target = parseConsoleLink(href);
   if (target?.kind === 'citation') {
-    return { sessionId: target.sessionId, inputKind: target.inputKind, key: target.key };
+    return { ...(target.agent ? { agent: target.agent } : {}), sessionId: target.sessionId, inputKind: target.inputKind, key: target.key };
   }
   if (!href.startsWith(LEGACY_HUMAN_CITATION_BASE)) return null;
   const segments = href.slice(LEGACY_HUMAN_CITATION_BASE.length).split('/');
@@ -234,15 +242,18 @@ export function citationsEqual(a: Citation, b: Citation): boolean {
   if (a.kind === 'source' || b.kind === 'source') {
     return a.kind === 'source' && b.kind === 'source' && a.target === b.target;
   }
-  return a.sessionId === b.sessionId && a.inputKind === b.inputKind && a.key === b.key
-    && TITLE_FIELDS.every(([field]) => (a[field] ?? '') === (b[field] ?? ''));
+  return sameHumanTarget(a, b) && TITLE_FIELDS.every(([field]) => (a[field] ?? '') === (b[field] ?? ''));
+}
+
+function sameHumanTarget(a: HumanCitationRef, b: HumanCitationRef): boolean {
+  return a.agent === b.agent && a.sessionId === b.sessionId && a.inputKind === b.inputKind && a.key === b.key;
 }
 
 function sameTarget(a: Citation, b: Citation): boolean {
   if (a.kind === 'source' || b.kind === 'source') {
     return a.kind === 'source' && b.kind === 'source' && a.target === b.target;
   }
-  return a.sessionId === b.sessionId && a.inputKind === b.inputKind && a.key === b.key;
+  return sameHumanTarget(a, b);
 }
 
 /**

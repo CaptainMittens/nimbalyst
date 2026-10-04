@@ -80,11 +80,15 @@ export interface CollabTypeTreeResolver {
         title: string;
         typeId: string;
     } | null;
-    /** Types a user may place, for the "Place type..." menu. */
+    /**
+     * Types a user may place, for the "Place type..." menu. `creatable: false`
+     * marks a type that holds no new pages, which "Set type" does not offer.
+     */
     listedTypes?(): Array<{
         typeId: string;
         name: string;
         icon?: string;
+        creatable?: boolean;
     }>;
 }
 export interface CollabTypePlacementInput {

@@ -96,7 +96,10 @@ export const COLLAB_BUNDLE_EAGER_GZIP_BUDGET_BYTES = {
   // lost its qualifiers and the label registry's property qualifiers moved to
   // their own module with their own error codes, which costs a few hundred
   // bytes of strings. Reset with ~2% headroom.
-  'trackers-ui': 186_000,
+  // 2026-10-03: 188,280 bytes after typed pages and type pages moved into
+  // collab-client for the web console, console links, and the page links
+  // query; their views and editors load on demand. Reset with ~4% headroom.
+  'trackers-ui': 196_000,
   // Deliberately tight. This entry is a WebSocket client over the protocol
   // package and nothing else; anything that makes it jump has dragged a UI
   // graph in behind it.

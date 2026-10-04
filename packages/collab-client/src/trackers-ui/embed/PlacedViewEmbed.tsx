@@ -9,7 +9,7 @@
  */
 
 import { useMemo, type JSX } from 'react';
-import type { PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
+import { createPlacedViewUrl, type PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
 import { QuadrantChart } from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/QuadrantChart';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import type { SavedView } from '@nimbalyst/collab-client/trackers';
@@ -17,7 +17,7 @@ import { useTrackersUI } from '../TrackersUIProvider';
 import { useTrackerDataSelector } from '../useTrackerData';
 import { useTrackerViewRows } from '../useTrackerViewRows';
 import { TrackerViewEmbed } from './TrackerViewEmbed';
-import { placedViewDefinition, type PlacedQuadrant } from './placedViewDefinition';
+import { placedViewDefinition, placedViewInReach, type PlacedQuadrant, type PlacedViewReach } from './placedViewDefinition';
 import { quadrantData } from './quadrantData';
 import { PlacedViewNote } from './PlacedViewNote';
 import { MarksListEmbed } from './MarksListEmbed';
@@ -26,10 +26,17 @@ export interface PlacedViewEmbedProps {
   target: PlacedViewTarget;
   label: string;
   attrs: Readonly<Record<string, string>>;
+  /**
+   * The scopes the mounted data source serves. A link naming any other scope
+   * is never drawn from (or edited through) this host's items.
+   */
+  reach?: PlacedViewReach;
   onOpenItem?: (itemId: string) => void;
   onOpenAsTable?: (view: SavedView) => void;
   /** Opens the page a listed mark is on, by its tab uri. */
   onOpenPage?: (uri: string) => void;
+  /** Opens the view's own console link, for a view this host cannot draw. */
+  onOpenLink?: (href: string) => void;
 }
 
 function parseHeight(value: string | undefined): number | undefined {
@@ -37,11 +44,36 @@ function parseHeight(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? Math.max(parsed, 120) : undefined;
 }
 
-export function PlacedViewEmbed({ target, label, attrs, onOpenItem, onOpenAsTable, onOpenPage }: PlacedViewEmbedProps): JSX.Element {
+export function PlacedViewEmbed({ target, label, attrs, reach, onOpenItem, onOpenAsTable, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element {
+  if (!placedViewInReach(target.scope, reach)) {
+    return <OutOfScopeViewNote target={target} label={label} onOpenLink={onOpenLink} />;
+  }
   if (target.kind === 'marks') {
     return <MarksListEmbed kind={target.marks} label={label} attrs={attrs} onOpenPage={onOpenPage} />;
   }
   return <TypeViewEmbed typeId={target.typeId} label={label} attrs={attrs} onOpenItem={onOpenItem} onOpenAsTable={onOpenAsTable} />;
+}
+
+/** A view of another project (or of someone's own items, on a shared page): its link, never these items. */
+function OutOfScopeViewNote({ target, label, onOpenLink }: {
+  target: PlacedViewTarget;
+  label: string;
+  onOpenLink?: (href: string) => void;
+}): JSX.Element {
+  const href = createPlacedViewUrl(target);
+  const name = label || (target.kind === 'type' ? target.typeId : 'View');
+  const open = onOpenLink
+    ? <button type="button" className="ml-1 text-nim-link hover:underline" data-testid="placed-view-open-link" onClick={() => onOpenLink(href)}>Open</button>
+    : <a className="ml-1 text-nim-link hover:underline" data-testid="placed-view-open-link" href={href} target="_blank" rel="noreferrer">Open</a>;
+  return (
+    <div
+      className="placed-view-out-of-scope my-3 rounded-lg border border-nim bg-nim-secondary px-3 py-2 text-xs text-nim-muted"
+      contentEditable={false}
+      data-testid="placed-view-out-of-scope"
+    >
+      {name}: a view from another project, so it is not shown here.{open}
+    </div>
+  );
 }
 
 function TypeViewEmbed({ typeId, label, attrs, onOpenItem, onOpenAsTable }: {

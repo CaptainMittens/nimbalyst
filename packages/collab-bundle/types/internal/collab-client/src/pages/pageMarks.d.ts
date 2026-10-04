@@ -5,7 +5,9 @@
  * host answers `listMarks`. Team pages come from the server's marks index
  * (`pageMarksQuery`, mapped by `pageMarkRecordsFromTeamIndex`). The desktop
  * adds what it reads locally -- typed pages, Personal pages and Personal type
- * pages -- and merges the two; the web console uses the index alone.
+ * pages -- and merges the two; the web console uses the index alone, so it
+ * lists no typed-page marks. A source's `subscribe` (`PageMarksChangeFeed`)
+ * tells open lists to load again.
  *
  * Logic and contracts only -- no React, no DOM.
  */
@@ -66,19 +68,27 @@ export declare function onPageMarksSourceChange(listener: () => void): () => voi
 export declare function filterPageMarks(records: readonly PageMarkRecord[], query?: PageMarksQuery): PageMarkRecord[];
 export interface TeamIndexMappingOptions {
     orgId: string;
-    /**
-     * Names a typed page from its tracker item. Marks in a typed page's body
-     * (`tracker-content/<itemId>`) are kept only when this resolves the item, so
-     * a deleted item or one this client cannot see drops out. Omit it to leave
-     * typed pages out entirely (a host that reads them locally).
-     */
-    resolveTypedPage?: (itemId: string) => {
-        title: string;
-        issueKey: string | null;
-        typeId: string | null;
-    } | null;
 }
-/** Records for the marks the server's index returned. */
+/**
+ * Records for the marks the server's index returned. A typed page's body is
+ * never taken from the index (an older server listed them, deleted items
+ * included); the desktop reads those locally.
+ */
 export declare function pageMarkRecordsFromTeamIndex(entries: readonly PageMarkEntry[], options: TeamIndexMappingOptions): PageMarkRecord[];
+/**
+ * A source's `subscribe`: `notify()` reaches every open list, and while the
+ * team index's last answer was missing (offline, no reply) or `partial`, the
+ * lists are asked to load again, backing off, until an answer is complete.
+ */
+export declare class PageMarksChangeFeed {
+    private readonly listeners;
+    private retryTimer;
+    private retryDelay;
+    subscribe(listener: () => void): () => void;
+    notify(): void;
+    /** After a load: whether the team index answered completely. */
+    settled(complete: boolean): void;
+    private stopRetry;
+}
 /** Local and server marks together; a mark listed by both appears once (the first list wins). */
 export declare function mergePageMarks(first: readonly PageMarkRecord[], second: readonly PageMarkRecord[]): PageMarkRecord[];

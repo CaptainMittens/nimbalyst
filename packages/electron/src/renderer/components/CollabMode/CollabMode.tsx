@@ -37,9 +37,10 @@ import {
   updateCollabConfigDisplayMetadata,
   type CollabDocumentOpenSource,
 } from '../../utils/collabDocumentOpener';
-import { openPageTab } from './collabPageTabs';
+import { activePageRow, openPageTab } from './collabPageTabs';
 import { composePagesCreateMenu } from './pagesCreateMenu';
 import { useCollabTabPersistence } from './useCollabTabPersistence';
+import { usePublishPagesTabStrip } from '../../services/pageTreeTools/pagesTabStrip';
 import { PagesSidebarSections } from './PagesSidebarSections';
 import {
   initSharedDocuments,
@@ -233,6 +234,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
   onPanelStateChange,
 }, ref) {
   const tabsActions = useTabsActions();
+  usePublishPagesTabStrip(workspacePath, tabsActions);
   const { tabs, activeTabId } = useTabs();
   useTabNavigationShortcuts(isActive);
   const pendingDoc = useAtomValue(pendingCollabDocumentAtom);
@@ -595,23 +597,19 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
     openPageTab(tabsActions.addTab, { kind: 'tracker', artifactId: trackerItemId });
   }, [tabsActions]);
 
+  const activeTabPath = activeTabId ? tabs.find(tab => tab.id === activeTabId)?.filePath ?? null : null;
   const activeCollabDocumentId = useMemo(() => {
-    if (!activeTabId) return null;
-    const activeTab = tabs.find(tab => tab.id === activeTabId);
-    if (!activeTab || !isCollabUri(activeTab.filePath)) return null;
-
+    if (!activeTabPath || !isCollabUri(activeTabPath)) return null;
     try {
-      return parseCollabUri(activeTab.filePath).documentId;
+      return parseCollabUri(activeTabPath).documentId;
     } catch {
       return null;
     }
-  }, [activeTabId, tabs]);
-  const activePersonalDocumentId = useMemo(() => {
-    const activeTab = activeTabId ? tabs.find(tab => tab.id === activeTabId) : null;
-    return activeTab && isPersonalPageTabPath(activeTab.filePath)
-      ? activeTab.filePath.slice(PERSONAL_PAGE_TAB_PREFIX.length)
-      : null;
-  }, [activeTabId, tabs]);
+  }, [activeTabPath]);
+  const activePersonalDocumentId = activeTabPath && isPersonalPageTabPath(activeTabPath)
+    ? activeTabPath.slice(PERSONAL_PAGE_TAB_PREFIX.length)
+    : null;
+  const activeRow = useMemo(() => activePageRow(activeTabPath), [activeTabPath]);
 
   useEffect(() => {
     if (!teamScope) return;
@@ -816,6 +814,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
               personalScope={personalScope}
               activeTeamDocumentId={activeCollabDocumentId}
               activePersonalDocumentId={activePersonalDocumentId}
+              activeRow={activeRow}
               onShowHome={() => openSharedHomeTab(true)}
               homeActive={activeTabIsHome}
               registerTeamCreateMenu={registerTeamCreateMenu}

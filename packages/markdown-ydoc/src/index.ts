@@ -10,6 +10,7 @@
  */
 import type * as Api from '../types/index';
 import {
+  applyMarkdownReplacementsToLexicalYUpdate,
   lexicalYDocToMarkdown,
   markdownToLexicalYUpdate,
 } from '../../runtime/src/sync/markdownYDoc';
@@ -19,11 +20,12 @@ import { findPageMarks } from '../../runtime/src/core/pageMarkSyntax';
 
 // The published types are hand-written; fail the typecheck if they drift.
 const _typesMatch: {
+  applyMarkdownReplacementsToLexicalYUpdate: typeof Api.applyMarkdownReplacementsToLexicalYUpdate;
   markdownToLexicalYUpdate: typeof Api.markdownToLexicalYUpdate;
   lexicalYDocToMarkdown: typeof Api.lexicalYDocToMarkdown;
   findPageMarks: typeof Api.findPageMarks;
-} = { markdownToLexicalYUpdate, lexicalYDocToMarkdown, findPageMarks };
+} = { applyMarkdownReplacementsToLexicalYUpdate, markdownToLexicalYUpdate, lexicalYDocToMarkdown, findPageMarks };
 void _typesMatch;
 
-export { findPageMarks, lexicalYDocToMarkdown, markdownToLexicalYUpdate };
-export type { MarkdownToLexicalYUpdateOptions, PageMarkKind, PageMarkOccurrence } from '../types/index';
+export { applyMarkdownReplacementsToLexicalYUpdate, findPageMarks, lexicalYDocToMarkdown, markdownToLexicalYUpdate };
+export type { MarkdownTextReplacement, MarkdownToLexicalYUpdateOptions, PageMarkKind, PageMarkOccurrence } from '../types/index';

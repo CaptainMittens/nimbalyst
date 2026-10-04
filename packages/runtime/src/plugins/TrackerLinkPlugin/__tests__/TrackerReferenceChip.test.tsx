@@ -12,7 +12,9 @@ import { TrackerReferenceChip } from '../TrackerReferenceChip';
 import { $getNodeByKey, $getRoot, $createParagraphNode, createEditor } from 'lexical';
 import { LexicalComposerContext, createLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { globalRegistry, type PredicateDefinition } from '@nimbalyst/tracker-schema';
-import { $createTrackerReferenceNode, TrackerReferenceNode } from '../TrackerReferenceNode';
+import { $createTrackerReferenceNode, TrackerReferenceNode, TrackerReferenceNodeDecorator } from '../TrackerReferenceNode';
+import { setTrackerReferenceNodeRenderer } from '../TrackerReferenceNodeRenderer';
+import { setTrackerReferenceHomeScope } from '../trackerReferenceHref';
 import { trackerReferenceRelationOptions } from '../TrackerReferenceRelationMenu';
 import { TrackerReferenceSourceProvider } from '../trackerReferenceSource';
 
@@ -541,5 +543,46 @@ describe('TrackerReferenceChip', () => {
       container.querySelector<HTMLElement>('.tracker-reference-chip-title')
         ?.style.textDecoration,
     ).toBe('line-through');
+  });
+});
+
+describe('a reference to another project', () => {
+  const OTHER = 'https://console.nimbalyst.com/org/org-1/project/elsewhere/trackers/item/NIM-1';
+  const HOME = 'https://console.nimbalyst.com/org/org-1/project/home/trackers/item/NIM-1';
+  afterEach(() => {
+    setTrackerReferenceNodeRenderer(undefined);
+    setTrackerReferenceHomeScope(undefined);
+  });
+
+  function renderReference(href: string | null): void {
+    const editor = createEditor({ nodes: [TrackerReferenceNode], onError: error => { throw error; } });
+    let element: React.ReactNode = null;
+    editor.update(() => {
+      const node = $createTrackerReferenceNode('NIM-1', 'chip', null, href);
+      $getRoot().append($createParagraphNode().append(node));
+      element = TrackerReferenceNodeDecorator.decorate(node, editor, { namespace: 'test', theme: {} });
+    }, { discrete: true });
+    render(<>{element}</>);
+  }
+
+  it('is never resolved against this project; it shows as an external link to its own console page', () => {
+    setTrackerReferenceNodeRenderer(({ referenceKey }) => <span data-testid="local-chip">{referenceKey}</span>);
+    setTrackerReferenceHomeScope({ orgId: 'org-1', projectId: 'home' });
+
+    renderReference(OTHER);
+    expect(screen.queryByTestId('local-chip')).toBeNull();
+    const external = screen.getByTestId('tracker-reference-external');
+    expect(external.getAttribute('href')).toBe(OTHER);
+    expect(external.textContent).toContain('NIM-1');
+  });
+
+  it('resolves this project\'s links, local links and nimbalyst:// links as before', () => {
+    setTrackerReferenceNodeRenderer(({ referenceKey }) => <span data-testid="local-chip">{referenceKey}</span>);
+    setTrackerReferenceHomeScope({ orgId: 'org-1', projectId: 'home' });
+    renderReference(HOME);
+    renderReference('https://console.nimbalyst.com/app/item/NIM-1');
+    renderReference(null);
+    expect(screen.getAllByTestId('local-chip')).toHaveLength(3);
+    expect(screen.queryByTestId('tracker-reference-external')).toBeNull();
   });
 });

@@ -53,6 +53,19 @@ describe('citationSyntax', () => {
     expect(formatCitationMarkdown(moved, occurrence.rawTitle, occurrence.rawHref)).toContain('(https://console.nimbalyst.com/app/cite/s/prompt/p2 ');
   });
 
+  it('round-trips a citation of a Claude Code session, which never equals the same key in a Nimbalyst session', () => {
+    const terminal = createHumanCitation({ agent: 'claude-code', sessionId: 'cc-1', inputKind: 'prompt', key: 'u-1', by: 'Dana Lee', quote: 'Use Flagship' });
+    const markdown = formatCitationMarkdown(terminal);
+    expect(markdown.startsWith('[DL](https://console.nimbalyst.com/app/cite/claude-code/cc-1/prompt/u-1 "')).toBe(true);
+    const [found] = findCitations(markdown);
+    expect(found.citation).toEqual(terminal);
+    expect(formatCitationMarkdown(found.citation, found.rawTitle, found.rawHref)).toBe(markdown);
+
+    const { agent: _agent, ...desktop } = terminal;
+    expect(formatCitationMarkdown(desktop)).not.toBe(markdown);
+    expect(formatCitationMarkdown(desktop, found.rawTitle, found.rawHref)).not.toContain('claude-code');
+  });
+
   it('reads a source citation as an ordinary link titled cite, and nothing else as a citation', () => {
     expect(findCitations('See [TanStack docs](https://tanstack.com/table "cite").')[0].citation)
       .toEqual({ kind: 'source', target: 'https://tanstack.com/table', label: 'TanStack docs' });

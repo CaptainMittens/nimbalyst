@@ -6,36 +6,83 @@
  *   personal://<documentId>              Personal page body (`personal-pages:*` IPC)
  *   personal://tracker-content/<itemId>  Personal typed-page body (the tracker item's content)
  *
- * A Personal page open in a tab is edited through its mounted editor, which
- * saves through its own versioned path; editing the stored body under it would
- * leave the tab showing old text until the next keystroke hit a conflict.
- * Otherwise the stored body is edited directly: read with its version, apply
- * the replacements, write back only if the version still matches (one retry
- * on a race), with the pre-edit text kept in history first.
+ * A page open in a tab is edited through its mounted editor, which saves
+ * through its own path. Editing the stored body under it would leave the tab
+ * showing old text, and a typed page's pending autosave would write that old
+ * text straight back over the agent's edit. Otherwise the stored body is
+ * edited directly: read with its version, apply the replacements, write back
+ * only if the version still matches (one retry on a race). A plain page keeps
+ * its pre-edit text in history first.
  */
+import type { LexicalEditor } from 'lexical';
 import type { TextReplacement } from '@nimbalyst/runtime';
 // Deep paths, not the barrels: see HeadlessCollabDocEdit.
 import { applyTextReplacementsToString } from '@nimbalyst/runtime/editor/plugins/DiffPlugin/core/diffUtils';
+import {
+  APPLY_MARKDOWN_REPLACE_COMMAND,
+  type ApplyMarkdownReplaceResult,
+} from '@nimbalyst/runtime/editor/plugins/DiffPlugin/DiffCommands';
 import { editorRegistry } from '@nimbalyst/runtime/ai/EditorRegistry';
 import { parsePersonalPageUri } from '../../shared/personalPageUri';
 
 const PERSONAL_DOC_EDITOR_PREFIX = 'personal-doc://';
 
 type BodyWrite = { version: number } | { conflict: true; version: number; content: string };
+type TypedPageBodyWrite = { written: true } | { conflict: true; version: number };
+
+/** A typed page's body editor while it is mounted. */
+export interface LiveTypedPageEditor {
+  editor: LexicalEditor;
+  getContent(): string;
+}
 
 export interface PersonalPageIo {
   getBody(workspacePath: string, documentId: string): Promise<{ content: string; version: number } | null>;
   updateBody(workspacePath: string, documentId: string, content: string, expectedVersion?: number): Promise<BodyWrite>;
   /** Keep text in a page's local history under its history key. */
   keepInHistory(historyKey: string, content: string, description: string): Promise<void>;
-  getTypedPageBody(itemId: string): Promise<unknown>;
-  setTypedPageBody(itemId: string, content: string): Promise<void>;
+  /** The body with its `body_version`; version null when it cannot be read together with the text. */
+  getTypedPageBody(itemId: string): Promise<{ content: unknown; version: number | null }>;
+  setTypedPageBody(itemId: string, content: string, expectedVersion: number): Promise<TypedPageBodyWrite>;
+  /** The typed page's mounted body editor, if any. */
+  liveTypedPage(itemId: string): LiveTypedPageEditor | null;
   /** The editor mounted for this path, if any, applies the replacements itself. */
   mountedEditor: {
     has(path: string): boolean;
     applyReplacements(path: string, replacements: TextReplacement[], requestId?: string): Promise<{ success: boolean; error?: string } | undefined>;
     getContent(path: string): string;
   };
+}
+
+const liveTypedPages = new Map<string, LiveTypedPageEditor[]>();
+
+/**
+ * Called by a typed page's body editor when it mounts; returns the
+ * unregister. The same item can be mounted twice (a Pages tab and Tracker
+ * mode's detail); an edit goes to the visible one, else the latest.
+ */
+export function registerLiveTypedPageEditor(itemId: string, live: LiveTypedPageEditor): () => void {
+  liveTypedPages.set(itemId, [...(liveTypedPages.get(itemId) ?? []), live]);
+  return () => {
+    const rest = (liveTypedPages.get(itemId) ?? []).filter((entry) => entry !== live);
+    if (rest.length > 0) liveTypedPages.set(itemId, rest);
+    else liveTypedPages.delete(itemId);
+  };
+}
+
+function isShown(editor: LexicalEditor): boolean {
+  try {
+    const root = editor.getRootElement();
+    return !!root && root.isConnected && root.offsetParent !== null;
+  } catch {
+    // A headless editor has no root element.
+    return false;
+  }
+}
+
+function liveTypedPage(itemId: string): LiveTypedPageEditor | null {
+  const entries = liveTypedPages.get(itemId) ?? [];
+  return entries.find((entry) => isShown(entry.editor)) ?? entries.at(-1) ?? null;
 }
 
 const rendererIo: PersonalPageIo = {
@@ -47,14 +94,25 @@ const rendererIo: PersonalPageIo = {
     await window.electronAPI.invoke('history:create-snapshot', historyKey, content, 'pre-apply', description);
   },
   getTypedPageBody: async (itemId) => {
+    // Every body write caches its text under the version it bumped to; this
+    // reads the row at the current version, text and version in one query.
+    const cached = await window.electronAPI.documentService.getTrackerBodyCacheForDetail({ itemId });
+    if (cached.success && cached.row) return { content: cached.row.content, version: cached.row.bodyVersion };
     const result = await window.electronAPI.documentService.getTrackerItemContent({ itemId });
     if (!result.success) throw new Error(result.error || `Could not read the typed page ${itemId}`);
-    return result.content;
+    return { content: result.content, version: null };
   },
-  setTypedPageBody: async (itemId, content) => {
-    const result = await window.electronAPI.documentService.updateTrackerItemContent({ itemId, content });
+  setTypedPageBody: async (itemId, content, expectedVersion) => {
+    const result = await window.electronAPI.documentService.updateTrackerItemContent({
+      itemId,
+      content,
+      expectedBodyVersion: expectedVersion,
+    });
+    if (result.conflict) return { conflict: true, version: result.bodyVersion ?? 0 };
     if (!result.success) throw new Error(result.error || `Could not save the typed page ${itemId}`);
+    return { written: true };
   },
+  liveTypedPage,
   mountedEditor: editorRegistry,
 };
 
@@ -91,7 +149,9 @@ export async function readPersonalPageForAgent(
   const target = parsePersonalPageUri(uri);
   if (!target) throw new Error(`Not a Personal page URI: ${uri}`);
   if (target.kind === 'typed-page') {
-    return markdownOf(await io.getTypedPageBody(target.itemId), `The typed page ${target.itemId}`);
+    const live = io.liveTypedPage(target.itemId);
+    if (live) return live.getContent();
+    return markdownOf((await io.getTypedPageBody(target.itemId)).content, `The typed page ${target.itemId}`);
   }
   const editorPath = personalDocEditorPath(target.documentId);
   if (io.mountedEditor.has(editorPath)) return io.mountedEditor.getContent(editorPath);
@@ -99,6 +159,35 @@ export async function readPersonalPageForAgent(
   const body = await io.getBody(workspacePath, target.documentId);
   if (!body) throw new Error(`Unknown Personal page '${target.documentId}'.`);
   return body.content;
+}
+
+/** The edit lands as final text in the mounted editor; its autosave stores it. */
+function editLiveTypedPage(live: LiveTypedPageEditor, replacements: TextReplacement[]): PersonalEditResult {
+  let outcome: ApplyMarkdownReplaceResult | undefined;
+  const handled = live.editor.dispatchCommand(APPLY_MARKDOWN_REPLACE_COMMAND, {
+    replacements,
+    acceptChanges: true,
+    onResult: (result) => { outcome = result; },
+  });
+  if (!handled || !outcome) return failure('The open typed page did not take the edit.');
+  return outcome.ok ? { success: true } : failure(outcome.message, outcome.errorType);
+}
+
+async function editStoredTypedPage(itemId: string, replacements: TextReplacement[], io: PersonalPageIo): Promise<void> {
+  let knownVersion: number | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const body = await io.getTypedPageBody(itemId);
+    // A version learned before this read is safe to pair with its text: a
+    // save in between only moves the stored version past it.
+    const version = body.version ?? knownVersion ?? 0;
+    const current = markdownOf(body.content, `The typed page ${itemId}`);
+    const next = applyTextReplacementsToString(current, replacements);
+    if (next === current) return;
+    const written = await io.setTypedPageBody(itemId, next, version);
+    if (!('conflict' in written)) return;
+    knownVersion = written.version;
+  }
+  throw new Error(`The typed page '${itemId}' kept changing while the edit was applied. Read it again and retry.`);
 }
 
 async function editStoredPersonalPage(
@@ -134,9 +223,9 @@ export async function applyPersonalPageAgentEdit(
   }
   try {
     if (target.kind === 'typed-page') {
-      const current = markdownOf(await io.getTypedPageBody(target.itemId), `The typed page ${target.itemId}`);
-      const next = applyTextReplacementsToString(current, replacements);
-      if (next !== current) await io.setTypedPageBody(target.itemId, next);
+      const live = io.liveTypedPage(target.itemId);
+      if (live) return editLiveTypedPage(live, replacements);
+      await editStoredTypedPage(target.itemId, replacements, io);
       return { success: true };
     }
 

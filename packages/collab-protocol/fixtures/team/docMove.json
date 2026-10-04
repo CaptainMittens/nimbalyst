@@ -3,5 +3,6 @@
   "documentId": "page-2",
   "newParentFolderId": "NIM-42",
   "parentKind": "item",
-  "sortOrder": 512
+  "sortOrder": 512,
+  "requestId": "move-1"
 }

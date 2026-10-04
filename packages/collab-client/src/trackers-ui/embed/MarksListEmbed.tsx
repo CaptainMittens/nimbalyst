@@ -43,16 +43,39 @@ function useMarksSource(): PageMarksSource | null {
   return source;
 }
 
+/**
+ * Loads the marks, and again whenever the source says they changed (an edit,
+ * a reconnect, a retry while the team index was incomplete). Only the newest
+ * load lands; a failed reload keeps the rows already shown for the same query,
+ * never rows from another source or query.
+ */
 function useMarks(source: PageMarksSource | null, queryKey: string): { marks: PageMarkRecord[] | null; error: string | null } {
-  const [state, setState] = useState<{ marks: PageMarkRecord[] | null; error: string | null }>({ marks: null, error: null });
+  const [state, setState] = useState<{
+    source: PageMarksSource | null;
+    queryKey: string;
+    marks: PageMarkRecord[] | null;
+    error: string | null;
+  }>({ source: null, queryKey: '', marks: null, error: null });
   useEffect(() => {
     if (!source) return undefined;
     let cancelled = false;
+    let latest = 0;
     const query = JSON.parse(queryKey) as PageMarksQuery;
     const load = () => {
+      const attempt = ++latest;
+      const current = () => !cancelled && attempt === latest;
       source.listMarks(query).then(
-        (marks) => { if (!cancelled) setState({ marks, error: null }); },
-        (cause: unknown) => { if (!cancelled) setState({ marks: null, error: cause instanceof Error ? cause.message : String(cause) }); },
+        (marks) => { if (current()) setState({ source, queryKey, marks, error: null }); },
+        (cause: unknown) => {
+          if (!current()) return;
+          const error = cause instanceof Error ? cause.message : String(cause);
+          setState((previous) => ({
+            source,
+            queryKey,
+            marks: previous.source === source && previous.queryKey === queryKey ? previous.marks : null,
+            error,
+          }));
+        },
       );
     };
     load();
@@ -62,7 +85,9 @@ function useMarks(source: PageMarksSource | null, queryKey: string): { marks: Pa
       unsubscribe?.();
     };
   }, [source, queryKey]);
-  return state;
+  // Until the new query answers, show it as loading rather than the old rows.
+  if (state.source !== source || state.queryKey !== queryKey) return { marks: null, error: null };
+  return { marks: state.marks, error: state.error };
 }
 
 function metaLine(mark: PageMarkRecord): string {

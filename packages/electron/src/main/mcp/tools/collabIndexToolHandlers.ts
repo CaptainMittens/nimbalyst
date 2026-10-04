@@ -117,7 +117,7 @@ export function getCollabIndexToolSchemas() {
     {
       name: "deleteSharedItem",
       description:
-        "Delete a page. kind 'folder' removes the page with every page under it; kind 'doc' removes only a page that has no children. Ask a person before deleting a page someone else wrote.",
+        "Delete a page by moving it to Trash, where a person can restore it. kind 'folder' moves the page with every page under it to Trash; kind 'doc' moves only a page that has no children to Trash. Ask a person before deleting a page someone else wrote.",
       inputSchema: {
         type: "object",
         properties: {

@@ -81,11 +81,6 @@ export interface TrackerFieldPillsProps {
    * exists to prevent.
    */
   carriedFieldNames?: ReadonlySet<string>;
-  /**
-   * Extra hover text per field name, appended to the chip's title. Qualified
-   * label properties use it to show their qualifiers.
-   */
-  fieldHints?: Readonly<Record<string, string>>;
   /** Extra class on the chip row for surface-specific layout. */
   className?: string;
   /**
@@ -108,8 +103,6 @@ export interface TrackerFieldPillProps {
   onSave: (fieldName: string, value: unknown) => void | Promise<void>;
   /** See `TrackerFieldPillsProps.carriedFieldNames`. */
   carried?: boolean;
-  /** See `TrackerFieldPillsProps.fieldHints`. */
-  hint?: string;
   testIdBase?: string;
 }
 
@@ -227,7 +220,6 @@ export const TrackerFieldPill: React.FC<TrackerFieldPillProps> = ({
   onCreateCollection,
   onSave,
   carried = false,
-  hint,
   testIdBase = DEFAULT_TEST_ID_BASE,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
@@ -349,12 +341,11 @@ export const TrackerFieldPill: React.FC<TrackerFieldPillProps> = ({
     return [];
   }, [field.options, field.type, members]);
 
-  const baseTitle = !editable
+  const pillTitle = !editable
     ? `${label} is read-only`
     : empty
       ? `Set ${label}`
       : `${label}: ${displayValue}`;
-  const pillTitle = hint ? `${baseTitle}\n${hint}` : baseTitle;
 
   return (
     <>
@@ -505,7 +496,6 @@ export const TrackerFieldPills: React.FC<TrackerFieldPillsProps> = ({
   onOpenItem,
   onCreateCollection,
   carriedFieldNames,
-  fieldHints,
   className,
   testIdBase = DEFAULT_TEST_ID_BASE,
 }) => {
@@ -530,7 +520,6 @@ export const TrackerFieldPills: React.FC<TrackerFieldPillsProps> = ({
           onCreateCollection={onCreateCollection}
           onSave={onSave}
           carried={carriedFieldNames?.has(field.name) ?? false}
-          hint={fieldHints?.[field.name]}
           testIdBase={testIdBase}
         />
       ))}

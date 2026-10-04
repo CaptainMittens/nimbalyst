@@ -7,9 +7,9 @@
   },
   "plugins": [
     {
-      "name": "nimbalyst-wiki",
-      "source": "./plugins/nimbalyst-wiki",
-      "description": "A team wiki kept current by your Claude Code sessions, with a per-session page of what changed."
+      "name": "nimbalyst-pages",
+      "source": "./plugins/nimbalyst-pages",
+      "description": "Your team's Nimbalyst Pages from Claude Code: read them for context and record decisions where they belong."
     }
   ]
 }

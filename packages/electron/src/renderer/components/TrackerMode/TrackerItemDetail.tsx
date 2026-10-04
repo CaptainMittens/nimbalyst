@@ -59,8 +59,8 @@ import { createCollectionItem } from './createCollectionItem';
 import { TabEditor } from '../TabEditor/TabEditor';
 import { FeedbackBacklinkSection } from '../FeedbackRequest/FeedbackBacklinks';
 import { TypeTagsEditor } from './TrackerTypeTagsEditor';
-import { TrackerItemLabelProperties } from './TrackerItemLabelProperties';
-import { labelFieldHints, unwrapLabelFieldValues, useTrackerLabelFields, wrapLabelFieldValue } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerLabelFields';
+import { TrackerLabelPropertiesSection } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/TrackerLabelPropertiesSection';
+import { unwrapLabelFieldValues, useTrackerLabelFields, wrapLabelFieldValue } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerLabelFields';
 import {
   collabAwarenessAtom,
   collabProductStatusAtom,
@@ -1077,7 +1077,6 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
               onSave={handleChipSave}
               onOpenItem={onOpenItem}
               onCreateCollection={workspacePath ? handleCreateCollection : undefined}
-              fieldHints={labelFieldHints(labelLayout.fields, storedValues)}
               className="tracker-detail-field-pills"
               testIdBase="tracker-detail-field"
             />
@@ -1124,8 +1123,7 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
           </div>
         )}
 
-        {<TrackerItemLabelProperties item={item} workspacePath={workspacePath} layout={labelLayout}
-          values={storedValues} editable={editable} onSaveField={handleTextFieldChange} onOpenItem={onOpenItem} />}
+        <TrackerLabelPropertiesSection layout={labelLayout} />
 
         </>
         )}

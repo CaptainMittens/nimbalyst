@@ -1,33 +1,27 @@
 /**
- * The slash menu's entries for placing a view in a page: a table per type,
- * a 2x2 for a type with two number fields, and the decisions and open
- * questions lists. The menu itself is the picker; the placed link carries the
- * definition and can be edited in the markdown afterwards. Republished when
- * the project's types change.
+ * Publishes the slash menu's entries for placing a view in a page (built by
+ * the runtime's `buildPlacedViewCommandEntries`, shared with the browser
+ * editor), republished when the project's types change.
  *
  * The inserted link is a console link for the page's own scope (Decision 23):
  * the insert command reads the page's document path and asks
  * `placedViewScopeForDocument` here.
  */
 
-import type { UserCommand } from '@nimbalyst/runtime/editor/types/PluginTypes';
 import { setExtensionContributions } from '@nimbalyst/runtime/editor/extensions/extensionContributionsStore';
 import { setExtensionLexicalExtension } from '@nimbalyst/runtime/editor/extensions/extensionLexicalExtensionsStore';
-import {
-  INSERT_PLACED_VIEW_COMMAND,
-  PlacedViewInsertExtension,
-  setPlacedViewScopeResolver,
-  type PlacedViewInsertPayload,
-} from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/placedViewInsert';
+import { PlacedViewInsertExtension, setPlacedViewScopeResolver } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/placedViewInsert';
+import { buildPlacedViewCommandEntries } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/placedViewCommandEntries';
 import type { PlacedViewScope } from '@nimbalyst/runtime/core/placedViewUrl';
 import { store } from '@nimbalyst/runtime/store';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { trackerItemsMapAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
-import type { TrackerDataModel } from '@nimbalyst/tracker-schema';
+import type { PlacedViewEmbedProps } from '@nimbalyst/collab-client/trackers-ui/embed';
 import { activeCollabScopeAtom } from '../../store/atoms/collabDocuments';
 import { isTeamTrackerSharing } from '../Settings/panels/trackerConfigUpgrade';
 
 type Lane = 'team' | 'personal';
+type PlacedViewReach = NonNullable<PlacedViewEmbedProps['reach']>;
 
 export interface PlacedViewScopeLookups {
   /** The team project the window's Pages show, or null with no team. */
@@ -54,6 +48,24 @@ export function placedViewScopeForDocument(path: string | null, lookups: PlacedV
   return lookups.team ?? undefined;
 }
 
+/**
+ * What a placed view on the page at `path` may draw from this window's items:
+ * the window's team project, and `local` views only on a page of the author's
+ * own (a local link on a team page would show each reader their own items).
+ * An unknown page reaches `local` only in a window with no team.
+ */
+export function placedViewReachForDocument(path: string | null, lookups: PlacedViewScopeLookups): PlacedViewReach {
+  const pageScope = placedViewScopeForDocument(path, lookups);
+  return {
+    team: lookups.team,
+    local: pageScope === 'local' || (pageScope === undefined && lookups.team === null),
+  };
+}
+
+export function windowPlacedViewReach(path: string | null): PlacedViewReach {
+  return placedViewReachForDocument(path, windowScopeLookups());
+}
+
 const typeLane = (typeId: string): Lane => {
   const model = globalRegistry.get(typeId);
   return model && isTeamTrackerSharing(model.sharing ?? 'personal') ? 'team' : 'personal';
@@ -73,43 +85,13 @@ function windowScopeLookups(): PlacedViewScopeLookups {
 }
 
 const SOURCE = 'placed-view-embed';
-const command = INSERT_PLACED_VIEW_COMMAND as UserCommand['command'];
-
-function entry(title: string, description: string, icon: string, keywords: string[], payload: PlacedViewInsertPayload): UserCommand {
-  return { title, description, icon, keywords: ['view', 'embed', ...keywords], command, payload };
-}
-
-export function buildPlacedViewCommands(models: readonly TrackerDataModel[]): UserCommand[] {
-  const commands: UserCommand[] = [];
-  for (const model of models) {
-    const name = model.displayNamePlural || model.displayName || model.type;
-    const target = { kind: 'type', typeId: model.type } as const;
-    commands.push(entry(`Table: ${name}`, `A live table of ${name}; editing a cell edits the page`, 'table_view', ['table', name], { target, label: name }));
-    const numbers = model.fields.filter((field) => field.type === 'number');
-    if (numbers.length >= 2) {
-      commands.push(entry(`2x2: ${name}`, `${name} placed by ${numbers[0].name} and ${numbers[1].name}`, 'grid_view', ['2x2', 'quadrant', 'chart', name], {
-        target,
-        label: name,
-        attrs: { mode: '2x2', x: numbers[0].name, y: numbers[1].name },
-      }));
-    }
-  }
-  commands.push(
-    entry('Decisions list', 'Every sentence marked decided, across pages', 'gavel', ['decisions', 'decided', 'marks'], {
-      target: { kind: 'marks', marks: 'decided' }, label: 'Decisions',
-    }),
-    entry('Open questions list', 'Every sentence marked open, across pages', 'help', ['open', 'questions', 'marks'], {
-      target: { kind: 'marks', marks: 'open' }, label: 'Open questions',
-    }),
-  );
-  return commands;
-}
 
 export function registerPlacedViewCommands(): () => void {
   setExtensionLexicalExtension(SOURCE, PlacedViewInsertExtension);
   setPlacedViewScopeResolver((path) => placedViewScopeForDocument(path, windowScopeLookups()));
   const publish = () => {
-    setExtensionContributions(SOURCE, { userCommands: buildPlacedViewCommands(globalRegistry.getListed()) });
+    // The same entries the browser editor builds from its host's types.
+    setExtensionContributions(SOURCE, { userCommands: buildPlacedViewCommandEntries(globalRegistry.getListed()) });
   };
   publish();
   return globalRegistry.onChange(publish);

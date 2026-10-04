@@ -7,6 +7,7 @@ import { expect, it } from 'vitest';
 import type {
   EncryptedDocIndexEntry,
   ItemPlacementNode,
+  PageLinkEntry,
   PageMarkEntry,
   TeamClientMessage,
   TeamServerMessage,
@@ -63,9 +64,10 @@ const pageTreeTeam = {
     projectId: 'project-1', createdBy: 'member-1', createdAt: 1790000000000, updatedAt: 1790000000000,
   }],
   pageTree: true,
+  authorWriteEcho: true,
   typePlacements: [typeNode],
   itemPlacements: [node, childNode],
-} satisfies Omit<TeamState, 'settings'> & Exhaustive<Pick<TeamState, 'folders' | 'pageTree' | 'typePlacements' | 'itemPlacements'>>;
+} satisfies Omit<TeamState, 'settings'> & Exhaustive<Pick<TeamState, 'folders' | 'pageTree' | 'authorWriteEcho' | 'typePlacements' | 'itemPlacements'>>;
 
 // A decision on a plain page, and an open question in a typed page's body
 // (no project or title: the client resolves the tracker item).
@@ -79,7 +81,30 @@ const openMark = {
   text: 'Pricing is unknown.', plainText: 'Pricing is unknown.', by: 'Spike 6', email: null, on: null, over: null, line: 1, offset: 0,
 } satisfies PageMarkEntry;
 
+// A typed page that underlies NIM-42 (incoming to it), and NIM-42's own link
+// out to a plain page.
+const incomingLink = {
+  source: { kind: 'item', itemId: 'item-7' }, projectId: 'project-1', title: null,
+  target: { kind: 'item', ref: 'NIM-42' }, rel: 'built-on', sentence: 'Sync is built on NIM-42.', count: 1,
+} satisfies Exhaustive<PageLinkEntry>;
+const outgoingLink = {
+  source: { kind: 'item', itemId: 'item-42' }, projectId: 'project-1', title: null,
+  target: { kind: 'page', documentId: 'page-1' }, rel: null, sentence: 'See Specs.', count: 2,
+} satisfies PageLinkEntry;
+const pageSourcedLink = {
+  source: { kind: 'page', documentId: 'page-1' }, projectId: 'project-1', title: 'Specs',
+  target: { kind: 'item', ref: 'item-42' }, rel: null, sentence: 'Covers item-42.', count: 1,
+} satisfies PageLinkEntry;
+
 const fixtures: Record<string, unknown> = {
+  'pageLinksQuery.json': {
+    type: 'pageLinksQuery', requestId: 'links-1', projectId: 'project-1',
+    from: { kind: 'item', itemId: 'item-42' }, to: [{ kind: 'item', ref: 'item-42' }, { kind: 'item', ref: 'NIM-42' }],
+  } satisfies Client<'pageLinksQuery'>,
+  'pageLinksResponse.json': {
+    type: 'pageLinksResponse', requestId: 'links-1', outgoing: [outgoingLink], incoming: [incomingLink, pageSourcedLink], status: 'ready',
+  } satisfies Server<'pageLinksResponse'>,
+  'pageLinksChanged.json': { type: 'pageLinksChanged' } satisfies Server<'pageLinksChanged'>,
   'pageMarksQuery.json': {
     type: 'pageMarksQuery', requestId: 'marks-1', kind: 'decided', email: 'greg@example.com', documentIds: ['page-1'],
   } satisfies Client<'pageMarksQuery'>,
@@ -108,8 +133,19 @@ const fixtures: Record<string, unknown> = {
   } satisfies Client<'docIndexRegister'>,
   // Same parent with a new sortOrder: a reorder.
   'docMove.json': {
-    type: 'docMove', documentId: 'page-2', newParentFolderId: 'NIM-42', parentKind: 'item', sortOrder: 512,
+    type: 'docMove', documentId: 'page-2', newParentFolderId: 'NIM-42', parentKind: 'item', sortOrder: 512, requestId: 'move-1',
   } satisfies Client<'docMove'>,
+  // Writes a client confirms by their echo carry a requestId.
+  'docIndexRemove.json': { type: 'docIndexRemove', documentId: 'page-2', requestId: 'remove-1' } satisfies Omit<Client<'docIndexRemove'>, 'purge'>,
+  // Only Trash's permanent delete sends `purge`; a plain remove never deletes a trashed page.
+  'docIndexRemove.purge.json': {
+    type: 'docIndexRemove', documentId: 'page-3', requestId: 'remove-3', purge: true,
+  } satisfies Client<'docIndexRemove'>,
+  'folderRemove.json': { type: 'folderRemove', folderId: 'page-1', requestId: 'remove-2' } satisfies Client<'folderRemove'>,
+  // A refused write, answered with the message's requestId.
+  'error.requestId.json': {
+    type: 'error', code: 'folder_cycle', message: 'A page cannot move under itself', requestId: 'move-1',
+  } satisfies Server<'error'>,
   'docIndexBroadcast.json': { type: 'docIndexBroadcast', document: pageUnderItem } satisfies Server<'docIndexBroadcast'>,
   'itemPlacementRemoveBroadcast.json': {
     type: 'itemPlacementRemoveBroadcast', projectId: 'project-1', itemIds: ['NIM-42', 'NIM-43'],

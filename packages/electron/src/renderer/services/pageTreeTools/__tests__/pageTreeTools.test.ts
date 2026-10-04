@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { atom } from 'jotai';
 import type {
   CollabDocsSession,
   CollabTypeTreeResolver,
@@ -13,10 +12,11 @@ import {
   deletePageTool,
   listPagesTool,
   movePageTreeNodeTool,
+  renamePageTool,
   setPageTypeTool,
   type PageTreeSection,
   type PageTreeToolEnv,
-} from '../pageTreeToolCore';
+} from '@nimbalyst/collab-client/docs/pageTreeToolCore';
 import { registerPageTreeToolHandlers } from '../pageTreeToolHandlers';
 
 const page = (documentId: string, title: string, parent: string | null = null, extra: Partial<SharedDocument> = {}): SharedDocument => ({
@@ -24,15 +24,15 @@ const page = (documentId: string, title: string, parent: string | null = null, e
   parentFolderId: parent, ...extra,
 });
 
-/** Records every write; applies page moves so a later read sees them. */
+/** Records every write; answers each with the store's outcome, a refusal when `refuse` is set. */
 class FakeSession {
   calls: Array<[string, ...unknown[]]> = [];
   typePlacementList: SharedTypePlacement[];
-  atoms: { typePlacements: ReturnType<typeof atom<SharedTypePlacement[]>> };
+  refuse: string | null = null;
   constructor(public documents: SharedDocument[], typePlacements: SharedTypePlacement[] = [], public itemPlacements: SharedItemPlacement[] = []) {
     this.typePlacementList = typePlacements;
-    this.atoms = { typePlacements: atom(typePlacements) };
   }
+  private outcome = async () => (this.refuse ? { ok: false as const, error: this.refuse } : { ok: true as const });
   scope = { scopeKey: 'team', orgId: 'org1', indexConfig: { teamProjectId: 'proj1' } };
   start = async () => {};
   isPageTree = () => true;
@@ -40,17 +40,19 @@ class FakeSession {
   getItemPlacements = () => this.itemPlacements;
   movePage = (id: string, parentId: string | null, options?: unknown) => {
     this.calls.push(['movePage', id, parentId, options]);
-    return true;
+    return this.outcome();
   };
-  moveDocument = (...args: unknown[]) => { this.calls.push(['moveDocument', ...args]); };
+  moveDocument = (...args: unknown[]) => { this.calls.push(['moveDocument', ...args]); return this.outcome(); };
   moveFolder = (...args: unknown[]) => { this.calls.push(['moveFolder', ...args]); };
-  placeType = async (...args: unknown[]) => { this.calls.push(['placeType', ...args]); };
-  moveTypePlacement = async (...args: unknown[]) => { this.calls.push(['moveTypePlacement', ...args]); };
-  setItemPlacement = async (...args: unknown[]) => { this.calls.push(['setItemPlacement', ...args]); return { ok: true as const }; };
-  removeItemPlacement = async (...args: unknown[]) => { this.calls.push(['removeItemPlacement', ...args]); return { ok: true as const }; };
-  removeDocument = (...args: unknown[]) => { this.calls.push(['removeDocument', ...args]); };
-  removePage = (...args: unknown[]) => { this.calls.push(['removePage', ...args]); };
-  updateDocumentTitle = async (...args: unknown[]) => { this.calls.push(['updateDocumentTitle', ...args]); };
+  placeType = async (...args: unknown[]) => { this.calls.push(['placeType', ...args]); return this.outcome(); };
+  moveTypePlacement = async (...args: unknown[]) => { this.calls.push(['moveTypePlacement', ...args]); return this.outcome(); };
+  setItemPlacement = async (...args: unknown[]) => { this.calls.push(['setItemPlacement', ...args]); return this.outcome(); };
+  removeItemPlacement = async (...args: unknown[]) => { this.calls.push(['removeItemPlacement', ...args]); return this.outcome(); };
+  removeDocument = (...args: unknown[]) => { this.calls.push(['removeDocument', ...args]); return this.outcome(); };
+  trashDocument = (...args: unknown[]) => { this.calls.push(['trashDocument', ...args]); return this.outcome(); };
+  removePage = (...args: unknown[]) => { this.calls.push(['removePage', ...args]); return this.outcome(); };
+  pageRemovalCount = () => 0;
+  updateDocumentTitle = async (...args: unknown[]) => { this.calls.push(['updateDocumentTitle', ...args]); return this.outcome(); };
   createFolder = async (name: string, parentId: string | null) => {
     this.calls.push(['createFolder', name, parentId]);
     this.documents.push(page(`new-${name}`, name, parentId));
@@ -93,6 +95,7 @@ function envFor(sessions: Partial<Record<PageTreeSection, FakeSession>>, overrid
       return session as unknown as CollabDocsSession;
     },
     resolver: () => resolver,
+    typePlacements: (session) => (session as unknown as FakeSession).typePlacementList,
     findItem: (ref) => {
       const byKey: Record<string, string> = { 'MOD-1': 'mod_1', 'MOD-2': 'mod_2' };
       const itemId = byKey[ref] ?? ref;
@@ -120,8 +123,8 @@ describe('page tree agent tools', () => {
     // Console links an agent writes into page content, built from the section's own scope.
     const base = 'https://console.nimbalyst.com/org/org1/project/proj1';
     expect(byId['document:overview'].link).toBe(`${base}/document/overview`);
-    expect(byId['item:mod_1'].link).toBe(`${base}/trackers/item/MOD-1`);
-    expect(byId['type:module']).toMatchObject({ link: `${base}/trackers/type/module`, viewLink: `${base}/view/type/module` });
+    expect(byId['item:mod_1'].link).toBe(`${base}/page/item/MOD-1`);
+    expect(byId['type:module']).toMatchObject({ link: `${base}/page/type/module`, viewLink: `${base}/view/type/module` });
   });
 
   it('creates a page under a typed page named by issue key, as an item parent', async () => {
@@ -192,6 +195,32 @@ describe('page tree agent tools', () => {
     expect(session.writes()).toEqual([]);
     expect(await deletePageTool(env, { section: 'team', itemId: 'arch', kind: 'folder' })).toMatchObject({ success: true });
     expect(session.writes()).toEqual(['removePage']);
+  });
+
+  it('moves a deleted page to Trash and never removes it outright', async () => {
+    const session = tree();
+    expect(await deletePageTool(envFor({ team: session }), { section: 'team', itemId: 'deep', kind: 'doc' })).toMatchObject({ success: true });
+    expect(session.calls).toEqual([['trashDocument', 'deep']]);
+  });
+
+  it('reports a write the store refused instead of success', async () => {
+    const session = tree();
+    session.refuse = 'Personal pages refused the write';
+    const env = envFor({ team: session });
+    const attempts: Array<Record<string, unknown>> = [
+      { tool: 'move', kind: 'doc', itemId: 'overview', newParentFolderId: null },
+      { tool: 'move', kind: 'doc', itemId: 'notes', after: 'document:more' },
+      { tool: 'move', kind: 'type', itemId: 'module', newParentFolderId: 'arch' },
+      { tool: 'move', kind: 'type', itemId: 'technology', newParentFolderId: 'arch' },
+      { tool: 'rename', itemId: 'deep', newName: 'Deeper' },
+      { tool: 'delete', itemId: 'deep', kind: 'doc' },
+      { tool: 'delete', itemId: 'arch', kind: 'folder' },
+    ];
+    for (const { tool, ...args } of attempts) {
+      const run = tool === 'move' ? movePageTreeNodeTool : tool === 'rename' ? renamePageTool : deletePageTool;
+      const result = await run(env, { section: 'team', ...args });
+      expect(result, JSON.stringify(args)).toMatchObject({ success: false, error: expect.stringContaining('Personal pages refused the write') });
+    }
   });
 
   it('works in the Personal section with no team, through the registered handler', async () => {

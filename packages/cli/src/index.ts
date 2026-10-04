@@ -14,48 +14,40 @@ import { runWorkspace } from './commands/workspace.js';
 import { runSession, runDoc } from './commands/sessionDoc.js';
 import { runRelease } from './commands/release.js';
 import { runLogin, runLogout, runWhoami } from './commands/login.js';
-import { runWiki } from './commands/wiki.js';
-import { githubNativeEnabled } from './cloud/config.js';
+import { runPages, wikiRenamed } from './commands/pages.js';
 
 export const VERSION = '0.1.0';
 
-/** The hosted-wiki block; the GitHub-native membership commands only appear under NIM_GITHUB_NATIVE=on. */
-function wikiHelp(): string {
-  if (githubNativeEnabled()) {
-    return `Hosted wiki (GitHub-native mode; server = NIM_SERVER, default https://sync.nimbalyst.com):
-  nim login / nim logout / nim whoami                (GitHub sign-in)
-  nim wiki status [--join-secret S]
-  nim wiki create --policy invite|repo-link       (writes .nimbalyst/wiki.json)
-  nim wiki invite <githubLogin> / nim wiki remove-member <githubLogin>
-  nim wiki rotate-secret
-${WIKI_CONTENT_HELP}
-  Wiki flags: --repo <remote|wiki:id> (default: origin, else .nimbalyst/wiki.json),
-              --changeset <id> (required by the server on create-item, update-item, define-type)
-`;
-  }
-  return `Hosted wiki (Nimbalyst Teams sign-in; server = NIM_SERVER, default https://sync.nimbalyst.com):
+const PAGES_HELP = `Team pages (Nimbalyst Teams sign-in; server = NIM_SERVER, default https://sync.nimbalyst.com):
   nim login / nim logout / nim whoami
-  nim wiki status                            (unbound, bound, or ambiguous, with your teams)
-  nim wiki bind --org <id> --project <id>    (team admins: connect this repo's remote)
-  nim wiki create-project --org <id> --name <n> [--bind]   (team admins)
-  nim wiki pin --org <id> --project <id>     (writes .nimbalyst/wiki.json; one of the projects this repo resolves to)
-${WIKI_CONTENT_HELP}
-  Wiki flags: --repo <remote> (default: origin; ignores .nimbalyst/wiki.json),
-              --org <id> --project <id> (explicit project; ignores .nimbalyst/wiki.json),
-              --changeset <id> (required by the server on create-item, update-item, define-type)
+  nim pages status                           (unbound, bound, or ambiguous, with your teams)
+  nim pages bind --org <id> --project <id>   (team admins: connect this repo's remote)
+  nim pages create-project --org <id> --name <n> [--bind]   (team admins)
+  nim pages pin --org <id> --project <id>    (writes .nimbalyst/wiki.json; one of the projects this repo resolves to)
+  nim pages list                             (the page tree, with links)
+  nim pages read <uri|link>
+  nim pages edit <uri|link> --old TXT --new TXT [...]   (or --replacements-file F)
+  nim pages create "<title>" [--parent ID] [--parent-kind page|item] [--path A/B]
+                     [--body TXT | --body-file F] [--before NODE | --after NODE]
+  nim pages create-folder "<name>" [--parent ID] [--path A/B]
+  nim pages move <id> --kind page|item|type [--parent ID] [--path A/B]
+                     [--before NODE | --after NODE] [--under-type]
+  nim pages rename <pageId> "<name>"
+  nim pages delete <pageId> --kind doc|folder
+  nim pages set-type <pageId> <typeId>
+  nim pages members [query]
+  nim pages types [--search S]
+  nim pages define-type [-f <schema.yaml|.json>] [--predicates-file F] [--overwrite]
+                     [--remove-predicate ID ...] [--confirm-destructive]
+  nim pages items [--type T] [--status S] [--search TXT] [--where f=v ...] [--include-closed] [--limit N]
+  nim pages item <id|KEY>
+  nim pages create-item <type> "<title>" [--status S] [--field k=v ...] [--tag T ...] [--body TXT | --body-file F]
+  nim pages update-item <id|KEY> [--title T] [--status S] [--field k=v ...] [--unset f ...]
+                     [--body TXT | --body-file F] [--archive | --unarchive] [--expected-revision N]
+  nim pages comments --page <uri> [...] [--query TXT]   (citable comments)
+  Target flags: --repo <remote> (default: origin; ignores .nimbalyst/wiki.json),
+                --org <id> --project <id> (explicit project; ignores .nimbalyst/wiki.json)
 `;
-}
-
-const WIKI_CONTENT_HELP = `  nim wiki types
-  nim wiki define-type [-f <schema.yaml|.json>] [--overwrite] [--predicates-file F]
-  nim wiki list [--type T] [--status S] [--search TXT] [--limit N]
-  nim wiki get <id>
-  nim wiki create-item <type> "<title>" [--status S] [--field k=v ...] [--body TXT | --body-file F]
-  nim wiki update-item <id> [--title T] [--status S] [--field k=v ...] [--unset f ...]
-  nim wiki changes [--limit N] [--before C]      (activity log of what each session wrote)
-  nim wiki changes show <changesetId>
-  nim wiki changes begin --title T [--source S] [--session-ref R]  (-q prints the id)
-  nim wiki changes finish <changesetId> [--summary TXT]`;
 
 const help = () => `nim — Nimbalyst companion CLI (v${VERSION})
 
@@ -103,7 +95,7 @@ Release (live mode for writes):
                      [--date <iso>]        (fills the existing item, flips it to released)
   nim release notes [<id|KEY>] [--json]    (markdown from the release's members)
 
-${wikiHelp()}
+${PAGES_HELP}
 Cross-cutting flags:
   --workspace <path>   target workspace (default: resolve from cwd)
   --db <file>          direct mode against an explicit SQLite file
@@ -114,7 +106,6 @@ Cross-cutting flags:
   --no-color           disable ANSI color (also honors NO_COLOR)
 
 Exit codes: 0 ok · 1 not found · 2 usage · 3 connection · 4 schema · 5 write-not-permitted
-            6 partial write (wiki item written, page text failed; not retryable as-is)
 `;
 
 export async function main(argv: string[]): Promise<number> {
@@ -157,8 +148,10 @@ export async function main(argv: string[]): Promise<number> {
         return await runLogout(args);
       case 'whoami':
         return await runWhoami(args);
+      case 'pages':
+        return await runPages(args);
       case 'wiki':
-        return await runWiki(args);
+        return wikiRenamed();
       default:
         process.stderr.write(`nim: unknown command '${args.noun}'. Run 'nim --help'.\n`);
         return ExitCode.USAGE;

@@ -7,11 +7,14 @@ import { asTeamJwt, asTeamMemberId } from '@nimbalyst/runtime/auth/jwtScopes';
 import { collabCommentControllerRegistry } from '@nimbalyst/runtime/editor/commenting/CollabCommentControllerRegistry';
 import { withHeadlessLexicalBridge } from '@nimbalyst/runtime/sync/withHeadlessLexicalBridge';
 import { HeadlessBodyNodes } from '@nimbalyst/runtime/editor/nodes/headlessBodyNodes';
-import { $getRoot } from 'lexical';
+import { $createParagraphNode, $getRoot, type LexicalEditor } from 'lexical';
+import { getAllExtensionUserCommands } from '@nimbalyst/runtime/editor/extensions/extensionContributionsStore';
 import { uint8ArrayToBase64, base64ToUint8Array } from '@nimbalyst/runtime/sync/documentSyncBase64';
 import { $createEmbeddedFileNode } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/EmbeddedFileNode';
 import { MarkdownCollabContentAdapter } from '@nimbalyst/runtime/sync/MarkdownCollabContentAdapter';
+import { buildTrackerReferenceHref } from '@nimbalyst/runtime/plugins/TrackerLinkPlugin/trackerReferenceHref';
 import { decisionMembersFromComments, mountCollabEditor } from '../mount';
+import { setConsoleLinkOpener } from '../consoleLinkOpener';
 import { CollabPresenceSurface } from '../presence';
 import {
   asTeamDocumentId,
@@ -155,6 +158,69 @@ describe('in-memory collaborative editor harness', () => {
     await waitFor(() => expect(yDocument.getMap('decisions').get('browser-q\x1fteam-reader')).toMatchObject({ answer: { type: 'singleSelect', selectedId: 'yes' } }));
   });
 
+  it('writes references inserted in a team room as that project\'s console links', () => {
+    const element = document.createElement('div'); document.body.append(element);
+    const handle = mountCollabEditor({
+      element,
+      source: {
+        kind: 'team-room', serverUrl: 'ws://collab.test',
+        room: { orgId: asTeamOrgId('org-1'), projectId: asTeamProjectId('project-1'), documentId: asTeamDocumentId('doc-1') },
+        auth: { scope: 'team', memberId: asTeamMemberId('team-reader'), getTeamJwt: async () => asTeamJwt('team-jwt') },
+        createWebSocket: () => new FakeRoomSocket() as unknown as WebSocket,
+      },
+      user: { memberId: asTeamMemberId('team-reader'), name: 'Reader' },
+    });
+    expect(buildTrackerReferenceHref('NIM-1')).toBe('https://console.nimbalyst.com/org/org-1/project/project-1/page/item/NIM-1');
+    handle.destroy();
+    expect(buildTrackerReferenceHref('NIM-1')).toBeNull();
+  });
+
+  it('offers placed views in the slash menu and writes them as that project\'s console view links', async () => {
+    const element = document.createElement('div'); document.body.append(element);
+    const handle = mountCollabEditor({
+      element,
+      source: {
+        kind: 'team-room', serverUrl: 'ws://collab.test',
+        room: { orgId: asTeamOrgId('org-1'), projectId: asTeamProjectId('project-1'), documentId: asTeamDocumentId('doc-1') },
+        auth: { scope: 'team', memberId: asTeamMemberId('team-writer'), getTeamJwt: async () => asTeamJwt('team-jwt') },
+        createWebSocket: () => new FakeRoomSocket() as unknown as WebSocket,
+      },
+      user: { memberId: asTeamMemberId('team-writer'), name: 'Writer' },
+      placedViewTypes: {
+        list: () => [
+          { type: 'competitor', displayName: 'Competitor', displayNamePlural: 'Competitors', fields: [{ name: 'reach', type: 'number' }, { name: 'price', type: 'number' }, { name: 'title', type: 'string' }] },
+          { type: 'module', displayName: 'Module', fields: [{ name: 'title', type: 'string' }] },
+        ],
+        subscribe: () => () => undefined,
+      },
+    });
+    const titles = () => getAllExtensionUserCommands().map((command) => command.title);
+    await waitFor(() => expect(titles()).toEqual(expect.arrayContaining(['Table: Competitors', '2x2: Competitors', 'Table: Module', 'Decisions list', 'Open questions list'])));
+    expect(titles()).not.toContain('2x2: Module');
+
+    const editable = await waitFor(() => {
+      const found = element.querySelector('[contenteditable]') as (HTMLElement & { __lexicalEditor?: LexicalEditor }) | null;
+      expect(found?.__lexicalEditor).toBeTruthy();
+      return found!;
+    });
+    const editor = editable.__lexicalEditor!;
+    const entry = getAllExtensionUserCommands().find((command) => command.title === '2x2: Competitors')!;
+    act(() => {
+      editor.update(() => {
+        const paragraph = $createParagraphNode();
+        $getRoot().append(paragraph);
+        paragraph.select();
+        editor.dispatchCommand(entry.command, entry.payload);
+      }, { discrete: true });
+    });
+    const placed = editor.getEditorState().read(() => $getRoot().getChildren().find((node) => node.getType() === 'embedded-file')?.exportJSON()) as { src: string; attrs: Record<string, string> } | undefined;
+    expect(placed?.src).toBe('https://console.nimbalyst.com/org/org-1/project/project-1/view/type/competitor');
+    expect(placed?.attrs).toEqual({ mode: '2x2', x: 'reach', y: 'price' });
+
+    handle.destroy();
+    expect(titles()).not.toContain('Decisions list');
+  });
+
   it('paints tracker and shared-document references written by a desktop client', async () => {
     // A desktop client's node set is wider than the bundle's. A Y.Doc holding
     // either reference node used to abort the whole binding with
@@ -188,6 +254,29 @@ describe('in-memory collaborative editor harness', () => {
     expect(handle.getMarkdown()).toContain(
       '(nimbalyst://doc/fa164469-0e2b-4f1a-9c2d-6b1f0a3d5e77)',
     );
+  });
+
+  it('shows a reference to someone\'s Personal page as on the author\'s device, opened through the host, never resolved here', async () => {
+    const yDocument = new Y.Doc();
+    MarkdownCollabContentAdapter.seedFromFile(
+      yDocument,
+      'Mine is [NIM-7](https://console.nimbalyst.com/app/item/NIM-7) and ours is [NIM-8](nimbalyst://NIM-8).',
+    );
+    const element = globalThis.document.createElement('div');
+    globalThis.document.body.append(element);
+    const opened: string[] = [];
+    const stopOpener = setConsoleLinkOpener((href) => { opened.push(href); return true; });
+    const handle = mountCollabEditor({ element, source: { kind: 'in-memory', document: yDocument }, user: { memberId: asTeamMemberId('member'), name: 'Member' } });
+    mountedHandles.push(handle);
+    await settle();
+
+    const personal = element.querySelectorAll('[data-testid="tracker-reference-author-device"]');
+    expect(personal).toHaveLength(1);
+    expect(personal[0]!.textContent).toContain('on the author\'s device');
+    expect(element.querySelector('[data-issue-key="NIM-8"]:not([data-testid="tracker-reference-author-device"])')).not.toBeNull();
+    fireEvent.click(personal[0]!);
+    expect(opened).toEqual(['https://console.nimbalyst.com/app/item/NIM-7']);
+    stopOpener();
   });
 
   it('carries no formatting toolbar and applies the browser-host chrome', async () => {

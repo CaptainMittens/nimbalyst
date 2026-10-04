@@ -118,10 +118,10 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, no-shadow */
 
 import type {Transformer} from '@lexical/markdown';
-import {
-  $convertFromEnhancedMarkdownString,
-  $convertToEnhancedMarkdownString,
-} from '../../../markdown';
+// Deep paths, not the `markdown` barrel: this engine also runs headless in the
+// collab worker (`@nimbalyst/markdown-ydoc`), which must not load React.
+import {$convertFromEnhancedMarkdownString} from '../../../markdown/EnhancedMarkdownImport';
+import {$convertToEnhancedMarkdownString} from '../../../markdown/EnhancedMarkdownExport';
 import type {LexicalEditor, SerializedLexicalNode, TextNode} from 'lexical';
 import {
   type ElementNode,
@@ -140,8 +140,8 @@ import {
   SKIP_DOM_SELECTION_TAG,
 } from 'lexical';
 import {$createAutoLinkNode, $isAutoLinkNode, $isLinkNode} from '@lexical/link';
-import {$isEmbeddedFileNode} from '../../EmbedPlugin/EmbeddedFileNode';
-import {$rescanForEmbedUpgrade} from '../../../extensions/builtin/EmbedExtension';
+import {$isEmbeddedFileNode} from '../../EmbedPlugin/EmbeddedFileNodeCore';
+import {$rescanForEmbedUpgrade} from '../../EmbedPlugin/embedUpgrade';
 
 import {createHeadlessEditor} from '@lexical/headless';
 import {createNodeFromSerialized} from './createNodeFromSerialized';
@@ -175,6 +175,7 @@ import { applyFrontmatterUpdateIfNeeded } from './diffFrontmatter';
 // Circular with diffPluginUtils (which imports `initializeHandlers` from here);
 // both sides only call the other at run time, never during module evaluation.
 import {$approveDiffs} from './diffPluginUtils';
+import {isDiffDebug} from './diffDebug';
 
 // Initialize a simple registry (in future this could be external)
 let _handlersInitialized = false;
@@ -1291,7 +1292,7 @@ export function applyMarkdownDiffToDocument(
         },
         {discrete: true},
       );
-      if (process?.env?.DIFF_DEBUG === '1') {
+      if (isDiffDebug()) {
         editor.getEditorState().read(() => {
           const root = $getRoot();
           const snapshot = root.getChildren().map((child, idx) => ({

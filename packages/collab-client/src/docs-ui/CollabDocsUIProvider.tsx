@@ -48,7 +48,8 @@ interface CollabDocsUIContextValue {
   controller: CollabDocsUIController;
 }
 
-const CollabDocsUIContext = createContext<CollabDocsUIContextValue | null>(null);
+/** Exported for this package's own hooks (`useCollabPagesState`); hosts use `useCollabDocsUI`. */
+export const CollabDocsUIContext = createContext<CollabDocsUIContextValue | null>(null);
 
 export interface CollabDocsUIProviderProps {
   session: CollabDocsSession;

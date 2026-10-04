@@ -1,5 +1,6 @@
 export * from './CollabCreateItemDialog';
 export * from './CollabDocsUIProvider';
+export * from './useCollabPagesState';
 export * from './CollabNewDocumentMenu';
 export * from './CollabSidebar';
 export * from './DocUnreadDot';

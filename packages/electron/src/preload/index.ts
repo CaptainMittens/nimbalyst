@@ -1018,7 +1018,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     updateTrackerItemContent: (payload: {
       itemId: string;
       content: any;
-    }) => ipcRenderer.invoke('document-service:tracker-item-update-content', payload) as Promise<{ success: boolean; error?: string }>,
+      expectedBodyVersion?: number;
+    }) => ipcRenderer.invoke('document-service:tracker-item-update-content', payload) as Promise<{ success: boolean; conflict?: boolean; bodyVersion?: number; error?: string }>,
     getTrackerItemContent: (payload: {
       itemId: string;
     }) => ipcRenderer.invoke('document-service:tracker-item-get-content', payload) as Promise<{ success: boolean; content?: any; error?: string }>,

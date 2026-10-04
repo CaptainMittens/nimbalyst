@@ -41,7 +41,8 @@
 }
 
 .collab-sidebar .file-tree-file.active,
-.collab-sidebar .file-tree-directory.selected {
+.collab-sidebar .file-tree-directory.selected,
+.collab-sidebar .collab-tree-type-row.active {
   background-color: var(--nim-bg-selected);
 }
 
@@ -71,6 +72,7 @@
 
 .collab-sidebar .file-tree-file.active .file-tree-icon,
 .collab-sidebar .file-tree-directory.selected .file-tree-icon,
+.collab-sidebar .collab-tree-type-row.active .file-tree-icon,
 .collab-sidebar .file-tree-directory.selected .file-tree-chevron {
   color: var(--nim-text);
 }

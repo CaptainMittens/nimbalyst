@@ -806,7 +806,9 @@ interface ElectronAPI {
     updateTrackerItemContent: (payload: {
       itemId: string;
       content: any;
-    }) => Promise<{ success: boolean; error?: string }>;
+      /** Write only if the stored body is still at this version; otherwise answer `conflict`. */
+      expectedBodyVersion?: number;
+    }) => Promise<{ success: boolean; conflict?: boolean; bodyVersion?: number; error?: string }>;
     getTrackerItemContent: (payload: {
       itemId: string;
     }) => Promise<{ success: boolean; content?: any; error?: string }>;

@@ -7,5 +7,7 @@
  * shares this one module instance, and with it the installed source.
  */
 export * from './internal/collab-client/src/pages/index';
-export { TeamPageMarksRequests } from './internal/runtime/src/sync/teamPageMarks';
+export { onTeamPageMarksChanged, TeamPageMarksRequests } from './internal/runtime/src/sync/teamPageMarks';
 export type { TeamPageMarksFilters, TeamPageMarksResult } from './internal/runtime/src/sync/teamPageMarks';
+export { onTeamPageLinksChanged, TeamPageLinksRequests } from './internal/runtime/src/sync/teamPageLinks';
+export type { TeamPageLinksFilters, TeamPageLinksResult } from './internal/runtime/src/sync/teamPageLinks';

@@ -306,7 +306,11 @@ export function SharedDocsItemMenu({
     if (docCount > 0) parts.push(`${docCount} document${docCount === 1 ? '' : 's'}`);
     if (folderCount > 0) parts.push(`${folderCount} subfolder${folderCount === 1 ? '' : 's'}`);
     const detail = parts.length > 0 ? ` and its ${parts.join(' and ')}` : '';
-    if (!await confirmDestructive('Delete shared folder', `Delete shared folder "${target.folder.name}"${detail}? This cannot be undone.`)) return;
+    // In the page tree a folder is a page, and removing it moves its subtree to Trash.
+    const confirmed = session.isPageTree()
+      ? await confirmDestructive('Move page to Trash', `Move "${target.folder.name}"${detail} to Trash?`)
+      : await confirmDestructive('Delete shared folder', `Delete shared folder "${target.folder.name}"${detail}? This cannot be undone.`);
+    if (!confirmed) return;
     session.removeFolder(target.folder.folderId);
     host.trackEvent?.('collab_folder_deleted', { actorType: 'user', source: 'home' });
   }, [canMutate, documents, folders, host, session, track]);
@@ -412,7 +416,7 @@ export function SharedDocsItemMenu({
             <MenuItem
               icon="delete"
               danger
-              label={target.kind === 'document' ? 'Move to Trash' : 'Delete'}
+              label={target.kind === 'document' || session.isPageTree() ? 'Move to Trash' : 'Delete'}
               onClick={choose(() => { void remove(target); })}
             />
           </div>

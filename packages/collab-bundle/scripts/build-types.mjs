@@ -50,7 +50,9 @@ function internalTarget(specifier) {
   // every label, predicate and schema type reaching them silently became `any`.
   // The bundle resolves it to the browser barrel (see vite.config.ts).
   if (specifier === '@nimbalyst/tracker-schema') return path.join(internalRoot, 'tracker-schema/src/browser.d.ts');
-  const collabClient = specifier.match(/^@nimbalyst\/collab-client\/(core|docs|docs-ui|feedback|feedback-ui|trackers|trackers-ui|quick-open|pages)$/);
+  // Every collab-client subpath the bundle reaches is a directory with an
+  // index, as vite.config.ts and tsconfig.json resolve it.
+  const collabClient = specifier.match(/^@nimbalyst\/collab-client\/([a-z-]+(?:\/[A-Za-z-]+)*)$/);
   if (collabClient) {
     return path.join(internalRoot, 'collab-client/src', collabClient[1], 'index.d.ts');
   }

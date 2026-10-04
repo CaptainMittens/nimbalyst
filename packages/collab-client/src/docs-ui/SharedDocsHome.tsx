@@ -313,7 +313,7 @@ export const SharedDocsHome: React.FC<SharedDocsHomeProps> = () => {
                     aria-label={`Delete ${docName(doc)} permanently`}
                     onClick={() => {
                       void confirmDestructive('Delete permanently', `Permanently delete "${docName(doc)}"? This cannot be undone.`)
-                        .then((accepted) => { if (accepted) session.removeDocument(doc.documentId); });
+                        .then((accepted) => { if (accepted) session.removeDocument(doc.documentId, { purge: true }); });
                     }}
                   >
                     <MaterialSymbol icon="delete_forever" size={18} />

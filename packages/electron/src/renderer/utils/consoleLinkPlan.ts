@@ -11,7 +11,7 @@
  *
  * Pure, so the decision is tested without a window; `openConsoleLink.ts` runs it.
  */
-import { buildConsoleLink, parseConsoleLink } from '@nimbalyst/collab-protocol';
+import { parseConsoleLink } from '@nimbalyst/collab-protocol';
 
 export interface ConsoleLinkOpenContext {
   /** This window's team project, or null when the workspace has none. */
@@ -33,7 +33,11 @@ export type ConsoleLinkPlan =
 export function planConsoleLinkOpen(href: string, context: ConsoleLinkOpenContext): ConsoleLinkPlan | null {
   const target = parseConsoleLink(href);
   if (!target) return null;
-  if (target.kind === 'citation') return { action: 'session', sessionId: target.sessionId };
+  if (target.kind === 'citation') {
+    // A Claude Code session lives in the author's terminal, not in Nimbalyst; the console page says so.
+    if (target.agent) return { action: 'browser' };
+    return { action: 'session', sessionId: target.sessionId };
+  }
 
   const local = target.scope === 'local';
   if (target.scope !== 'local') {
@@ -46,6 +50,8 @@ export function planConsoleLinkOpen(href: string, context: ConsoleLinkOpenContex
   switch (target.kind) {
     case 'page':
       return local ? { action: 'personal-page', pageId: target.pageId } : { action: 'team-document', documentId: target.pageId };
+    case 'commentCitation':
+      return { action: 'team-document', documentId: target.pageId };
     case 'item': {
       const itemId = context.resolveItem(target.itemRef);
       return itemId ? { action: 'item', itemId } : { action: 'missing', what: 'page' };
@@ -59,16 +65,5 @@ export function planConsoleLinkOpen(href: string, context: ConsoleLinkOpenContex
   }
 }
 
-/**
- * The link a new typed-page reference is written with. A team link when the
- * window has a team and the item is not personal (an item this window does not
- * know is assumed to be the team's); a local link otherwise.
- */
-export function trackerReferenceLinkFor(
-  referenceKey: string,
-  team: ConsoleLinkOpenContext['team'],
-  record: { syncStatus: 'local' | 'pending' | 'synced' } | null,
-): string {
-  const scope = team && record?.syncStatus !== 'local' ? { orgId: team.orgId, projectId: team.teamProjectId } : 'local';
-  return buildConsoleLink({ kind: 'item', scope, itemRef: referenceKey });
-}
+/** The link a new typed-page reference is written with; shared with the web console. */
+export { trackerReferenceLinkFor } from '@nimbalyst/collab-client/trackers';

@@ -5,7 +5,7 @@
  * bundle.
  */
 import { type CollabTreeNode, type CollabTypeTreeResolver } from './collabTree';
-import type { CollabDocsSession } from './session';
+import type { PageTreeSession } from './pageTreeSession';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 export interface CollabPageTreeInput {
     resolver?: CollabTypeTreeResolver;
@@ -159,7 +159,7 @@ export declare function pageTreeRowDrop(context: PageTreeRowDropContext, node: C
  * Move or reorder a page in the page tree through the session. Says what
  * happened: refused for a taken name or a cycle, nothing to do, or done.
  */
-export declare function movePageInTree(session: CollabDocsSession, tree: CollabTreeNode[], page: SharedDocument, parentId: string | null, options?: {
+export declare function movePageInTree(session: PageTreeSession, tree: CollabTreeNode[], page: SharedDocument, parentId: string | null, options?: {
     parentKind?: SharedParentKind;
     sortOrder?: number | null;
 }): 'taken' | 'cycle' | 'unchanged' | 'reordered' | 'moved';
@@ -175,9 +175,9 @@ export type PageTreeDestination = {
  * would put it inside itself (also through its type). Every path uses this:
  * drops, the row menu's "Back under its type" and the move dialog.
  */
-export declare function moveItemInTree(session: CollabDocsSession, tree: CollabTreeNode[], itemId: string, destination: PageTreeDestination): 'cycle' | ReturnType<CollabDocsSession['setItemPlacement']>;
+export declare function moveItemInTree(session: PageTreeSession, tree: CollabTreeNode[], itemId: string, destination: PageTreeDestination): 'cycle' | ReturnType<PageTreeSession['setItemPlacement']>;
 /** Apply one row's write from a drop plan through the docs session. */
-export declare function applyPageTreeWrite(session: CollabDocsSession, write: PageTreeWrite, onError: (error: unknown) => void): void;
+export declare function applyPageTreeWrite(session: PageTreeSession, write: PageTreeWrite, onError: (error: unknown) => void): void;
 /**
  * Whether moving the row `movingNodeId` under a row (`nodeId`, null for root)
  * or, for a typed page, back under its own type would put it inside itself, walking up

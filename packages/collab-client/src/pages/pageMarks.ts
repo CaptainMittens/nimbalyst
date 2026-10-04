@@ -5,7 +5,9 @@
  * host answers `listMarks`. Team pages come from the server's marks index
  * (`pageMarksQuery`, mapped by `pageMarkRecordsFromTeamIndex`). The desktop
  * adds what it reads locally -- typed pages, Personal pages and Personal type
- * pages -- and merges the two; the web console uses the index alone.
+ * pages -- and merges the two; the web console uses the index alone, so it
+ * lists no typed-page marks. A source's `subscribe` (`PageMarksChangeFeed`)
+ * tells open lists to load again.
  *
  * Logic and contracts only -- no React, no DOM.
  */
@@ -112,37 +114,27 @@ const TYPE_PAGE_PREFIX = 'type-page:';
 
 export interface TeamIndexMappingOptions {
   orgId: string;
-  /**
-   * Names a typed page from its tracker item. Marks in a typed page's body
-   * (`tracker-content/<itemId>`) are kept only when this resolves the item, so
-   * a deleted item or one this client cannot see drops out. Omit it to leave
-   * typed pages out entirely (a host that reads them locally).
-   */
-  resolveTypedPage?: (itemId: string) => { title: string; issueKey: string | null; typeId: string | null } | null;
 }
 
-/** Records for the marks the server's index returned. */
+/**
+ * Records for the marks the server's index returned. A typed page's body is
+ * never taken from the index (an older server listed them, deleted items
+ * included); the desktop reads those locally.
+ */
 export function pageMarkRecordsFromTeamIndex(entries: readonly PageMarkEntry[], options: TeamIndexMappingOptions): PageMarkRecord[] {
   const out: PageMarkRecord[] = [];
   for (const entry of entries) {
-    let page: PageMarkRecord['page'];
-    if (entry.documentId.startsWith(TRACKER_CONTENT_PREFIX)) {
-      const itemId = entry.documentId.slice(TRACKER_CONTENT_PREFIX.length);
-      const item = options.resolveTypedPage?.(itemId);
-      if (!item) continue;
-      page = { kind: 'typed-page', scope: 'team', id: itemId, title: item.title, uri: `tracker://${itemId}`, typeId: item.typeId, issueKey: item.issueKey };
-    } else {
-      const typeId = entry.documentId.startsWith(TYPE_PAGE_PREFIX) ? entry.documentId.slice(TYPE_PAGE_PREFIX.length) : null;
-      page = {
-        kind: typeId ? 'type-page' : 'page',
-        scope: 'team',
-        id: entry.documentId,
-        title: entry.title ?? typeId ?? 'Untitled',
-        uri: buildCollabUri(options.orgId, entry.documentId),
-        typeId,
-        issueKey: null,
-      };
-    }
+    if (entry.documentId.startsWith(TRACKER_CONTENT_PREFIX)) continue;
+    const typeId = entry.documentId.startsWith(TYPE_PAGE_PREFIX) ? entry.documentId.slice(TYPE_PAGE_PREFIX.length) : null;
+    const page: PageMarkRecord['page'] = {
+      kind: typeId ? 'type-page' : 'page',
+      scope: 'team',
+      id: entry.documentId,
+      title: entry.title ?? typeId ?? 'Untitled',
+      uri: buildCollabUri(options.orgId, entry.documentId),
+      typeId,
+      issueKey: null,
+    };
     out.push({
       id: `${page.uri}#${entry.offset}`,
       kind: entry.kind,
@@ -157,6 +149,52 @@ export function pageMarkRecordsFromTeamIndex(entries: readonly PageMarkEntry[], 
     });
   }
   return out;
+}
+
+const FIRST_RETRY_MS = 2000;
+const MAX_RETRY_MS = 30_000;
+
+/**
+ * A source's `subscribe`: `notify()` reaches every open list, and while the
+ * team index's last answer was missing (offline, no reply) or `partial`, the
+ * lists are asked to load again, backing off, until an answer is complete.
+ */
+export class PageMarksChangeFeed {
+  private readonly listeners = new Set<() => void>();
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+  private retryDelay = 0;
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+      if (this.listeners.size === 0) this.stopRetry();
+    };
+  }
+
+  notify(): void {
+    for (const listener of [...this.listeners]) listener();
+  }
+
+  /** After a load: whether the team index answered completely. */
+  settled(complete: boolean): void {
+    if (complete) {
+      this.stopRetry();
+      this.retryDelay = 0;
+      return;
+    }
+    if (this.retryTimer || this.listeners.size === 0) return;
+    this.retryDelay = this.retryDelay ? Math.min(this.retryDelay * 2, MAX_RETRY_MS) : FIRST_RETRY_MS;
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.notify();
+    }, this.retryDelay);
+  }
+
+  private stopRetry(): void {
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+  }
 }
 
 /** Local and server marks together; a mark listed by both appears once (the first list wins). */

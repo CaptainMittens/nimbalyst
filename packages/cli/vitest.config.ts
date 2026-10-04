@@ -15,6 +15,11 @@ export default defineConfig({
         find: '@nimbalyst/tracker-core',
         replacement: path.join(repoRoot, 'packages/tracker-core/src'),
       },
+      // Only the tests import the Pages tool contract (to check every tool has a verb).
+      {
+        find: '@nimbalyst/collab-protocol',
+        replacement: path.join(repoRoot, 'packages/collab-protocol/src/index.ts'),
+      },
     ],
   },
   test: {

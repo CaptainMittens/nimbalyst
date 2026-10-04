@@ -26,8 +26,9 @@ import { errorNotificationService } from '../../services/ErrorNotificationServic
 import { getCollabConfig } from '../../utils/collabDocumentOpener';
 import { openPageTab } from './collabPageTabs';
 import { flushPersonalPageBody } from './usePersonalPageBody';
-import { listPageChildren, movePageChild } from './setPageTypeChildren';
 import {
+  listPageChildren,
+  movePageChild,
   setPageType,
   type CreatedPageItem,
   type ItemBodyCheck,
@@ -36,7 +37,7 @@ import {
   type PageCopy,
   type PageTypeLane,
   type SetPageTypeDependencies,
-} from './setPageType';
+} from '@nimbalyst/collab-client/docs/pageTypes';
 
 type TabsActions = ReturnType<typeof useTabsActions>;
 
@@ -202,7 +203,11 @@ export function buildSetPageTypeDependencies(context: SetPageTypeContext, title:
     },
     setItemPlacement: (itemId, parentId, position) => placeItem(session, itemId, parentId, position),
     pageUnchangedSince: (pageId, copy) => pageUnchangedSince(context, pageId, copy),
-    trashPage: async (pageId) => session.trashDocument(pageId),
+    trashPage: async (pageId) => {
+      const result = await session.trashDocument(pageId);
+      // A refusal must reach the sequence, which then keeps both and says so.
+      if (!result.ok) throw new Error(result.error);
+    },
     openItem: (itemId, pageId) => openItemInPlace(context, itemId, pageId, title),
     wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   };

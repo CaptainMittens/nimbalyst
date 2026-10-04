@@ -1546,6 +1546,27 @@ describe('tracker schema tools', () => {
     }
   });
 
+  it('refuses the retired `labels` argument without touching an existing labels.yaml', async () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'nim-define-type-'));
+    try {
+      const labelsFile = path.join(workspace, '.nimbalyst', 'labels.yaml');
+      fs.mkdirSync(path.dirname(labelsFile), { recursive: true });
+      fs.writeFileSync(labelsFile, 'labels:\n  - id: feature\n    label: Feature\n');
+      const result = await handleTrackerDefineType({
+        predicates: [{ id: 'built-on', label: 'built on', subjectKinds: ['*'], valueShape: 'entity', direction: 'directed' }],
+        labels: { labels: [{ id: 'capability', label: 'Capability' }] },
+      }, workspace);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('`labels` is no longer supported');
+      expect(fs.readFileSync(labelsFile, 'utf-8')).toBe('labels:\n  - id: feature\n    label: Feature\n');
+      // Refused before any vocabulary was written.
+      expect(fs.existsSync(path.join(workspace, '.nimbalyst', 'predicates.yaml'))).toBe(false);
+    } finally {
+      fs.rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   it('defines a custom tracker type through the schema service', async () => {
     mockUpsertWorkspaceTrackerSchema.mockResolvedValue({
       model: {
