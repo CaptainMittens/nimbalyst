@@ -48,7 +48,8 @@ import {
   getElectronCollabHostForScopeKey,
   getPersonalCollabDocsSession,
   getPersonalCollabHost,
-  getSharedDocumentsForScope,
+  getLinkableSharedDocumentsForScopeKey,
+  linkableSharedDocumentsAtom,
   pendingCollabDocumentAtom,
   rebindElectronCollabHostScope,
   sharedDocumentsAtom,
@@ -239,6 +240,9 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
   useTabNavigationShortcuts(isActive);
   const pendingDoc = useAtomValue(pendingCollabDocumentAtom);
   const sharedDocuments = useAtomValue(sharedDocumentsAtom);
+  // Opening and naming an existing link also finds other projects' pages,
+  // which the window's lists leave out.
+  const linkableDocuments = useAtomValue(linkableSharedDocumentsAtom);
   const sharedFolders = useAtomValue(sharedFoldersAtom);
   const unreadDocumentIds = useAtomValue(changedDocIdsAtom);
 
@@ -562,9 +566,9 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
       return;
     }
     if (ref.kind !== 'document') return;
-    const document = sharedDocuments.find((item) => item.documentId === ref.documentId);
+    const document = linkableDocuments.find((item) => item.documentId === ref.documentId);
     if (document) void handleDocumentSelect(document, undefined, source);
-  }) : undefined, [teamScope, sharedDocuments, handleDocumentSelect, tabsActions]);
+  }) : undefined, [teamScope, linkableDocuments, handleDocumentSelect, tabsActions]);
 
   // Personal pages open as `personal://` tabs; their items and types open as
   // pages, the same as the team's.
@@ -623,7 +627,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
         continue;
       }
 
-      const document = sharedDocuments.find(doc => doc.documentId === documentId);
+      const document = linkableDocuments.find(doc => doc.documentId === documentId);
       if (!document) continue;
 
       const nextName = reconcileSharedDocumentDisplayName(
@@ -643,7 +647,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
         tabsActions.updateTab(tab.id, { fileName: nextName });
       }
     }
-  }, [teamScope, sharedDocuments, sharedFolders, tabs, tabsActions]);
+  }, [teamScope, linkableDocuments, sharedFolders, tabs, tabsActions]);
 
   const restored = useCollabTabPersistence({
     workspacePath,
@@ -668,7 +672,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
       || pendingDoc.orgId !== teamScope.orgId
     ) return;
 
-    const docs = getSharedDocumentsForScope(teamScope);
+    const docs = getLinkableSharedDocumentsForScopeKey(teamScope.scopeKey);
     const found = docs.find(d => d.documentId === pendingDoc.documentId);
 
     // Prefer the synced doc (it has the canonical title), but fall back to

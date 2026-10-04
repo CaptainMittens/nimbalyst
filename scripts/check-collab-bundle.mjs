@@ -62,7 +62,10 @@ export const COLLAB_BUNDLE_EAGER_GZIP_BUDGET_BYTES = {
   // 2026-10-02: 83,980 bytes after typed pages became parents, plain pages got
   // a sort order and the native confirms became an in-app dialog (lazy, own
   // root). Reset with ~5% headroom so small Pages changes need no shuffling.
-  'docs-ui': 88_000,
+  // 2026-10-04: 88,122 bytes after Pages became per project (the session keeps
+  // other projects' pages in a separate link-only index and refuses writes to
+  // them). Raised with ~4% headroom.
+  'docs-ui': 92_000,
   // Sep 5 privacy-aware document transport graph measured 35,049 bytes.
   // Keep a narrow allowance for the supported response/refresh contract.
   'feedback-ui': 35_500,

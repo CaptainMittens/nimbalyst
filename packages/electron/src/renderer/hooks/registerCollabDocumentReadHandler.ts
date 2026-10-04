@@ -1,7 +1,11 @@
 import { isCollabUri } from "@nimbalyst/collab-protocol";
 import { HeadlessCollabDocumentError } from "../services/HeadlessCollabDocument";
 import { readCollabDocWithDecisionState } from "../services/readCollabDecisionState";
-import { readCollabDocForAgent } from "../services/agentDocumentAccess";
+import {
+  assertCurrentProjectPage,
+  OtherProjectPageError,
+  readCollabDocForAgent,
+} from "../services/agentDocumentAccess";
 import { isPersonalPageUri } from "../../shared/personalPageUri";
 
 /** One read handler for editable source and optional read-only decision responses. */
@@ -40,9 +44,12 @@ export function registerCollabDocumentReadHandler(
         // lives on the server, not in a tab (NIM-3754).
         // Both read modes must use the same authorized privacy boundary. A
         // mounted editor can still contain an older, unsafe local projection.
+        const workspacePath = routedWorkspacePath ?? resolveWorkspacePath();
+        // Another project's page is read through that project (main re-routes).
+        assertCurrentProjectPage(targetFilePath, workspacePath);
         const result = await readCollabDocWithDecisionState(
           targetFilePath,
-          routedWorkspacePath ?? resolveWorkspacePath()
+          workspacePath
         );
         window.electronAPI.sendMcpReadCollabDocResult(resultChannel, {
           success: true,
@@ -56,6 +63,9 @@ export function registerCollabDocumentReadHandler(
           success: false,
           ...(error instanceof HeadlessCollabDocumentError
             ? { code: error.code }
+            : {}),
+          ...(error instanceof OtherProjectPageError
+            ? { code: error.code, projectId: error.projectId }
             : {}),
           error:
             error instanceof Error

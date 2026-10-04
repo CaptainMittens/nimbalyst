@@ -1,12 +1,14 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
-import { PAGE_TOOL_CONTRACT, type PageToolJsonSchema } from '@nimbalyst/collab-protocol';
+import { PAGE_TOOL_CONTRACT, PAGE_TOOL_DESKTOP_PROJECT_ARG, type PageToolJsonSchema } from '@nimbalyst/collab-protocol';
 
 /**
  * The remote Pages tools (collab-protocol `pageToolContract.ts`) take the
  * desktop tools' arguments, so one skill text serves both. A desktop argument
  * added, renamed or reshaped without a decision about the remote server fails
- * here: it either joins the contract or is listed in `desktopOnlyArgs`.
+ * here: it either joins the contract or is listed in `desktopOnlyArgs`. A
+ * desktop `project` (another project to read) is `desktopProjectArg`, since
+ * the remote `project` is a different shape.
  */
 
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp' }, BrowserWindow: { fromId: () => null, getAllWindows: () => [] } }));
@@ -56,8 +58,14 @@ describe('Pages tool contract matches the desktop tools', () => {
       const desktopProps = desktop!.inputSchema.properties ?? {};
       const desktopOnly = new Set(tool.desktopOnlyArgs ?? []);
       const remoteOnly = new Set(tool.remoteOnlyArgs ?? []);
+      if (tool.desktopProjectArg) {
+        expect(shape(desktopProps.project), `${name}.project`).toEqual(shape(PAGE_TOOL_DESKTOP_PROJECT_ARG));
+        desktopOnly.add('project');
+      } else {
+        expect(desktopProps, `${name} names another project without desktopProjectArg`).not.toHaveProperty('project');
+      }
 
-      for (const arg of desktopOnly) expect(desktopProps, `${name}: stale desktopOnlyArgs entry`).toHaveProperty(arg);
+      for (const arg of tool.desktopOnlyArgs ?? []) expect(desktopProps, `${name}: stale desktopOnlyArgs entry`).toHaveProperty(arg);
       const shared = sorted(Object.keys(desktopProps).filter((arg) => !desktopOnly.has(arg)));
       expect(sorted(Object.keys(tool.inputSchema.properties).filter((arg) => !remoteOnly.has(arg)))).toEqual(shared);
       for (const arg of shared) {

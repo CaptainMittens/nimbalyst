@@ -71,7 +71,16 @@ type DocsHost = CollabHost<DocsCapability> & { documents: DocsCapability };
 type ListUpdate<T> = T[] | ((current: T[]) => T[]);
 type ListAtom<T> = WritableAtom<T[], [ListUpdate<T>], void>;
 
+/** The scope's own project's documents: everything the window lists. */
 const documentsByScope = atomFamily((_scopeKey: string) => atom<SharedDocument[]>([]));
+/**
+ * Other projects' documents in the same org. Every member receives the whole
+ * org's index, but the window shows one project; these are kept only so a
+ * link to another project's page can still show its title.
+ */
+const otherProjectDocumentsByScope = atomFamily((_scopeKey: string) => atom<SharedDocument[]>([]));
+/** The primary project from the snapshot; null documents belong to it. */
+const primaryProjectByScope = atomFamily((_scopeKey: string) => atom<string | null>(null));
 const foldersByScope = atomFamily((_scopeKey: string) => atom<SharedFolder[]>([]));
 const typePlacementsByScope = atomFamily((_scopeKey: string) => atom<SharedTypePlacement[]>([]));
 const itemPlacementsByScope = atomFamily((_scopeKey: string) => atom<SharedItemPlacement[]>([]));
@@ -189,7 +198,9 @@ export const trashedSharedDocumentsAtom = atom((get) =>
 );
 
 /**
- * The readable documents of one scope, whether or not it is the active one.
+ * The readable documents a reference in one scope can name, whether or not it
+ * is the active scope: its own project's and, after them, the other projects'
+ * in the same org, since a link may point at another project's page.
  *
  * `sharedDocumentsAtom` answers for the scope the window is *browsing*, which
  * a window that never mounts a Shared Docs surface never sets -- the
@@ -202,8 +213,14 @@ export const trashedSharedDocumentsAtom = atom((get) =>
  * a reference was rendered still reaches the reference.
  */
 export const sharedDocumentsForScopeAtom = atomFamily((scopeKey: string) =>
-  atom((get) => get(documentsByScope(scopeKey)).filter((document) => document.trashedAt == null)),
+  atom((get) => [...get(documentsByScope(scopeKey)), ...get(otherProjectDocumentsByScope(scopeKey))]
+    .filter((document) => document.trashedAt == null)),
 );
+/** `sharedDocumentsForScopeAtom` for the active scope: what a link can open and name. */
+export const linkableSharedDocumentsAtom = atom((get) => {
+  const scope = get(activeCollabScopeAtom);
+  return scope ? get(sharedDocumentsForScopeAtom(scope.scopeKey)) : [];
+});
 export const sharedFoldersAtom = activeListAtom(visibleFoldersByScope);
 /** Tracker types placed in the active scope's page tree, one per type. */
 export const sharedTypePlacementsAtom = activeListAtom(typePlacementsByScope);
@@ -599,6 +616,12 @@ function reconcileById<T>(
   ];
 }
 
+function withoutDocuments(documents: SharedDocument[], removed: SharedDocument[]): SharedDocument[] {
+  if (removed.length === 0) return documents;
+  const ids = new Set(removed.map((document) => document.documentId));
+  return documents.filter((document) => !ids.has(document.documentId));
+}
+
 export function reconcileSharedDocuments(existing: SharedDocument[], incoming: SharedDocument[]) {
   return reconcileById(existing, incoming, (document) => document.documentId, mergeSharedDocument);
 }
@@ -859,6 +882,11 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   async registerDocument(registration: Parameters<CollabDocsSession['registerDocument']>[0]): Promise<boolean> {
+    const refused = this.otherProjectRefusal([
+      registration.documentId,
+      registration.parentKind === 'item' ? null : registration.parentFolderId,
+    ]);
+    if (refused) throw new Error(refused);
     const now = Date.now();
     // The order module loads lazily, with the page tree that needs it.
     const sortOrder = registration.sortOrder !== undefined
@@ -887,6 +915,8 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   async updateDocumentTitle(documentId: string, title: string): Promise<CollabPlacementWriteResult> {
+    const refused = this.refusedWrite([documentId]);
+    if (refused) return refused;
     const now = Date.now();
     store.set(documentsByScope(this.scope.scopeKey), (current) => {
       const existing = current.find((document) => document.documentId === documentId);
@@ -898,6 +928,8 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   removeDocument(documentId: string, options: { purge?: true } = {}): Promise<CollabPlacementWriteResult> {
+    const refused = this.refusedWrite([documentId]);
+    if (refused) return refused;
     const target = documentsByScope(this.scope.scopeKey);
     const removed = store.get(target).find((document) => document.documentId === documentId);
     store.set(target, (current) => current.filter((document) => document.documentId !== documentId));
@@ -911,6 +943,8 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   trashDocument(documentId: string, trashedAt = Date.now()): Promise<CollabPlacementWriteResult> {
+    const refused = this.refusedWrite([documentId]);
+    if (refused) return refused;
     store.set(documentsByScope(this.scope.scopeKey), (current) => current.map((document) =>
       document.documentId === documentId
         ? { ...document, trashedAt, updatedAt: trashedAt }
@@ -919,6 +953,7 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   restoreDocument(documentId: string): void {
+    if (this.otherProjectRefusal([documentId])) return;
     const now = Date.now();
     const all = this.getAllDocuments();
     const trashedAt = all.find((document) => document.documentId === documentId)?.trashedAt;
@@ -945,6 +980,8 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   moveDocument(documentId: string, parentFolderId: string | null, options: CollabPageMoveOptions = {}): Promise<CollabPlacementWriteResult> {
+    const refused = this.refusedWrite([documentId, options.parentKind === 'item' ? null : parentFolderId]);
+    if (refused) return refused;
     const parentKind = options.parentKind === 'item' && parentFolderId ? 'item' as const : undefined;
     const token = Symbol(documentId);
     let previous: Pick<SharedDocument, 'parentFolderId' | 'parentKind' | 'sortOrder'> | null = null;
@@ -1087,10 +1124,14 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   placeType(typeId: string, parentFolderId: string | null, parentKind?: SharedParentKind): Promise<CollabPlacementWriteResult> {
+    const refused = this.refusedWrite([parentKind === 'item' ? null : parentFolderId]);
+    if (refused) return refused;
     return this.writeTypePlacement(typeId, parentFolderId, Date.now(), parentKind);
   }
 
   moveTypePlacement(typeId: string, parentFolderId: string | null, sortOrder?: number, parentKind?: SharedParentKind): Promise<CollabPlacementWriteResult> {
+    const refused = this.refusedWrite([parentKind === 'item' ? null : parentFolderId]);
+    if (refused) return refused;
     const existing = store.get(typePlacementsByScope(this.scope.scopeKey))
       .find((placement) => placement.typeId === typeId);
     return this.writeTypePlacement(typeId, parentFolderId, sortOrder ?? existing?.sortOrder ?? Date.now(), parentKind);
@@ -1118,6 +1159,8 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   }
 
   removePage(documentId: string): Promise<CollabPlacementWriteResult> {
+    const refused = this.refusedWrite([documentId]);
+    if (refused) return refused;
     const scopeKey = this.scope.scopeKey;
     const plan = planPageRemoval(this.getAllDocuments(), store.get(typePlacementsByScope(scopeKey)), documentId);
     // Sent before the removal on the same ordered channel, so the store has
@@ -1143,6 +1186,8 @@ class CollabDocsSessionImpl implements CollabDocsSession {
     sortOrder?: number,
     parentKind?: SharedParentKind,
   ): Promise<CollabPlacementWriteResult> {
+    const refused = this.refusedWrite([parentKind === 'item' ? null : parentId]);
+    if (refused) return refused;
     if (this.wouldCycle(itemId, parentId)) {
       return Promise.resolve({ ok: false, error: 'cycle' });
     }
@@ -1377,9 +1422,27 @@ class CollabDocsSessionImpl implements CollabDocsSession {
   private applyDataChange(change: CollabDocsDataChange): void {
     const scopeKey = this.scope.scopeKey;
     switch (change.type) {
-      case 'snapshot':
-        store.set(documentsByScope(scopeKey), (current) =>
-          reconcileSharedDocuments(current, change.snapshot.items.map((item) => this.withPendingMove(item))));
+      case 'snapshot': {
+        if (change.snapshot.primaryProjectId !== undefined
+          && change.snapshot.primaryProjectId !== store.get(primaryProjectByScope(scopeKey))) {
+          store.set(primaryProjectByScope(scopeKey), change.snapshot.primaryProjectId);
+          // Rows held before the primary was known were classified without it;
+          // a snapshot can name the primary before it carries any rows.
+          this.resplitStoredDocuments();
+        }
+        const [own, other] = this.splitByProject(change.snapshot.items);
+        // A row can change sides once the primary is known, so each list drops
+        // what the snapshot put on the other side before reconciling.
+        const ownIds = new Set(own.map((document) => document.documentId));
+        const otherIds = new Set(other.map((document) => document.documentId));
+        store.set(documentsByScope(scopeKey), (current) => reconcileSharedDocuments(
+          current.filter((document) => !otherIds.has(document.documentId)),
+          own.map((item) => this.withPendingMove(item)),
+        ));
+        store.set(otherProjectDocumentsByScope(scopeKey), (current) => reconcileSharedDocuments(
+          current.filter((document) => !ownIds.has(document.documentId)),
+          other,
+        ));
         store.set(foldersByScope(scopeKey), (current) =>
           reconcileSharedFolders(current, change.snapshot.containers));
         // Authoritative when present, unlike the reconciled lists above: a
@@ -1396,20 +1459,34 @@ class CollabDocsSessionImpl implements CollabDocsSession {
         // Path-in-title folders become folder rows; a page tree has none.
         if (!this.isPageTree()) void this.migrateVirtualFolders();
         break;
-      case 'items-upserted':
+      }
+      case 'items-upserted': {
+        const [own, other] = this.splitByProject(change.items);
         store.set(documentsByScope(scopeKey), (current) => {
-          let next = current;
-          for (const incoming of change.items) {
+          let next = withoutDocuments(current, other);
+          for (const incoming of own) {
             const existing = next.find((document) => document.documentId === incoming.documentId);
             const merged = this.withPendingMove(existing ? mergeSharedDocument(existing, incoming) : incoming);
             next = [merged, ...next.filter((document) => document.documentId !== incoming.documentId)];
           }
           return next;
         });
+        store.set(otherProjectDocumentsByScope(scopeKey), (current) => {
+          let next = withoutDocuments(current, own);
+          for (const incoming of other) {
+            const existing = next.find((document) => document.documentId === incoming.documentId);
+            const merged = existing ? mergeSharedDocument(existing, incoming) : incoming;
+            next = [merged, ...next.filter((document) => document.documentId !== incoming.documentId)];
+          }
+          return next;
+        });
         break;
+      }
       case 'items-removed': {
         const removed = new Set(change.itemIds);
         store.set(documentsByScope(scopeKey), (current) =>
+          current.filter((document) => !removed.has(document.documentId)));
+        store.set(otherProjectDocumentsByScope(scopeKey), (current) =>
           current.filter((document) => !removed.has(document.documentId)));
         break;
       }
@@ -1431,12 +1508,67 @@ class CollabDocsSessionImpl implements CollabDocsSession {
           current.filter((folder) => !removedFolders.has(folder.folderId)));
         store.set(documentsByScope(scopeKey), (current) =>
           current.filter((document) => !removedDocuments.has(document.documentId)));
+        store.set(otherProjectDocumentsByScope(scopeKey), (current) =>
+          current.filter((document) => !removedDocuments.has(document.documentId)));
         break;
       }
       case 'status':
         store.set(statusByScope(scopeKey), change.status);
     }
     this.recomputeUnread();
+  }
+
+  /**
+   * This scope's project's documents, then every other project's. A document
+   * with no project belongs to the primary; with no project known for the
+   * scope, nothing is split off (an older server, or before the first snapshot).
+   */
+  private splitByProject(documents: SharedDocument[]): [SharedDocument[], SharedDocument[]] {
+    const primary = store.get(primaryProjectByScope(this.scope.scopeKey));
+    const own = this.scope.indexConfig.teamProjectId ?? primary;
+    if (!own) return [documents, []];
+    const ownList: SharedDocument[] = [];
+    const otherList: SharedDocument[] = [];
+    for (const document of documents) {
+      const project = document.teamProjectId ?? primary;
+      (project === null || project === own ? ownList : otherList).push(document);
+    }
+    return [ownList, otherList];
+  }
+
+  private resplitStoredDocuments(): void {
+    const scopeKey = this.scope.scopeKey;
+    const [own, other] = this.splitByProject([
+      ...store.get(documentsByScope(scopeKey)),
+      ...store.get(otherProjectDocumentsByScope(scopeKey)),
+    ]);
+    store.set(documentsByScope(scopeKey), own);
+    store.set(otherProjectDocumentsByScope(scopeKey), other);
+  }
+
+  /** Another project's page, when `documentId` names one and not one of this project's. */
+  private otherProjectPage(documentId: string | null | undefined): SharedDocument | null {
+    if (!documentId || this.getAllDocuments().some((document) => document.documentId === documentId)) return null;
+    return store.get(otherProjectDocumentsByScope(this.scope.scopeKey))
+      .find((document) => document.documentId === documentId) ?? null;
+  }
+
+  /**
+   * The refusal for a write that targets, or puts something under, another
+   * project's page. The window holds those pages only to name them in links;
+   * every write goes to the scope's own project. Null when the write may go.
+   */
+  private otherProjectRefusal(targets: Array<string | null | undefined>): string | null {
+    for (const target of targets) {
+      const page = this.otherProjectPage(target);
+      if (page) return `"${page.title || page.documentId}" is a page in another project; changes stay in the current project.`;
+    }
+    return null;
+  }
+
+  private refusedWrite(targets: Array<string | null | undefined>): Promise<CollabPlacementWriteResult> | null {
+    const error = this.otherProjectRefusal(targets);
+    return error ? Promise.resolve({ ok: false, error }) : null;
   }
 
   private applyPersonalStateRow(row: CollabPersonalStateRow): void {
@@ -1671,6 +1803,32 @@ export function getSharedDocumentsForScopeKey(scopeKey: string): SharedDocument[
   return store.get(documentsByScope(scopeKey)).filter((document) => document.trashedAt == null);
 }
 
+/**
+ * The documents a link in this scope can open: the scope's own project's,
+ * then other projects' in the org. For opening and naming an existing link
+ * only; pickers and lists use `getSharedDocumentsForScopeKey`.
+ */
+export function getLinkableSharedDocumentsForScopeKey(scopeKey: string): SharedDocument[] {
+  return store.get(sharedDocumentsForScopeAtom(scopeKey));
+}
+
+/**
+ * Another project's page, when `documentId` names one and not one of this
+ * scope's own: the page and its project (a null project resolved to the
+ * primary). Writes to it are refused; reads go through that project.
+ */
+export function findOtherProjectDocument(
+  scopeKey: string,
+  documentId: string,
+): { document: SharedDocument; projectId: string | null } | null {
+  if (store.get(documentsByScope(scopeKey)).some((document) => document.documentId === documentId)) return null;
+  const document = store.get(otherProjectDocumentsByScope(scopeKey))
+    .find((candidate) => candidate.documentId === documentId);
+  return document
+    ? { document, projectId: document.teamProjectId ?? store.get(primaryProjectByScope(scopeKey)) }
+    : null;
+}
+
 export function getSharedFoldersForScopeKey(scopeKey: string): SharedFolder[] {
   return store.get(visibleFoldersByScope(scopeKey));
 }
@@ -1698,6 +1856,10 @@ export function pruneCollabDocsSession(scopeKey: string): void {
     if (!retainedElsewhere) docUnreadAtom.remove(documentId);
   }
   documentsByScope.remove(scopeKey);
+  otherProjectDocumentsByScope.remove(scopeKey);
+  primaryProjectByScope.remove(scopeKey);
+  // Derived from the two lists above; a kept instance would read the removed atoms.
+  sharedDocumentsForScopeAtom.remove(scopeKey);
   foldersByScope.remove(scopeKey);
   visibleFoldersByScope.remove(scopeKey);
   typePlacementsByScope.remove(scopeKey);

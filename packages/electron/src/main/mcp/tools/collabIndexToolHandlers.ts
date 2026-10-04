@@ -1,7 +1,9 @@
 import { BrowserWindow } from "electron";
+import { PAGE_TOOL_DESKTOP_PROJECT_ARG } from "@nimbalyst/collab-protocol";
 import { findWindowIdForWorkspacePath } from "../mcpWorkspaceResolver";
 import { getMostRecentlyFocusedWorkspaceWindow } from "../../window/WindowManager";
 import { requestFromRenderer } from "../rendererRequest";
+import { refuseOtherProjectWrite, routePageRead } from "./pageProjectReads";
 
 type McpToolResult = {
   content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
@@ -42,8 +44,8 @@ export function getCollabIndexToolSchemas() {
     {
       name: "listPages",
       description:
-        "List a Pages section as a tree: pages, placed types and typed pages, each with nodeId, kind, id, title, parentNodeId, depth, sortOrder and the https link to write in page content (types also a viewLink); pages carry the uri to read and edit their body, typed pages their issueKey and whether they are placed outside their type.",
-      inputSchema: { type: "object", properties: { section: SECTION } },
+        "List a Pages section as a tree: pages, placed types and typed pages, each with nodeId, kind, id, title, parentNodeId, depth, sortOrder and the https link to write in page content (types also a viewLink); pages carry the uri to read and edit their body, typed pages their issueKey and whether they are placed outside their type. The team section lists the current project and names the team's other projects; pass one as `project` to list it.",
+      inputSchema: { type: "object", properties: { section: SECTION, project: PAGE_TOOL_DESKTOP_PROJECT_ARG } },
     },
     {
       name: "createSharedDoc",
@@ -255,10 +257,13 @@ const TOOL_NAMES = new Set([
   "setPageType",
 ]);
 
-async function runPageTreeTool(tool: string, args: any, workspacePath: string | undefined): Promise<McpToolResult> {
-  const invalid = invalidArguments(tool, args);
-  if (invalid) return errorResult(`Error: ${invalid}`);
-
+/** Run a tool on the window's sessions; `extra` is merged into what the renderer answered. */
+async function runInRenderer(
+  tool: string,
+  args: any,
+  workspacePath: string | undefined,
+  extra: Record<string, unknown> = {},
+): Promise<McpToolResult> {
   const window = await resolveTargetWindow(workspacePath);
   if (!window) return errorResult("Error: No open workspace window available for Pages.");
 
@@ -267,7 +272,19 @@ async function runPageTreeTool(tool: string, args: any, workspacePath: string | 
   const timeout = tool === "setPageType" || tool === "createSharedDoc" ? SLOW_ROUND_TRIP_TIMEOUT_MS : ROUND_TRIP_TIMEOUT_MS;
   const result = await roundTripToRenderer(window, `mcp:${tool}`, payload, timeout);
   if (!result.success) return errorResult(`${tool} failed: ${result.error || "Unknown error"}`);
-  return textResult(describeSuccess(tool, args, result));
+  return textResult(describeSuccess(tool, args, { ...result, ...extra }));
+}
+
+async function runPageTreeTool(tool: string, args: any, workspacePath: string | undefined): Promise<McpToolResult> {
+  const invalid = invalidArguments(tool, args);
+  if (invalid) return errorResult(`Error: ${invalid}`);
+  // listPages reads another project when `project` names one; writes stay in this one.
+  if (tool === "listPages") {
+    return routePageRead("listPages", args, workspacePath, (localArgs, extra) => runInRenderer(tool, localArgs, workspacePath, extra));
+  }
+  const refused = await refuseOtherProjectWrite(tool, args, workspacePath);
+  if (refused) return errorResult(`Error: ${refused}`);
+  return runInRenderer(tool, args, workspacePath);
 }
 
 /** Dispatch for every page tree tool; null for a name this module does not own. */

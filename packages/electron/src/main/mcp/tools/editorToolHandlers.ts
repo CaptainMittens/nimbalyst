@@ -16,6 +16,8 @@ import {
   personalTypedPageError,
   typedPageItemId,
 } from "./agentPageTargets";
+import { PAGE_TOOL_DESKTOP_PROJECT_ARG } from "@nimbalyst/collab-protocol";
+import { routePageRead } from "./pageProjectReads";
 
 type McpToolResult = {
   content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
@@ -72,6 +74,7 @@ export function getEditorToolSchemas(sessionId: string | undefined) {
             type: "boolean",
             description: "Include a bounded read-only snapshot of current human answers and separate agent recommendations for extant decision blocks. Supplemental state is not editable document source; default false.",
           },
+          project: PAGE_TOOL_DESKTOP_PROJECT_ARG,
         },
         required: ["filePath"],
       },
@@ -407,12 +410,27 @@ async function resolveCollabDocWindow(
  * readCollabDoc — return the current text of a shared collaborative document.
  *
  * Served from the live editor when one is mounted, and from the room itself
- * otherwise. Filesystem Read does not work for collab:// URIs.
+ * otherwise. Filesystem Read does not work for collab:// URIs. A page in
+ * another project of the team is read through the server when `project`
+ * names it (`pageProjectReads.ts`), and so is one named by its link alone:
+ * the renderer answers with the page's project and the read goes the same way.
  */
 export async function handleReadCollabDoc(
   args: any,
   workspacePath?: string,
 ): Promise<McpToolResult> {
+  return routePageRead("readCollabDoc", args, workspacePath, async (localArgs) => {
+    const { otherProjectId, ...local } = await readCollabDocLocally(localArgs, workspacePath);
+    if (!otherProjectId) return local;
+    return routePageRead("readCollabDoc", { ...localArgs, project: otherProjectId }, workspacePath, async () => local);
+  });
+}
+
+/** `otherProjectId`: the renderer found the page in another project of the team. */
+async function readCollabDocLocally(
+  args: any,
+  workspacePath?: string,
+): Promise<McpToolResult & { otherProjectId?: string }> {
   const targetFilePath = args?.filePath;
   if (!isAgentPageUri(targetFilePath)) {
     return {
@@ -434,7 +452,14 @@ export async function handleReadCollabDoc(
     };
   }
 
-  const outcome = await requestFromRenderer<{ success: boolean; content?: string; decisionState?: unknown; error?: string }>(
+  const outcome = await requestFromRenderer<{
+    success: boolean;
+    content?: string;
+    decisionState?: unknown;
+    error?: string;
+    code?: string;
+    projectId?: string | null;
+  }>(
     targetWindow,
     "mcp:readCollabDoc",
     { targetFilePath, workspacePath, ...(args?.includeDecisionState === true ? { includeDecisionState: true } : {}) },
@@ -452,6 +477,9 @@ export async function handleReadCollabDoc(
     return {
       content: [{ type: "text", text: `Failed to read collab doc: ${outcome.response?.error || "Unknown error"}` }],
       isError: true,
+      ...(outcome.response?.code === "OTHER_PROJECT" && outcome.response.projectId
+        ? { otherProjectId: outcome.response.projectId }
+        : {}),
     };
   }
   return {

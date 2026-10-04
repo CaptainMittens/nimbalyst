@@ -17,7 +17,7 @@ import {
   type CollabTreeTypeNode,
   type CollabTypeTreeResolver,
 } from './collabTree';
-import { isForeignHomePageId, isHomePageId } from './homePage';
+import { isHomePageId } from './homePage';
 
 import type { PageTreeSession } from './pageTreeSession';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
@@ -26,8 +26,6 @@ export interface CollabPageTreeInput {
   resolver?: CollabTypeTreeResolver;
   typePlacements?: SharedTypePlacement[];
   itemPlacements?: SharedItemPlacement[];
-  /** The scope's team project: another project's Home is left out unless something sits under it. */
-  currentProjectId?: string | null;
 }
 
 /** Spacing for a re-spaced sibling group. */
@@ -311,22 +309,8 @@ export function buildCollabPageTree(
     attach(nodes.get(current)!, null);
   }
 
-  dropEmptyForeignHomes(roots, input.currentProjectId);
   sortPageTree(roots);
   return roots;
-}
-
-/** Leave out another project's Home with nothing under it (see `isForeignHomePageId`). */
-function dropEmptyForeignHomes(nodes: CollabTreeNode[], currentProjectId: string | null | undefined): void {
-  if (!currentProjectId) return;
-  for (let index = nodes.length - 1; index >= 0; index--) {
-    const node = nodes[index];
-    const children = childList(node);
-    dropEmptyForeignHomes(children, currentProjectId);
-    if (node.type === 'document' && children.length === 0 && isForeignHomePageId(node.document.documentId, currentProjectId)) {
-      nodes.splice(index, 1);
-    }
-  }
 }
 
 export type PageTreeDragged =

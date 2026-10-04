@@ -18,7 +18,7 @@
  */
 import type { TextReplacement } from '@nimbalyst/runtime';
 import { editorRegistry } from '@nimbalyst/runtime/ai/EditorRegistry';
-import { isCollabUri } from '@nimbalyst/collab-protocol';
+import { isCollabUri, parseCollabUri } from '@nimbalyst/collab-protocol';
 
 import {
   acquireHeadlessCollabDocument,
@@ -38,6 +38,7 @@ import {
 import { applyPersonalPageAgentEdit, readPersonalPageForAgent } from './personalAgentEdit';
 import { isPersonalPageUri } from '../../shared/personalPageUri';
 import { agentPageTitle } from '../utils/agentEditedPage';
+import { findOtherProjectDocument } from '../store/atoms/collabDocuments';
 
 export type CollabDocAccessRoute = 'mounted' | 'headless';
 
@@ -63,6 +64,42 @@ export interface AgentDiffOptions {
 }
 
 /**
+ * A page that belongs to another project of the workspace's team. The window
+ * holds those pages only to name them in links: an edit is refused, and a read
+ * goes through the `project` argument like any other cross-project read (main
+ * re-routes on this code, with `projectId`).
+ */
+export class OtherProjectPageError extends Error {
+  readonly code = 'OTHER_PROJECT';
+  constructor(readonly projectId: string | null, message: string) {
+    super(message);
+    this.name = 'OtherProjectPageError';
+  }
+}
+
+/**
+ * Throws when `documentUri` names another project's page in the invoking
+ * workspace's scope. Checked before the mounted or headless route, since
+ * either would reach the page.
+ */
+export function assertCurrentProjectPage(documentUri: string, workspacePath: string | null | undefined): void {
+  if (!workspacePath || !isCollabUri(documentUri)) return;
+  let documentId: string;
+  try {
+    documentId = parseCollabUri(documentUri).documentId;
+  } catch {
+    return;
+  }
+  const other = findOtherProjectDocument(workspacePath, documentId);
+  if (!other) return;
+  const project = other.projectId ?? 'another project';
+  throw new OtherProjectPageError(
+    other.projectId,
+    `"${other.document.title || documentId}" is a page in another project of this team (${project}); changes stay in the current project. Read it with readCollabDoc and project "${project}".`,
+  );
+}
+
+/**
  * Read a shared document's current content, whether or not it is open.
  *
  * Throws rather than returning empty content when the room cannot be reached --
@@ -75,6 +112,7 @@ export async function readCollabDocForAgent(
   if (isPersonalPageUri(documentUri)) {
     return { content: await readPersonalPageForAgent(documentUri, workspacePath), route: 'headless' };
   }
+  assertCurrentProjectPage(documentUri, workspacePath);
   if (editorRegistry.has(documentUri)) {
     return { content: editorRegistry.getContent(documentUri), route: 'mounted' };
   }
@@ -154,6 +192,12 @@ async function applyAgentDiffToTarget(
     });
   }
   const isCollab = isCollabUri(targetFilePath);
+  try {
+    assertCurrentProjectPage(targetFilePath, options.workspacePath);
+  } catch (error) {
+    if (error instanceof OtherProjectPageError) return { success: false, code: error.code, error: error.message };
+    throw error;
+  }
   if (!isCollab && !targetFilePath.endsWith('.md')) {
     return {
       success: false,

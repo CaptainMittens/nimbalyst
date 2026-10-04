@@ -50,6 +50,13 @@ export interface PageToolContract {
   remoteOnlyArgs?: readonly string[];
   /** Arguments whose values the remote server narrows; an array argument is checked per element. */
   remoteAcceptedValues?: Readonly<Record<string, PageToolAcceptedValues>>;
+  /**
+   * The desktop tool takes `project` as `PAGE_TOOL_DESKTOP_PROJECT_ARG` (another
+   * project in the window's org, by id or name) to read it. Read tools only:
+   * desktop writes go to the current project. Remotely every tool takes
+   * `project` as `PAGE_TOOL_PROJECT_ARG` instead.
+   */
+  desktopProjectArg?: true;
 }
 
 export const PAGE_TOOL_NAMES = [
@@ -97,6 +104,12 @@ export const PAGE_TOOL_PROJECT_ARG = {
   description: 'The team project to act on, { orgId, projectId }, from .nimbalyst/wiki.json. Wins over the repo lookup when you can access it.',
   properties: { orgId: { type: 'string' }, projectId: { type: 'string' } },
   required: ['orgId', 'projectId'],
+} as const;
+
+/** The desktop read tools' `project`: another project in the window's org. */
+export const PAGE_TOOL_DESKTOP_PROJECT_ARG = {
+  type: 'string',
+  description: "Read another project in this workspace's team instead of the current one: its project id or name (listPages names the team's other projects). Omit for the current project. Changes always go to the current project.",
 } as const;
 
 const SECTION = {
@@ -172,6 +185,7 @@ export const PAGE_TOOL_CONTRACT: readonly PageToolContract[] = [
       "List the project's pages as a tree: pages, placed types and typed pages, each with nodeId, kind, id, title, parentNodeId, depth, sortOrder and the https link to write in page content (types also a viewLink); pages carry the uri to read and edit their body, typed pages their issueKey and whether they are placed outside their type.",
     inputSchema: { type: 'object', properties: { section: SECTION } },
     remoteAcceptedValues: TEAM_SECTION_ONLY,
+    desktopProjectArg: true,
   },
   {
     name: 'readCollabDoc',
@@ -180,6 +194,7 @@ export const PAGE_TOOL_CONTRACT: readonly PageToolContract[] = [
     description: "Read a page's body as markdown, from the shared document every collaborator sees.",
     inputSchema: { type: 'object', properties: { filePath: PAGE_URI }, required: ['filePath'] },
     desktopOnlyArgs: ['includeDecisionState'],
+    desktopProjectArg: true,
   },
   {
     name: 'applyCollabDocEdit',
@@ -612,12 +627,21 @@ export type PageTreeNodeSummary =
   | (PageTreeNodeBase & { kind: 'typedPage'; typeId: string; issueKey?: string; placed: boolean })
   | (PageTreeNodeBase & { kind: 'type'; viewLink?: string });
 
+/** A team project an agent can name in `project`. */
+export interface PageToolProjectSummary {
+  projectId: string;
+  projectName: string | null;
+}
+
 /** `listPages`: the text answer is this object as JSON. */
 export interface ListPagesResult {
   section: 'team' | 'personal';
   consoleScope: ConsoleLinkScope | null;
   openMarksViewLink?: string;
   nodes: PageTreeNodeSummary[];
+  /** Desktop, team section: the project listed, and the org's other projects to pass as `project`. */
+  project?: PageToolProjectSummary;
+  otherProjects?: PageToolProjectSummary[];
 }
 
 export interface CreateSharedDocResult {

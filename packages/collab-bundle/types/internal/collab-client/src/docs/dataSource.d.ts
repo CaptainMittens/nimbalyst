@@ -121,6 +121,13 @@ export interface CollabDocsSnapshot extends CollabDataSnapshot<SharedDocument, S
      * is ignored. Absent from an older server, which keeps the folder tree.
      */
     pageTree?: boolean;
+    /**
+     * The team's primary project (the team snapshot's `metadata.teamProjectId`).
+     * The session shows one project: a document with no project (an older
+     * server) belongs to the primary, and so does a scope with no project id.
+     * Absent while unknown; then nothing is split off.
+     */
+    primaryProjectId?: string | null;
 }
 export type CollabDocsDataChange = Exclude<CollabDataChange<SharedDocument, SharedFolder>, {
     type: 'snapshot';

@@ -451,6 +451,8 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     // Omitted until the server has sent a list, so the session keeps its own.
     const typePlacements = this.provider.getTypePlacements();
     const itemPlacements = this.provider.getItemPlacements();
+    // Known once the team room answered; the session splits other projects off by it.
+    const metadata = this.provider.getTeamState()?.metadata;
     return {
       items: this.provider.getDocuments().map(mapDocument),
       containers: this.provider.getFolders().map(mapFolder),
@@ -458,6 +460,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       ...(itemPlacements ? { itemPlacements: itemPlacements.map(mapItemPlacement) } : {}),
       // The server's snapshot flag: its folders are now pages.
       ...(this.provider.isPageTree() ? { pageTree: true } : {}),
+      ...(metadata ? { primaryProjectId: metadata.teamProjectId ?? null } : {}),
     };
   }
 

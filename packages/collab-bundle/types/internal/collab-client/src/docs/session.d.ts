@@ -47,7 +47,9 @@ export declare const allSharedDocumentsAtom: ListAtom<SharedDocument>;
 export declare const sharedDocumentsAtom: WritableAtom<SharedDocument[], [ListUpdate<SharedDocument>], void>;
 export declare const trashedSharedDocumentsAtom: Atom<SharedDocument[]>;
 /**
- * The readable documents of one scope, whether or not it is the active one.
+ * The readable documents a reference in one scope can name, whether or not it
+ * is the active scope: its own project's and, after them, the other projects'
+ * in the same org, since a link may point at another project's page.
  *
  * `sharedDocumentsAtom` answers for the scope the window is *browsing*, which
  * a window that never mounts a Shared Docs surface never sets -- the
@@ -60,6 +62,8 @@ export declare const trashedSharedDocumentsAtom: Atom<SharedDocument[]>;
  * a reference was rendered still reaches the reference.
  */
 export declare const sharedDocumentsForScopeAtom: import("jotai-family").AtomFamily<string, Atom<SharedDocument[]>>;
+/** `sharedDocumentsForScopeAtom` for the active scope: what a link can open and name. */
+export declare const linkableSharedDocumentsAtom: Atom<SharedDocument[]>;
 export declare const sharedFoldersAtom: ListAtom<SharedFolder>;
 /** Tracker types placed in the active scope's page tree, one per type. */
 export declare const sharedTypePlacementsAtom: ListAtom<SharedTypePlacement>;
@@ -262,6 +266,21 @@ export interface CollabDocsScopeLifecycle {
 export declare function createCollabDocsScopeLifecycle(host: DocsHost, options: CollabDocsScopeLifecycleOptions): CollabDocsScopeLifecycle;
 export declare function getCollabDocsSession(scopeKey: string): CollabDocsSession | null;
 export declare function getSharedDocumentsForScopeKey(scopeKey: string): SharedDocument[];
+/**
+ * The documents a link in this scope can open: the scope's own project's,
+ * then other projects' in the org. For opening and naming an existing link
+ * only; pickers and lists use `getSharedDocumentsForScopeKey`.
+ */
+export declare function getLinkableSharedDocumentsForScopeKey(scopeKey: string): SharedDocument[];
+/**
+ * Another project's page, when `documentId` names one and not one of this
+ * scope's own: the page and its project (a null project resolved to the
+ * primary). Writes to it are refused; reads go through that project.
+ */
+export declare function findOtherProjectDocument(scopeKey: string, documentId: string): {
+    document: SharedDocument;
+    projectId: string | null;
+} | null;
 export declare function getSharedFoldersForScopeKey(scopeKey: string): SharedFolder[];
 export declare function getFavoriteDocumentIdsForScopeKey(scopeKey: string): string[];
 export declare function setCollabScopeAvailability(scopeKey: string, available: boolean): void;

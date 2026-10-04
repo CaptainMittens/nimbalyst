@@ -346,7 +346,6 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
 
   // Full tree (all docs + first-class folders) — used for path-collision checks
   // and auto-expand, independent of the active filter.
-  const currentProjectId = session.scope.indexConfig.teamProjectId;
   const tree = useMemo(
     () => {
       if (!pageTree) return buildCollabTreeAdaptive(sharedDocuments, sharedFolders, typeTreeInput);
@@ -354,10 +353,9 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         resolver: typeResolver,
         typePlacements,
         itemPlacements,
-        currentProjectId,
       }) ?? [];
     },
-    [currentProjectId, itemPlacements, pageTree, pageTreeBuilder, sharedDocuments, sharedFolders, typePlacements, typeResolver, typeTreeInput]
+    [itemPlacements, pageTree, pageTreeBuilder, sharedDocuments, sharedFolders, typePlacements, typeResolver, typeTreeInput]
   );
 
   // Placed subtypes shown inside their base type (see `attachTypeNodes`).
@@ -403,12 +401,12 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       // Favorites and Updated are document filters; placed types only show in All.
       if (effectiveTreeFilter !== 'all') {
         return pageTree
-          ? pageTreeBuilder?.buildCollabPageTree(visibleDocuments, { currentProjectId }) ?? []
+          ? pageTreeBuilder?.buildCollabPageTree(visibleDocuments) ?? []
           : pruneEmptyFolders(buildCollabTreeAdaptive(visibleDocuments, sharedFolders));
       }
       return pageTree ? tree : buildCollabTreeAdaptive(visibleDocuments, sharedFolders, typeTreeInput);
     },
-    [visibleDocuments, sharedFolders, effectiveTreeFilter, typeTreeInput, pageTree, pageTreeBuilder, tree, currentProjectId]
+    [visibleDocuments, sharedFolders, effectiveTreeFilter, typeTreeInput, pageTree, pageTreeBuilder, tree]
   );
   const trimmedSearchQuery = searchQuery.trim();
   const hasActiveSearch = trimmedSearchQuery.length > 0;

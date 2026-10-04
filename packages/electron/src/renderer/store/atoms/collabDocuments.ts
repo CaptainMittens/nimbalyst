@@ -62,6 +62,9 @@ export {
   workspaceHasTeamAtom,
   getSharedDocumentsForScopeKey,
   getSharedFoldersForScopeKey,
+  findOtherProjectDocument,
+  getLinkableSharedDocumentsForScopeKey,
+  linkableSharedDocumentsAtom,
 } from '@nimbalyst/collab-client/docs';
 
 /**

@@ -71,7 +71,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
       refreshItemPlacements: vi.fn(async () => null),
       registerDocument: vi.fn(async () => true),
       moveDocument: vi.fn(),
-      getTeamState: vi.fn(() => ({ members: [] })),
+      getTeamState: vi.fn(() => ({ members: [], metadata: { teamProjectId: 'project-primary' } })),
       updateDocumentTitle: vi.fn(async () => undefined),
       refreshFolders: vi.fn(async () => []),
       setTypePlacement: vi.fn(),
@@ -106,6 +106,8 @@ describe('ElectronCollabDocumentsDataSource', () => {
       typePlacements: [expect.objectContaining({ typeId: 'module', parentFolderId: 'folder-1', parentKind: 'page' })],
       itemPlacements: [expect.objectContaining({ itemId: 'item-1', parentId: 'doc-1', parentKind: 'page', sortOrder: 2 })],
       pageTree: true,
+      // The session splits other projects off; a null-project row is the primary's.
+      primaryProjectId: 'project-primary',
     });
     config.onDocumentChanged?.({
       documentId: 'doc-2',
@@ -173,6 +175,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
         getTypePlacements: vi.fn(() => null),
         getItemPlacements: vi.fn(() => null),
         isPageTree: vi.fn(() => true),
+        getTeamState: vi.fn(() => null),
         setItemPlacement: vi.fn(),
         removeItemPlacement: vi.fn(),
         destroy: vi.fn(),
@@ -229,6 +232,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
         getTypePlacements: vi.fn(() => null),
         getItemPlacements: vi.fn(() => null),
         isPageTree: vi.fn(() => true),
+        getTeamState: vi.fn(() => null),
         // A server that sends the author its own page writes says so.
         echoesAuthorWrites: vi.fn(() => true),
         moveDocument: vi.fn(),
@@ -328,6 +332,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
         getTypePlacements: vi.fn(() => null),
         getItemPlacements: vi.fn(() => null),
         isPageTree: vi.fn(() => true),
+        getTeamState: vi.fn(() => null),
         moveDocument: vi.fn(),
         removeDocument: vi.fn(),
         removeFolder: vi.fn(),

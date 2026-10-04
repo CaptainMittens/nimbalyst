@@ -24,6 +24,8 @@ const hostMocks = vi.hoisted(() => ({
   /** Team scope resolution for the outer CollabMode's real lifecycle. */
   resolveScope: null as null | (() => Promise<CollabScope>),
 }));
+/** What a link can open: the current project's pages, then other projects'. */
+const linkable = vi.hoisted(() => ({ documents: [] as any[] }));
 const PERSONAL_SCOPE: CollabScope = {
   scopeKey: 'personal:/workspace',
   orgId: 'local',
@@ -71,6 +73,8 @@ vi.mock('../../../store/atoms/collabDocuments', async () => {
     pendingCollabDocumentAtom: atom(null),
     sharedDocumentsAtom: atom([]),
     sharedFoldersAtom: atom([]),
+    linkableSharedDocumentsAtom: atom(() => linkable.documents),
+    getLinkableSharedDocumentsForScopeKey: () => linkable.documents,
   };
 });
 const personalSession = vi.hoisted(() => ({
@@ -203,9 +207,62 @@ describe('CollabMode pinned tab persistence', () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
     delete (window as any).electronAPI;
+    linkable.documents = [];
+    // CollabMode clears a pending deep link through the mocked runtime store.
+    const { getDefaultStore } = await import('jotai');
+    const { pendingCollabDocumentAtom } = await import('../../../store/atoms/collabDocuments');
+    getDefaultStore().set(pendingCollabDocumentAtom as any, null);
+  });
+
+  // Another project's page is not in the window's lists, but a link to it
+  // still opens with its title and in its own editor.
+  it("opens a link or deep link to another project's page with its metadata", async () => {
+    persistenceMocks.load.mockResolvedValue([]);
+    linkable.documents = [{
+      documentId: 'their-diagram',
+      teamProjectId: 'project-b',
+      title: 'Their diagram',
+      documentType: 'excalidraw',
+      editorId: 'builtin.excalidraw',
+      createdBy: 'u',
+      createdAt: 1,
+      updatedAt: 1,
+    }, {
+      documentId: 'their-mockup',
+      teamProjectId: 'project-b',
+      title: 'Their mockup',
+      documentType: 'mockup',
+      createdBy: 'u',
+      createdAt: 1,
+      updatedAt: 1,
+    }];
+    render(
+      <TabsProvider workspacePath="/workspace" disablePersistence>
+        <CollabModeInner workspacePath="/workspace" teamScope={SCOPE} personalScope={PERSONAL_SCOPE} isActive onFileOpen={() => {}} />
+        <TabProbe />
+      </TabsProvider>,
+    );
+    await waitFor(() => expect(hostMocks.adapter).not.toBeNull());
+
+    act(() => {
+      hostMocks.adapter!({ kind: 'document', scope: SCOPE, documentId: 'their-diagram', teamProjectId: 'project-b' }, 'sidebar');
+    });
+    await waitFor(() => expect(openerMocks.open).toHaveBeenCalledWith(expect.objectContaining({
+      documentId: 'their-diagram', title: 'Their diagram', documentType: 'excalidraw', editorId: 'builtin.excalidraw',
+    })));
+
+    openerMocks.open.mockClear();
+    const { getDefaultStore } = await import('jotai');
+    const { pendingCollabDocumentAtom } = await import('../../../store/atoms/collabDocuments');
+    act(() => {
+      getDefaultStore().set(pendingCollabDocumentAtom as any, { scopeKey: SCOPE.scopeKey, orgId: SCOPE.orgId, documentId: 'their-mockup' });
+    });
+    await waitFor(() => expect(openerMocks.open).toHaveBeenCalledWith(expect.objectContaining({
+      documentId: 'their-mockup', title: 'Their mockup', documentType: 'mockup',
+    })));
   });
 
   it('restores persisted pin state and tab order, then writes both back', async () => {
