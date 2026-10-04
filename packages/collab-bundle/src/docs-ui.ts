@@ -15,6 +15,17 @@ export {
 } from '@nimbalyst/runtime/sync/syncClientInfo';
 
 /**
+ * Page history: the dialog, its revisions client and the restore path. Loaded
+ * when someone opens a page's history; the diff it draws is in `./editor`.
+ */
+export const loadPageHistory = () => import('@nimbalyst/collab-client/docs-ui/history');
+export type {
+  CollabHistoryController,
+  CollabHistoryDialogProps,
+  CollabHistoryDiffProps,
+} from '@nimbalyst/collab-client/docs-ui/history';
+
+/**
  * Set type: the sequence, its child moves, the type page's register step and
  * the picker dialog. Loaded when someone picks Set type, so the eager docs-ui
  * graph does not carry it.

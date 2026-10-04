@@ -44,5 +44,6 @@ function entryFields(e: EncryptedDocIndexEntry): Omit<DocIndexEntry, 'title'> {
     parentKind: e.parentKind ?? 'page',
     sortOrder: e.sortOrder ?? null,
     trashedAt: e.trashedAt ?? null,
+    ...(e.hasContent === false ? { hasContent: false } : {}),
   };
 }

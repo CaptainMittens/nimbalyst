@@ -11,6 +11,8 @@ export interface CollabPageTreeInput {
     resolver?: CollabTypeTreeResolver;
     typePlacements?: SharedTypePlacement[];
     itemPlacements?: SharedItemPlacement[];
+    /** The scope's team project: another project's Home is left out unless something sits under it. */
+    currentProjectId?: string | null;
 }
 /** Spacing for a re-spaced sibling group. */
 export declare const RENUMBER_STEP = 1024;

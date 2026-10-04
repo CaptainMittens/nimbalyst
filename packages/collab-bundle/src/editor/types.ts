@@ -242,6 +242,14 @@ export interface CollabEditorHandle {
   /** True until local document writes have server acknowledgement. */
   hasPendingWrites?(): boolean;
   getMarkdown(): string;
+  /**
+   * Replace the whole body with `markdown` as one collaborative edit, the way
+   * restoring a page history version does on the desktop. Throws when the
+   * editor is not ready or the document is read-only.
+   */
+  replaceMarkdown?(markdown: string): void;
+  /** Largest server sequence this client has seen; a revision's `basisSequence`. */
+  getBasisSequence?(): number;
   getState(): CollabEditorState;
   getPresence(): CollabEditorPresence;
   /** Announce departure/backgrounding or rejoin for host-managed lifecycles. */

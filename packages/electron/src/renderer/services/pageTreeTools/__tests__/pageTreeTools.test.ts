@@ -127,6 +127,14 @@ describe('page tree agent tools', () => {
     expect(byId['type:module']).toMatchObject({ link: `${base}/page/type/module`, viewLink: `${base}/view/type/module` });
   });
 
+  it('lists only the current project\'s Home, and another project\'s while it holds a page', async () => {
+    const session = tree();
+    session.documents.push(page('home:proj1', 'Home'), page('home:proj2', 'Home'), page('home:proj3', 'Home'), page('kept', 'Kept', 'home:proj3'));
+    const result = await listPagesTool(envFor({ team: session }), { section: 'team' });
+    const nodeIds = (result as unknown as { nodes: Array<{ nodeId: string }> }).nodes.map((node) => node.nodeId);
+    expect(nodeIds.filter((id) => id.startsWith('document:home:'))).toEqual(['document:home:proj1', 'document:home:proj3']);
+  });
+
   it('creates a page under a typed page named by issue key, as an item parent', async () => {
     const env = envFor({ team: tree() });
     const result = await createPageTool(env, { section: 'team', title: 'Design notes', parentFolderId: 'MOD-2', initialContent: '# Hi' });

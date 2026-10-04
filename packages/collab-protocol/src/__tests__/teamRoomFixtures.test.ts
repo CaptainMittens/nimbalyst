@@ -43,7 +43,7 @@ const pageUnderItem = {
   documentId: 'page-2', encryptedTitle: 'Notes', titleIv: '', documentType: 'markdown', metadataVersion: 2,
   fileExtension: '.md', editorId: 'com.nimbalyst.markdown', createdBy: 'member-1', createdAt: 1790000000000,
   updatedAt: 1790000002000, projectId: 'project-1', lastWriterUserId: 'member-1', parentFolderId: 'NIM-42',
-  parentKind: 'item', sortOrder: 2048, trashedAt: null,
+  parentKind: 'item', sortOrder: 2048, trashedAt: null, hasContent: true,
 } satisfies Exhaustive<EncryptedDocIndexEntry>;
 
 const pageTreeTeam = {
@@ -56,7 +56,8 @@ const pageTreeTeam = {
     documentId: 'page-1', encryptedTitle: 'Specs', titleIv: '', documentType: 'markdown',
     createdBy: 'member-1', createdAt: 1790000000000, updatedAt: 1790000000000,
     projectId: 'project-1', lastWriterUserId: null, parentFolderId: null, parentKind: 'page', sortOrder: null,
-    trashedAt: null,
+    // A converted folder: its body was never edited, so the tree shows a folder.
+    trashedAt: null, hasContent: false,
   }, pageUnderItem],
   // The older-client projection: the page has a child placement.
   folders: [{

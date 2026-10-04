@@ -128,6 +128,15 @@ describe('in-memory collaborative editor harness', () => {
       status: 'not-required',
       reason: 'in-memory',
     });
+
+    // Page history restore: the whole body is replaced through the live
+    // editor, so the collaborative document (what peers see) holds it too.
+    await act(async () => handle.replaceMarkdown!('# Restored version\n\nRESTORED-MARKER'));
+    await settle();
+    expect(editable?.textContent).not.toContain('PREPOPULATED-MARKER');
+    expect(MarkdownCollabContentAdapter.exportToFile(yDocument)).toContain('RESTORED-MARKER');
+    handle.setReadOnly(true);
+    expect(() => handle.replaceMarkdown!('# Not allowed')).toThrow('read-only');
   });
 
   it('records browser decision votes in the shared document using the team member identity', async () => {

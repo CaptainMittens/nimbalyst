@@ -24,7 +24,8 @@
         "parentFolderId": null,
         "parentKind": "page",
         "sortOrder": null,
-        "trashedAt": null
+        "trashedAt": null,
+        "hasContent": false
       },
       {
         "documentId": "page-2",
@@ -42,7 +43,8 @@
         "parentFolderId": "NIM-42",
         "parentKind": "item",
         "sortOrder": 2048,
-        "trashedAt": null
+        "trashedAt": null,
+        "hasContent": true
       }
     ],
     "folders": [

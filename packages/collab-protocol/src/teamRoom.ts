@@ -575,6 +575,11 @@ export interface EncryptedDocIndexEntry {
   sortOrder?: number | null;
   /** Millisecond epoch when moved to Trash; null/undefined means active. */
   trashedAt?: number | null;
+  /**
+   * False until the body is first edited (a converted folder or a new page).
+   * Once true it stays true. Absent from older servers = true.
+   */
+  hasContent?: boolean;
 }
 
 /**

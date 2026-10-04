@@ -8,3 +8,10 @@
  */
 export declare const HOME_PAGE_ID_PREFIX = "home:";
 export declare function isHomePageId(documentId: string): boolean;
+/**
+ * Whether a Home belongs to a team project other than `currentProjectId`.
+ * Every member receives the org-wide index, so every project's Home arrives;
+ * the tree shows another project's only while something sits under it. False
+ * for the Personal Home and when the current project is unknown.
+ */
+export declare function isForeignHomePageId(documentId: string, currentProjectId: string | null | undefined): boolean;

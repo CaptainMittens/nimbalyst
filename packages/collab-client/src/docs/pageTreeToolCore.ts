@@ -107,6 +107,7 @@ async function readTree(env: PageTreeToolEnv, section: PageTreeSection): Promise
     resolver,
     typePlacements: env.typePlacements(session),
     itemPlacements: session.getItemPlacements(),
+    currentProjectId: session.scope.indexConfig?.teamProjectId ?? null,
   });
   const nodes = new Map<string, CollabTreeNode>();
   const parents = new Map<string, CollabTreeNode | null>();

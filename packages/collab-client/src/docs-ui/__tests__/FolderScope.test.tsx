@@ -322,6 +322,31 @@ describe('one page tree', () => {
     expect(document.querySelector<HTMLButtonElement>('.collab-page-set-type')!.disabled).toBe(true);
   });
 
+  it('shows a page that holds pages but was never written as a folder', async () => {
+    const { container } = renderDocsUIWithHost(<CollabSidebar />, [], {
+      documents: [
+        { ...page('specs', 'Specs', null), hasContent: false },
+        page('spec-a', 'Spec A', 'specs'),
+        // An older server sends no flag: still a page.
+        page('arch', 'Architecture', null),
+        page('overview', 'Overview', 'arch'),
+        // Empty but holding nothing: a page.
+        { ...page('draft', 'Draft', null), hasContent: false },
+      ],
+      itemPlacements: [],
+    });
+    const row = (name: string) => [...container.querySelectorAll<HTMLElement>('.file-tree-file')]
+      .find((element) => element.querySelector('.file-tree-name')?.textContent === name);
+    const icon = (name: string) => row(name)?.querySelector('.file-tree-icon [data-icon]')?.getAttribute('data-icon');
+    await found(() => row('Spec A'));
+    const pageIcon = icon('Draft');
+    expect(pageIcon).not.toMatch(/^folder/);
+    expect([icon('Architecture'), icon('Spec A')]).toEqual([pageIcon, pageIcon]);
+    expect(icon('Specs')).toBe('folder_open');
+    fireEvent.click(row('Specs')!.querySelector('.file-tree-chevron')!);
+    expect(icon('Specs')).toBe('folder');
+  });
+
   it('opens the collapsed pages above the open typed page', async () => {
     const typeResolver = {
       typeName: (typeId: string) => (typeId === 'module' ? 'Modules' : null),

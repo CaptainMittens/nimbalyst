@@ -71,6 +71,7 @@ function mapDocument(document: TeamDocIndexEntry): SharedDocument {
     parentKind: document.parentKind ?? 'page',
     sortOrder: document.sortOrder ?? null,
     trashedAt: document.trashedAt,
+    hasContent: document.hasContent,
     decryptFailed: document.decryptFailed,
   };
 }

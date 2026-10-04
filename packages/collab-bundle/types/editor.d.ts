@@ -255,6 +255,10 @@ export interface CollabEditorHandle {
   hasPendingWrites?(): boolean;
   getDocument(): Doc;
   getMarkdown(): string;
+  /** Replace the whole body as one collaborative edit (page history restore). Throws when not writable. */
+  replaceMarkdown?(markdown: string): void;
+  /** Largest server sequence this client has seen; a revision's `basisSequence`. */
+  getBasisSequence?(): number;
   getState(): CollabEditorState;
   getPresence(): CollabEditorPresence;
   /** Announce departure/backgrounding or rejoin for host-managed lifecycles. */
@@ -390,6 +394,25 @@ export type ConsoleLinkOpener = (href: string) => boolean;
  * Personal page): routed in its own tab. Returns the uninstall.
  */
 export declare function setConsoleLinkOpener(next: ConsoleLinkOpener): () => void;
+
+/** Page history: where the diff is in its change groups. */
+export interface DiffNavigationState {
+  currentIndex: number;
+  totalGroups: number;
+  canGoPrevious: boolean;
+  canGoNext: boolean;
+}
+/** Page history: a rich red/green diff of two markdown strings, read-only. */
+export declare function DiffPreviewEditor(props: {
+  oldMarkdown: string;
+  newMarkdown: string;
+  onNavigationStateChange?: (state: DiffNavigationState) => void;
+  onNavigatePrevious?: () => void;
+  onNavigateNext?: () => void;
+  theme?: string;
+}): ReactNode;
+/** Page history: a stored markdown page revision as markdown. */
+export declare function previewMarkdownRevisionSnapshot(bytes: Uint8Array): string;
 
 interface CollabLexicalProviderOptions {
   deferInitialSync?: boolean;

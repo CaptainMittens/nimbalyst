@@ -16,6 +16,7 @@
     "parentFolderId": "NIM-42",
     "parentKind": "item",
     "sortOrder": 2048,
-    "trashedAt": null
+    "trashedAt": null,
+    "hasContent": true
   }
 }

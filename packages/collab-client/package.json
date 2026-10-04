@@ -37,6 +37,10 @@
       "types": "./src/docs-ui/primitives/EditorHeaderBar.tsx",
       "default": "./src/docs-ui/primitives/EditorHeaderBar.tsx"
     },
+    "./docs-ui/history": {
+      "types": "./src/docs-ui/history/index.ts",
+      "default": "./src/docs-ui/history/index.ts"
+    },
     "./feedback": {
       "types": "./src/feedback/index.ts",
       "default": "./src/feedback/index.ts"

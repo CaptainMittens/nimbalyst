@@ -825,6 +825,26 @@ describe('collabTree', () => {
         });
       });
 
+      // Every project's Home is in the org-wide index; a tree shows its own
+      // project's Home, and another project's only while something sits under it.
+      it('hides another project\'s Home unless a page or typed page sits under it', () => {
+        const documents = [
+          doc('home:team-1', 'Home', null),
+          doc('home:team-2', 'Home', null),
+          doc('home:team-3', 'Home', null),
+          doc('home:team-4', 'Home', null),
+          doc('home:personal', 'Home', null),
+          doc('kept', 'Kept', 'home:team-3'),
+        ];
+        const input = { resolver, itemPlacements: [{ ...itemPlacement('mod-sync', 'home:team-4'), sortOrder: T }] };
+        const tree = buildCollabPageTree(documents, { ...input, currentProjectId: 'team-1' });
+        expect(ids(tree).filter((id) => id.startsWith('document:home:')).sort())
+          .toEqual(['document:home:personal', 'document:home:team-1', 'document:home:team-3', 'document:home:team-4']);
+        expect(ids(childrenOf(find(tree, 'document:home:team-3')!))).toEqual(['document:kept']);
+        // No current project known: nothing is hidden.
+        expect(ids(buildCollabPageTree(documents, input)).filter((id) => id.startsWith('document:home:'))).toHaveLength(5);
+      });
+
       it('renumbers an unreordered group on its first reorder and moves pages with an order', () => {
         const tree = buildCollabPageTree(
           [makeDocument('arch', 'Architecture'), makeDocument('zeta', 'Zeta')],

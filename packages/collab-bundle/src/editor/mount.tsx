@@ -2,12 +2,14 @@ import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import {
   $getRoot,
+  $setSelection,
   CONTROLLED_TEXT_INSERTION_COMMAND,
   FORMAT_TEXT_COMMAND,
   type LexicalEditor,
 } from 'lexical';
 
 import type { EditorConfig } from '@nimbalyst/runtime/editor/EditorConfig';
+import { $convertFromEnhancedMarkdownString, getEditorTransformers } from '@nimbalyst/runtime/editor/markdown';
 import '@nimbalyst/runtime/editor/extensions/registerBuiltinExtensions';
 import '@nimbalyst/runtime/editor/index.css';
 import { registerBrowserReferenceNodes } from './referenceNodes';
@@ -185,6 +187,18 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
   const handle: CollabEditorHandle = {
     getDocument: () => sharedDocument,
     getMarkdown: () => getMarkdown(),
+    replaceMarkdown(markdown) {
+      if (destroyed || !lexicalEditor) throw new Error('The document is not open');
+      if (session.getState().readOnly) throw new Error('This document is read-only');
+      lexicalEditor.update(() => {
+        // Clearing a selected node without moving selection first makes
+        // Lexical throw "selection has been lost".
+        $setSelection(null);
+        $getRoot().clear();
+        $convertFromEnhancedMarkdownString(markdown, getEditorTransformers());
+      }, { discrete: true });
+    },
+    getBasisSequence: () => session.networkProvider?.getLastSeq() ?? 0,
     getState: () => session.getState(),
     hasPendingWrites: () => session.networkProvider?.hasPendingWrites() ?? false,
     getPresence: () => presenceSurface.getPresence(),

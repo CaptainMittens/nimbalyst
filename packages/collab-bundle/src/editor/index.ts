@@ -11,6 +11,8 @@ export const loadPlacedViewEmbed = () => import('@nimbalyst/collab-client/tracke
 export { setPageMarkAuthorProvider, type PageMarkAuthor } from '@nimbalyst/runtime/editor/plugins/PageMarkPlugin/pageMarkHost';
 export { setCitationHost, type CitationHost } from '@nimbalyst/runtime/editor/plugins/CitationPlugin/citationHost';
 export { setConsoleLinkOpener, type ConsoleLinkOpener } from './consoleLinkOpener';
+// Page history: the markdown diff and revision projection. The dialog is in `./docs-ui`.
+export { DiffPreviewEditor, previewMarkdownRevisionSnapshot, type DiffNavigationState } from './pageHistory';
 
 // Extension-provided editors. The Lexical mount above is one tenant of the
 // collaborative session; this is the generic one, for editors an extension

@@ -28,6 +28,11 @@ export interface SharedDocument {
     sortOrder?: number | null;
     /** Millisecond epoch when moved to recoverable Trash. */
     trashedAt?: number | null;
+    /**
+     * False until the body is first edited; such a page with children shows as a
+     * folder in the tree. Absent (older servers) = true.
+     */
+    hasContent?: boolean;
     /** True when the encrypted title could not be decrypted. */
     decryptFailed?: boolean;
 }

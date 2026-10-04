@@ -249,6 +249,8 @@ export interface DocIndexEntry {
   sortOrder?: number | null;
   /** Millisecond epoch when moved to Trash; null/undefined means active. */
   trashedAt?: number | null;
+  /** False until the body is first edited; absent from older servers (= true). */
+  hasContent?: boolean;
   /**
    * True when the server returned a doc index entry whose encrypted title
    * could not be decrypted with the current org key. Preserved in the list

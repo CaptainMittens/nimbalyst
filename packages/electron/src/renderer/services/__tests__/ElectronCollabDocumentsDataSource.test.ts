@@ -35,6 +35,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
         parentFolderId: 'item-9',
         parentKind: 'item',
         sortOrder: 1024,
+        hasContent: false,
       }]),
       getFolders: vi.fn(() => [{
         folderId: 'folder-1',
@@ -98,6 +99,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
         parentFolderId: 'item-9',
         parentKind: 'item',
         sortOrder: 1024,
+        hasContent: false,
       })],
       containers: [expect.objectContaining({ folderId: 'folder-1', name: 'Folder' })],
       // Rows from an older server carry no parent kind: a page.

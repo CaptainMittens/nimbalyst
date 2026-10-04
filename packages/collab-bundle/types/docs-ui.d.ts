@@ -9,6 +9,12 @@ export * from './internal/collab-client/src/docs/index';
 export * from './internal/collab-client/src/docs-ui/index';
 export { appendSyncClientParams, getSyncClientInfo, setSyncClientInfo, type SyncClientInfo, } from './internal/runtime/src/sync/syncClientInfo';
 /**
+ * Page history: the dialog, its revisions client and the restore path. Loaded
+ * when someone opens a page's history; the diff it draws is in `./editor`.
+ */
+export declare const loadPageHistory: () => Promise<typeof import("./internal/collab-client/src/docs-ui/history/index")>;
+export type { CollabHistoryController, CollabHistoryDialogProps, CollabHistoryDiffProps, } from './internal/collab-client/src/docs-ui/history/index';
+/**
  * Set type: the sequence, its child moves, the type page's register step and
  * the picker dialog. Loaded when someone picks Set type, so the eager docs-ui
  * graph does not carry it.

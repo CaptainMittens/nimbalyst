@@ -90,11 +90,15 @@ describe('TeamSyncProvider pre-cutover content', () => {
     const receive = (document: Record<string, unknown>) =>
       (provider as any).handleMessage({ data: JSON.stringify({ type: 'docIndexBroadcast', document }) });
 
-    await receive({ ...row, documentId: 'known', encryptedTitle: 'Specs', titleIv: '' });
+    // A converted folder: never written.
+    await receive({ ...row, documentId: 'known', encryptedTitle: 'Specs', titleIv: '', hasContent: false });
     // A body edit on an older server re-broadcast the at-rest ciphertext.
     await receive({ ...row, documentId: 'known', encryptedTitle: 'Q2lwaGVy', titleIv: 'aXY=', updatedAt: 9 });
     await receive({ ...row, documentId: 'unknown', encryptedTitle: 'Q2lwaGVy', titleIv: 'aXY=' });
 
+    expect(onDocumentChanged.mock.calls[0][0].hasContent).toBe(false);
+    // An older server sends no flag: a page, never a folder.
+    expect(onDocumentChanged.mock.calls[1][0].hasContent).toBeUndefined();
     expect(onDocumentChanged.mock.calls[1][0]).toMatchObject({ documentId: 'known', title: 'Specs', updatedAt: 9 });
     expect(onDocumentChanged.mock.calls[1][0].decryptFailed).toBeUndefined();
     expect(onDocumentChanged.mock.calls[2][0]).toMatchObject({ documentId: 'unknown', title: '', decryptFailed: true });
