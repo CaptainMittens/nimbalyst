@@ -9,14 +9,12 @@
 import type { JSX } from 'react';
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ClickableLinkPlugin } from '@lexical/react/LexicalClickableLinkPlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import { HashtagPlugin } from '@lexical/react/LexicalHashtagPlugin';
 import { PlainTextPlugin } from '@lexical/react/LexicalPlainTextPlugin';
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin';
 import { TablePlugin } from '@lexical/react/LexicalTablePlugin';
-import { useLexicalEditable } from '@lexical/react/useLexicalEditable';
 import { CAN_USE_DOM } from '@lexical/utils';
 import type { LexicalEditor } from 'lexical';
 
@@ -109,7 +107,6 @@ export default function Editor({ config = DEFAULT_EDITOR_CONFIG }: EditorProps):
     forceFloatingToolbar = false,
   } = config;
 
-  const isEditable = useLexicalEditable();
   const placeholder = isRichText ? 'Enter some rich text...' : 'Enter some plain text...';
 
   const [floatingAnchorElem, setFloatingAnchorElem] = useState<HTMLDivElement | null>(null);
@@ -315,7 +312,11 @@ export default function Editor({ config = DEFAULT_EDITOR_CONFIG }: EditorProps):
               hasHorizontalScroll={false}
             />
             <TableCellResizer />
-            <ClickableLinkPlugin disabled={isEditable} />
+            {/* Owns link clicks too: a click opens the link, editing lives in its hover card. */}
+            <FloatingLinkEditorPlugin
+              isLinkEditMode={isLinkEditMode}
+              setIsLinkEditMode={setIsLinkEditMode}
+            />
             <KanbanBoardPlugin />
 
             {/*
@@ -333,14 +334,7 @@ export default function Editor({ config = DEFAULT_EDITOR_CONFIG }: EditorProps):
             </AnchorProvider>
 
             {floatingAnchorElem && (
-              <>
-                <FloatingLinkEditorPlugin
-                  anchorElem={floatingAnchorElem}
-                  isLinkEditMode={isLinkEditMode}
-                  setIsLinkEditMode={setIsLinkEditMode}
-                />
-                <TableCellActionMenuPlugin anchorElem={floatingAnchorElem} cellMerge={true} />
-              </>
+              <TableCellActionMenuPlugin anchorElem={floatingAnchorElem} cellMerge={true} />
             )}
             {floatingAnchorElem && (forceFloatingToolbar || !isSmallWidthViewport) && (
               <>
