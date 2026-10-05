@@ -1,8 +1,8 @@
 /**
  * The type map: every label a project uses, grouped into domain zones, with
  * one line per pair of types that links, a pill per relationship, and an
- * inspector beside it. Pan by dragging, zoom with the wheel (around the
- * cursor), the buttons or `+`/`-`/`0`, arrows to pan, Escape to deselect.
+ * inspector beside it. Pan by dragging or scrolling, zoom with a pinch (around the
+ * cursor), Ctrl+wheel, the buttons or `+`/`-`/`0`, arrows to pan, Escape to deselect.
  * Zooming in shows every relationship, then each type's properties.
  *
  * The host builds the model (`buildTypeMap`) and navigates; the layout is
@@ -173,7 +173,7 @@ export function OntologyTypeMap({ model, onOpenLabel, onOpenPage, onOpenUnlabele
           ref={viewport.canvasRef}
           tabIndex={0}
           role="application"
-          aria-label="Type map. Drag to pan, scroll to zoom."
+          aria-label="Type map. Drag or scroll to pan. Pinch or Control-scroll to zoom."
           onClick={() => { if (!viewport.dragged()) setSelection(null); }}
         >
           <svg className="type-map-svg" ref={viewport.svgRef} data-zoom="fit">
@@ -193,7 +193,7 @@ export function OntologyTypeMap({ model, onOpenLabel, onOpenPage, onOpenUnlabele
             </g>
           </svg>
           <TypeMapMinimap layout={layout} types={typeById} zoneTone={zoneTone} viewRef={viewport.miniViewRef} onJump={viewport.centerOn} onShown={viewport.refresh} />
-          <div className="type-map-hint">{`Scroll to zoom · drag to pan · ${inspector ? 'click a type or a relationship' : 'click a type to open it'} · zoom in for properties`}</div>
+          <div className="type-map-hint">{`Drag or scroll to pan · pinch or Ctrl+scroll to zoom · ${inspector ? 'click a type or a relationship' : 'click a type to open it'} · zoom in for properties`}</div>
         </div>
         {inspector && <TypeMapInspector
           model={model}

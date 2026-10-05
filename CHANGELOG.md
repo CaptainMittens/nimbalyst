@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- Changes to existing functionality go here -->
+- Pages: pan the type map with two fingers and pinch to zoom.
 - Removed vendor branding from embedded tracker tables in Pages.
 
 ### Fixed
