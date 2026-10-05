@@ -328,7 +328,11 @@ describe('AI input menu handoff', () => {
           agents: [{ id: 'agents:example', name: 'Example', provider: 'agents' }],
         } }),
         invoke: vi.fn().mockResolvedValue({
-          actions: actions ? [{ id: 'review', label: 'Review', body: 'Review the changes' }] : [],
+          actions: actions ? [
+            { id: 'review', label: 'Review', body: 'Review the changes' },
+            { id: 'tests', label: 'Write tests', body: 'Write regression tests' },
+            { id: 'types', label: 'Write types', body: 'Write type definitions' },
+          ] : [],
           fileExists: actions,
         }),
       },
@@ -409,5 +413,28 @@ describe('AI input menu handoff', () => {
     await act(async () => {});
     expect(document.activeElement).toBe(input);
     expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('selects actions by word typeahead, ignoring modifiers and resetting across menu handoffs', async () => {
+    const { onInsert } = setup();
+    await screen.findByRole('button', { name: 'Example' });
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+    const panel = await screen.findByTestId('action-prompts-dropdown-panel');
+    await screen.findByTestId('action-prompt-item-types');
+    fireEvent.keyDown(panel, { key: 'x', ctrlKey: true });
+    fireEvent.keyDown(panel, { key: 'x', isComposing: true });
+    for (const key of 'ty') fireEvent.keyDown(panel, { key });
+    expect(onInsert).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.keyDown(panel, { key: 'Enter' }); });
+    expect(onInsert).toHaveBeenLastCalledWith('Write type definitions');
+
+    fireEvent.click(screen.getByTestId('action-prompts-dropdown'));
+    fireEvent.keyDown(screen.getByTestId('action-prompts-dropdown-panel'), { key: 'r' });
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+    fireEvent.keyDown(document.activeElement!, { key: 'Tab' });
+    const reopenedPanel = screen.getByTestId('action-prompts-dropdown-panel');
+    for (const key of 'te') fireEvent.keyDown(reopenedPanel, { key });
+    await act(async () => { fireEvent.keyDown(reopenedPanel, { key: 'Enter' }); });
+    expect(onInsert).toHaveBeenLastCalledWith('Write regression tests');
   });
 });
