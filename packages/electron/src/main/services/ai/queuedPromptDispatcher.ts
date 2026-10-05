@@ -210,6 +210,8 @@ interface TryClaimAndDispatchNextQueuedPromptOptions {
   resolveLiveWindow?: (workspacePath: string) => Electron.BrowserWindow | null;
   targetWindow: Electron.BrowserWindow | null;
   workspacePath: string;
+  /** True when a draining turn holds the guard but its live query can take this prompt. */
+  canBypassChainGuard?: () => boolean;
 }
 
 export async function tryClaimAndDispatchNextQueuedPrompt(
@@ -231,6 +233,7 @@ export async function tryClaimAndDispatchNextQueuedPrompt(
     resolveLiveWindow,
     targetWindow,
     workspacePath,
+    canBypassChainGuard,
   } = options;
 
   const liveWindow =
@@ -243,7 +246,7 @@ export async function tryClaimAndDispatchNextQueuedPrompt(
     return false;
   }
 
-  if (processingSet.has(sessionId)) {
+  if (processingSet.has(sessionId) && !canBypassChainGuard?.()) {
     logInfo(`[AIService] ${source}: session ${sessionId} already processing a queued prompt, skipping`);
     return false;
   }

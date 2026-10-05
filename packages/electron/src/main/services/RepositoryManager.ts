@@ -21,6 +21,7 @@ import { createPGLiteWorkspaceRepository } from './PGLiteWorkspaceRepository';
 import { createPGLiteDocumentsRepository } from './PGLiteDocumentsRepository';
 import { createPGLiteQueuedPromptsStore, type QueuedPromptsStore } from './PGLiteQueuedPromptsStore';
 import { createPGLiteSessionWakeupsStore, type SessionWakeupsStore } from './PGLiteSessionWakeupsStore';
+import { createPendingSubmissionStore, type PendingSubmissionStore } from './ai/pendingSubmissions';
 import { runAgentMessagesBackfill } from './AgentMessagesBackfill';
 import { healArchivedWorkstreamChildren } from './healArchivedWorkstreamChildren';
 import { runWhenFirstUsable } from './startupMaintenanceGate';
@@ -45,6 +46,7 @@ class RepositoryManager {
   private documentsRepository: DocumentsRepository | null = null;
   private queuedPromptsStore: QueuedPromptsStore | null = null;
   private sessionWakeupsStore: SessionWakeupsStore | null = null;
+  private pendingSubmissionStore: PendingSubmissionStore | null = null;
   private initialized = false;
   private authListenerUnsubscribe: (() => void) | null = null;
   private wasAuthenticated = false; // Track auth state to detect transitions
@@ -132,6 +134,14 @@ class RepositoryManager {
             await database.initialize();
           }
         }
+      );
+
+      // Composer prompts between send and turn end. Writes through the base
+      // store so the record is never published to mobile sync.
+      const baseSessionStore = this.baseSessionStore!;
+      this.pendingSubmissionStore = createPendingSubmissionStore(
+        dbAdapter,
+        (sessionId, update) => baseSessionStore.updateMetadata(sessionId, update),
       );
 
       // Create session wakeups store (scheduled re-invocations)
@@ -322,6 +332,13 @@ class RepositoryManager {
     return this.baseAgentMessagesStore;
   }
 
+  getPendingSubmissionStore(): PendingSubmissionStore {
+    if (!this.pendingSubmissionStore) {
+      throw new Error('RepositoryManager not initialized. Call initialize() first.');
+    }
+    return this.pendingSubmissionStore;
+  }
+
   /**
    * Get the queued prompts store instance.
    * Used for atomic prompt claiming and queue management.
@@ -459,6 +476,10 @@ export function getBaseAgentMessagesStore(): AgentMessagesStore {
 
 export function getQueuedPromptsStore(): QueuedPromptsStore {
   return repositoryManager.getQueuedPromptsStore();
+}
+
+export function getPendingSubmissionStore(): PendingSubmissionStore {
+  return repositoryManager.getPendingSubmissionStore();
 }
 
 export function getSessionWakeupsStore(): SessionWakeupsStore {

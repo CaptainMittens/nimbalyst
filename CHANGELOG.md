@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 <!-- Bug fixes go here -->
+- A prompt sent while a session was still starting up is no longer lost if the app quits first; on the next launch it is back in the composer.
+- Claude Code: a message sent after the agent answered, while a background command it started is still running, now runs right away instead of waiting for the command to finish.
 - Agents can archive or update a tracker item that is missing a required field the update does not change, instead of the update being rejected.
 - Pages: a page deleted by an agent, or a page with child pages deleted from the sidebar, now goes to Trash instead of being deleted permanently.
 - Team trackers: sync no longer fails to start in a workspace where one item had built up a backlog of unsent edits too large to load, and an edit that would make a shared item too large to sync is refused with an error instead of appearing saved.

@@ -137,6 +137,7 @@ import { diffPeekSizeAtom, setDiffPeekSizeAtom } from '../../store/atoms/diffPee
 import { registerSessionWorkspace, loadInitialSessionFileState } from '../../store/listeners/fileStateListeners';
 import { sessionFileEditsAtom } from '../../store/atoms/sessionFiles';
 import { SESSION_PHASE_COLUMNS, setSessionPhaseAtom, type SessionPhase } from '../../store/atoms/sessionKanban';
+import { mergeRestoredPromptIntoDraft } from '../../../shared/restoredDraft';
 
 /**
  * Detect a metadata value that's the artifact of `{...stringValue, ...}` -
@@ -371,6 +372,8 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
 }, ref) => {
   const posthog = usePostHog();
   const inputRef = useRef<AIInputRef>(null);
+  // Guards the await between Enter and the composer clearing against a second send.
+  const submittingRef = useRef(false);
   const transcriptPanelRef = useRef<{ scrollToMessage: (index: number) => void; scrollToTop: () => void }>(null);
   const loadToolCallDiffs = useCallback(
     (toolCallItemId: string, toolCallTimestamp?: number): Promise<ToolCallDiffLoadResult> =>
@@ -1277,6 +1280,30 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
     const sessionRegistry = store.get(sessionRegistryAtom);
     message = expandSessionMentions(message, sessionRegistry);
 
+    // Record the prompt durably before the composer and its persisted draft
+    // are cleared. Setup before the provider logs the prompt can stall, and a
+    // quit during that stall used to lose the text. If this write fails, the
+    // draft is left alone and nothing is sent.
+    if (submittingRef.current) {
+      blocked('duplicate_prompt');
+      return;
+    }
+    submittingRef.current = true;
+    let submissionId: string;
+    try {
+      ({ submissionId } = await window.electronAPI.invoke('ai:recordPendingSubmission', sessionId, message) as { submissionId: string });
+    } catch (error) {
+      console.error('[SessionTranscript] Failed to record submission:', error);
+      updateSessionStore({
+        sessionId,
+        updates: { messages: [...messages, makeOptimisticError('Could not save your message, so it was not sent. Your text is still in the composer.')] },
+      });
+      blocked('submission_record_failed');
+      return;
+    } finally {
+      submittingRef.current = false;
+    }
+
     setLastSubmitAt(Date.now());
     setDraftInput('');
     setDraftAttachments([]);
@@ -1307,6 +1334,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
         attachments: attachments.length > 0 ? attachments : undefined,
         mode: overrideMode,
         inputType: 'user' as const,
+        submissionId,
       };
 
       await window.electronAPI.invoke('ai:sendMessage', message, docContext, sessionId, workspacePath);
@@ -1329,6 +1357,12 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
           messages: [...messages, userMessage, errorMessage],
         },
       });
+      // Give the text back so a failed send can be retried, keeping anything
+      // typed since. The `prev` form reads the live draft, not the one above.
+      setDraftInput(prev => mergeRestoredPromptIntoDraft(prev, message));
+      if (attachments.length > 0) {
+        setDraftAttachments(prev => (prev && prev.length > 0 ? prev : attachments));
+      }
       setIsProcessing(false);
     }
   }, [sessionId, sessionData, isLoading, getEffectiveDocumentContext, aiMode, workspacePath, setDraftInput, setDraftAttachments, setLastSubmitAt, resetHistory, updateSessionStore, handleQueue, setIsProcessing, messages, sessionHasMessages, startedCliSessionId, mode, onClearSession, onClearAgentSession, clearAIInputHistory, provider, recordClaudeActivity]);

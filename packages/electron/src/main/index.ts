@@ -195,7 +195,8 @@ import {
 } from './protocols/collabAssetProtocol';
 import { SessionNamingService } from './services/SessionNamingService';
 import { SessionWakeupScheduler } from './services/SessionWakeupScheduler';
-import { getSessionWakeupsStore, repositoryManager } from './services/RepositoryManager';
+import { getPendingSubmissionStore, getSessionWakeupsStore, repositoryManager } from './services/RepositoryManager';
+import { recoverPendingSubmissionsOnBoot } from './services/ai/pendingSubmissions';
 import { ExtensionDevService } from './services/ExtensionDevService';
 import { MetaAgentService } from './services/MetaAgentService';
 import { notificationService } from './services/NotificationService';
@@ -2880,6 +2881,8 @@ app.whenReady().then(async () => {
     } catch (sweepErr) {
       logger.main.error('[Main] Boot sweep failed:', sweepErr);
     }
+
+    await recoverPendingSubmissionsOnBoot(getPendingSubmissionStore());
 
     // Check for pending restart continuations and queue continuation prompts
     await checkForRestartContinuation(aiService);
