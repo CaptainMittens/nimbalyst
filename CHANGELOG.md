@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 <!-- Bug fixes go here -->
 - Effort and Actions menus now support typeahead like the model picker.
+- Pages with citations no longer fail to load with an editor update loop.
 
 ### Removed
 <!-- Removed features go here -->

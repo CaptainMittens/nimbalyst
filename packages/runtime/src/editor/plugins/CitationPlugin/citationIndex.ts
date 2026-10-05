@@ -4,7 +4,7 @@
  * when a citation node is created, destroyed or moved.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { $getRoot, $isElementNode, type LexicalEditor, type LexicalNode, type NodeKey } from 'lexical';
 
 import { $isCitationNode, CitationNode } from './CitationNodeCore';
@@ -95,8 +95,14 @@ function subscribe(editor: LexicalEditor, listener: () => void): () => void {
 }
 
 export function useCitationIndex(editor: LexicalEditor | null): CitationIndex {
+  // Re-subscribing the last listener recomputes the snapshot. Keep this stable
+  // so that snapshot-driven renders cannot start a subscribe/render loop.
+  const subscribeToEditor = useCallback(
+    (listener: () => void) => (editor ? subscribe(editor, listener) : () => {}),
+    [editor],
+  );
   return useSyncExternalStore(
-    (listener) => (editor ? subscribe(editor, listener) : () => {}),
+    subscribeToEditor,
     () => (editor ? storeFor(editor).index : EMPTY),
   );
 }
