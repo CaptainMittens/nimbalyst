@@ -591,6 +591,7 @@ export function TrackerGridSurface({
             rowClass={ROW_CLASS_KEY}
             sorting={gridSorting}
             theme="compact"
+            hideAttribution
             resize
             range
             readonly={!onItemsUpdate}
