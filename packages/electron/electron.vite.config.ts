@@ -10,6 +10,7 @@ import {
   findRequireCacheSelfEviction,
   stripRequireCacheSelfEviction,
 } from '../../scripts/main-bundle-require-policy.mjs'
+import dedupeWatcherAddsPlugin from './scripts/dedupeWatcherAddsPlugin.mjs'
 
 // Plugin to optimize Shiki language imports
 const optimizeShikiPlugin = () => {
@@ -394,6 +395,7 @@ const config = {
       '__CLAUDE_AGENT_SDK_VERSION__': JSON.stringify(claudeAgentSdkVersion),
     },
     plugins: [
+      dedupeWatcherAddsPlugin(),
       // Process polyfill for packaged builds - handles dependencies that access process globals.
       // Must be first so transforms run before other plugins.
       // Only polyfills in production builds; dev mode works fine with Vite's built-in handling.
