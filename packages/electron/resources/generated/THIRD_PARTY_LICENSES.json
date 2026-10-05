@@ -6400,9 +6400,9 @@
       "noticeFiles": []
     },
     {
-      "id": "better-sqlite3@13.0.1",
+      "id": "better-sqlite3@13.0.3",
       "name": "better-sqlite3",
-      "version": "13.0.1",
+      "version": "13.0.3",
       "rawLicense": "MIT",
       "selectedLicense": "MIT",
       "reviewRequired": false,
@@ -6414,7 +6414,7 @@
       "installPaths": [
         "node_modules/better-sqlite3"
       ],
-      "resolved": "https://registry.npmjs.org/better-sqlite3/-/better-sqlite3-13.0.1.tgz",
+      "resolved": "https://registry.npmjs.org/better-sqlite3/-/better-sqlite3-13.0.3.tgz",
       "licenseFiles": [
         {
           "fileName": "LICENSE",

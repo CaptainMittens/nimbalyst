@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated the desktop runtime with security fixes while preserving PDF export margins.
 - Fixed security issues in YAML metadata, extension archives, MCP connections and development tooling.
 - Fixed formatting loss on other clients when undoing collaborative text deletion.
+- Fixed a crash when stopping an active local database worker.
 
 ### Removed
 <!-- Removed features go here -->

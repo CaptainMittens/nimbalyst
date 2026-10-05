@@ -9378,7 +9378,7 @@ Copyright (C) 2013-present  SheetJS
    limitations under the License.
 
 ================================================================================
-better-sqlite3@13.0.1
+better-sqlite3@13.0.3
 Selected license: MIT
 Declared license: MIT
 Install paths: node_modules/better-sqlite3
