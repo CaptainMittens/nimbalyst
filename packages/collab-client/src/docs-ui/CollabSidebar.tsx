@@ -49,6 +49,7 @@ import {
 } from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from './primitives/useFloatingMenu';
 import { CollabSectionMenu, CollabTreeEmptyState } from './CollabSectionRoot';
+import { CollabSidebarTrashEntry } from './CollabTrash';
 import { revealKeysFor } from './collabTreeReveal';
 
 const CYCLE_WARNING = 'A page cannot move inside one of its own child pages.';
@@ -68,6 +69,7 @@ type PageTreeBuilder = Awaited<ReturnType<typeof loadPageTreeBuilder>>;
 const CollabPageMenuHead = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageMenuHead })));
 const CollabPageDeleteEntry = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageDeleteEntry })));
 const CollabItemMenu = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabItemMenu })));
+const CollabPageHistoryEntry = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageHistoryEntry })));
 const CollabMenuButton = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabMenuButton })));
 const CollabPageMoveDialog = React.lazy(() => import('./CollabPageMoveDialog'));
 import { CollabSearchInput } from './primitives/CollabSearchInput';
@@ -155,6 +157,12 @@ export interface CollabSidebarProps {
    */
   typeResolver?: CollabTypeTreeResolver;
   /**
+   * Archive a typed page (the tracker's own archive, which keeps its comments
+   * and sessions). Typed pages never go to Pages Trash; hosts without tracker
+   * writes omit it and the row offers no Archive.
+   */
+  onArchiveItem?: (itemId: string) => Promise<void>;
+  /**
    * Shows this tree as one section of a stacked sidebar ("Team", "Personal"):
    * a compact section header replaces the scope summary header.
    */
@@ -197,6 +205,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   onSelectFolder,
   registerCreateMenu,
   typeResolver,
+  onArchiveItem,
   sectionTitle,
   collapsed = false,
   onToggleCollapsed,
@@ -1908,6 +1917,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           return <CollabTreeActiveContext.Provider value={activeRow}><div>{renderTree(filteredTree)}</div></CollabTreeActiveContext.Provider>;
         })()}
       </div>
+      {scopeAvailable && <CollabSidebarTrashEntry sectionLabel={sectionTitle ?? (personal ? 'Personal' : 'Team')} />}
 
       {/* Header overflow menu: unread-bubble visibility + mark all read */}
       {readReceiptsAvailable && overflowMenu.isOpen && (
@@ -2077,6 +2087,15 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               <MaterialSymbol icon="playlist_remove" size={18} />
               <span>Remove from tree</span>
             </button>
+            {/* The type page's prose has a history of its own. */}
+            <CollabPageHistoryEntry
+              onClick={() => {
+                if (contextMenu.node.type !== 'type') return;
+                const { typeId } = contextMenu.node;
+                setContextMenu(null);
+                host.openArtifact({ kind: 'type', scope, typeId }, 'history');
+              }}
+            />
             </>
           ) : contextMenu.node.type === 'item' ? (
             <CollabItemMenu
@@ -2098,6 +2117,24 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 if (contextMenu.node.type === 'item') moveItemTo(contextMenu.node.itemId, { underType: true });
                 setContextMenu(null);
               }}
+              onHistory={() => {
+                if (contextMenu.node.type !== 'item') return;
+                const { itemId } = contextMenu.node;
+                setContextMenu(null);
+                host.openArtifact({ kind: 'tracker', scope, trackerId: itemId }, 'history');
+              }}
+              onArchive={onArchiveItem ? () => {
+                if (contextMenu.node.type !== 'item') return;
+                const { itemId, name } = contextMenu.node;
+                setContextMenu(null);
+                void confirmDestructive(
+                  'Archive page',
+                  `Archive "${name}"? It leaves Pages and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
+                  'Archive',
+                ).then((accepted) => {
+                  if (accepted) onArchiveItem(itemId).catch(reportTypePlacementError);
+                });
+              } : undefined}
             />
           ) : (
             <>

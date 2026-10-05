@@ -45,17 +45,50 @@ export function canRestoreCollabRevisions(controller: CollabHistoryController | 
   return !!controller?.exportSnapshot && !!controller.applySnapshot && !controller.isReadOnly?.();
 }
 
+const READ_ONLY_MESSAGE = 'You do not have permission to edit this document.';
+const UNSYNCED_MESSAGE = 'This document still has unsynced local changes. Wait for "Connected" before restoring.';
+
+/** Checkpoints taken before giving up on a page that keeps changing under the restore. */
+const RESTORE_CHECKPOINT_ATTEMPTS = 2;
+
+function toBytes(snapshot: Uint8Array | ArrayLike<number>): Uint8Array {
+  return snapshot instanceof Uint8Array ? snapshot : new Uint8Array(snapshot);
+}
+
+function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) return false;
+  for (let i = 0; i < a.byteLength; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return typeof (value as PromiseLike<T> | null)?.then === 'function';
+}
+
+/** Read the live head. Synchronous when the host's export is, so nothing can land between it and a replace. */
+function readHead(exportSnapshot: NonNullable<CollabHistoryController['exportSnapshot']>): Uint8Array | Promise<Uint8Array> {
+  const raw = exportSnapshot();
+  return isPromiseLike(raw) ? Promise.resolve(raw).then(toBytes) : toBytes(raw);
+}
+
 /**
  * Restore `revisionId` as the current version.
  *
- * 1. Record a `restore-pre` checkpoint of the current head, so the restore can
+ * 1. Load the selected revision, before anything is checkpointed.
+ * 2. Record a `restore-pre` checkpoint of the current head, so the restore can
  *    itself be undone from history.
- * 2. Load the selected revision and apply it through the live editor.
- * 3. Record a `restore-head` revision pointing back at the source.
+ * 3. Re-read the head and replace it through the live editor only if it is
+ *    still exactly what was checkpointed, with no await between that check and
+ *    the replace. A collaborator's edit that landed while the checkpoint was
+ *    posting would otherwise be erased and be absent from `restore-pre` too;
+ *    instead the head is checkpointed once more, and if it changes again the
+ *    restore is refused and the live page left alone.
+ * 4. Record a `restore-head` revision pointing back at the source.
  *
  * Returns false without writing anything when the document is not synced and
  * the controller cannot wait for it (an older controller); throws when it
- * waited and the document still has unsynced writes.
+ * waited and the document still has unsynced writes, when write access or the
+ * connection is lost mid-restore, or when the page keeps changing.
  */
 export async function restoreCollabRevision(
   controller: CollabHistoryController,
@@ -63,26 +96,41 @@ export async function restoreCollabRevision(
 ): Promise<boolean> {
   const { exportSnapshot, applySnapshot } = controller;
   if (!exportSnapshot || !applySnapshot) return false;
-  if (controller.isReadOnly?.()) throw new Error('You do not have permission to edit this document.');
+  if (controller.isReadOnly?.()) throw new Error(READ_ONLY_MESSAGE);
 
   if (!isCollabRestoreSafe(controller.getStatus())) {
     if (!controller.waitForPendingWrites) return false;
     const settled = await controller.waitForPendingWrites(5_000);
     if (!settled || !isCollabRestoreSafe(controller.getStatus())) {
-      throw new Error('This document still has unsynced local changes. Wait for "Connected" before restoring.');
+      throw new Error(UNSYNCED_MESSAGE);
     }
   }
 
-  const current = await exportSnapshot();
-  await controller.client.createRevision({
-    revisionKind: 'restore-pre',
-    editorType: controller.editorType,
-    contentFormat: controller.contentFormat,
-    plaintext: current instanceof Uint8Array ? current : new Uint8Array(current),
-    basisSequence: controller.getBasisSequence(),
-  });
-
   const loaded = await controller.client.loadRevision(revisionId);
+
+  let checkpointed = await readHead(exportSnapshot);
+  for (let attempt = 1; ; attempt++) {
+    await controller.client.createRevision({
+      revisionKind: 'restore-pre',
+      editorType: controller.editorType,
+      contentFormat: controller.contentFormat,
+      plaintext: checkpointed,
+      basisSequence: controller.getBasisSequence(),
+    });
+
+    const headOrPending = readHead(exportSnapshot);
+    // An async export opens a gap here; the host's own exports are synchronous.
+    const head = isPromiseLike(headOrPending) ? await headOrPending : headOrPending;
+    // Everything from here to `applySnapshot` runs without yielding.
+    if (controller.isReadOnly?.()) throw new Error(READ_ONLY_MESSAGE);
+    if (!isCollabRestoreSafe(controller.getStatus())) throw new Error(UNSYNCED_MESSAGE);
+    if (sameBytes(head, checkpointed)) break;
+    if (attempt >= RESTORE_CHECKPOINT_ATTEMPTS) {
+      throw new Error('This document changed while restoring, so the restore was cancelled. Nothing was lost; try again.');
+    }
+    checkpointed = head;
+  }
+
   await applySnapshot(loaded.plaintext);
 
   await controller.client.createRevision({

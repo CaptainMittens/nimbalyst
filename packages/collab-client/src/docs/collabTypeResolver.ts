@@ -16,6 +16,12 @@ export interface CollabTypeResolverRecord {
   title: string;
   issueNumber?: number | null;
   archived?: boolean;
+  /**
+   * Exists only on this machine: never shared, like a frontmatter projection
+   * of a local file. Kept out of the team section even when its type is a
+   * team type, because it is not team data.
+   */
+  localOnly?: boolean;
 }
 
 /** Which Pages section a resolver serves. */
@@ -43,6 +49,7 @@ export function buildCollabTypeResolver(
   const itemById = new Map<string, { itemId: string; title: string; typeId: string }>();
   for (const record of records) {
     if (record.archived) continue;
+    if (lane === 'team' && record.localOnly) continue;
     const list = itemsByType.get(record.typeId) ?? [];
     list.push({ itemId: record.id, title: record.title, sortKey: record.issueNumber ?? record.title });
     itemsByType.set(record.typeId, list);

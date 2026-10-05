@@ -17,6 +17,8 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { PERSONAL_TYPED_PAGE_HISTORY_PREFIX, personalPageHistoryKey } from '../../../shared/personalPageUri';
+import { restorePersonalTypedPageBody } from '../../services/personalAgentEdit';
 
 const DEFAULT_SAVE_DELAY_MS = 800;
 /** Delays before each retry of a failed save; one initial attempt plus these. */
@@ -31,9 +33,19 @@ type UpdateBodyResult = { version: number } | { conflict: true; version: number;
 
 const PERSONAL_PAGE_HISTORY_PREFIX = 'personal-doc://';
 
-/** Open editors' "save now and wait" hooks, by workspace and page. */
-const openPageFlushers = new Map<string, () => Promise<void>>();
-const flusherKey = (workspacePath: string, documentId: string) => `${workspacePath}\x1f${documentId}`;
+const RESTORE_CONFLICT = 'This page changed while restoring. Its current text was kept; try again.';
+
+/** What an open editor for a page lets other surfaces do through its save queue. */
+interface OpenPage {
+  /** Save now and wait. */
+  flush: () => Promise<void>;
+  /** Replace the body with a history snapshot and show it in the editor. */
+  restore: (markdown: string) => Promise<void>;
+}
+
+/** Open editors, by workspace and page. */
+const openPages = new Map<string, OpenPage>();
+const openPageKey = (workspacePath: string, documentId: string) => `${workspacePath}\x1f${documentId}`;
 
 /**
  * Save whatever an open editor for this page has not stored yet, and wait for
@@ -41,28 +53,38 @@ const flusherKey = (workspacePath: string, documentId: string) => `${workspacePa
  * could not be saved. Callers that copy the stored body run this first.
  */
 export function flushPersonalPageBody(workspacePath: string, documentId: string): Promise<void> {
-  return openPageFlushers.get(flusherKey(workspacePath, documentId))?.() ?? Promise.resolve();
+  return openPages.get(openPageKey(workspacePath, documentId))?.flush() ?? Promise.resolve();
 }
 
 /** The local-history key main records personal page snapshots under. */
-export function personalPageHistoryKey(documentId: string): string {
-  return `${PERSONAL_PAGE_HISTORY_PREFIX}${documentId}`;
-}
+export { personalPageHistoryKey };
 
 /**
- * Restore a local-history snapshot into a personal page body. Returns false
- * for any other history key so the caller can take its own path. Saves at the
- * body's current version and rejects, without overwriting, if the body moved on
- * between the read and the write.
+ * Restore a local-history snapshot into a personal page or Personal typed
+ * page body. Returns false for any other history key so the caller can take
+ * its own path. A page open in an editor restores through that editor's save
+ * queue, so the editor shows the restored text and its next save is made
+ * against the restored version. Otherwise the body is saved at its current
+ * version. Either way it rejects, without overwriting, if the body moved on
+ * since it was read.
  */
 export async function restoreHistoryToPersonalPage(
   historyKey: string,
   content: string,
   workspacePath: string | undefined,
 ): Promise<boolean> {
+  if (historyKey.startsWith(PERSONAL_TYPED_PAGE_HISTORY_PREFIX)) {
+    await restorePersonalTypedPageBody(historyKey.slice(PERSONAL_TYPED_PAGE_HISTORY_PREFIX.length), content);
+    return true;
+  }
   if (!historyKey.startsWith(PERSONAL_PAGE_HISTORY_PREFIX)) return false;
   const documentId = historyKey.slice(PERSONAL_PAGE_HISTORY_PREFIX.length);
   if (!workspacePath) throw new Error('No workspace is open to restore this page into.');
+  const open = openPages.get(openPageKey(workspacePath, documentId));
+  if (open) {
+    await open.restore(content);
+    return true;
+  }
   const current = (await window.electronAPI.invoke(
     'personal-pages:get-body',
     workspacePath,
@@ -76,7 +98,7 @@ export async function restoreHistoryToPersonalPage(
     current?.version,
   )) as UpdateBodyResult;
   if ('conflict' in result && result.conflict) {
-    throw new Error('This page changed while restoring. Try again.');
+    throw new Error(RESTORE_CONFLICT);
   }
   return true;
 }
@@ -119,6 +141,8 @@ export function usePersonalPageBody({
   const loadedRef = useRef(false);
   const mountedRef = useRef(true);
   const failedAttemptsRef = useRef(0);
+  /** Counts refused saves, so a restore can tell the body moved on under it. */
+  const conflictsRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -177,6 +201,7 @@ export function usePersonalPageBody({
         failedAttemptsRef.current = 0;
         versionRef.current = result.version;
         if ('conflict' in result && result.conflict) {
+          conflictsRef.current += 1;
           // The stored copy wins the body. The refused draft, or anything typed
           // over it since, goes to history so it can be restored.
           const draft = pendingRef.current ?? markdown;
@@ -243,13 +268,61 @@ export function usePersonalPageBody({
     }
   }, [flush]);
 
+  // A history restore saves through this queue and remounts the editor on the
+  // restored text, so the editor never shows the replaced body and its next
+  // save is made against the restored version.
+  const restore = useCallback(async (markdown: string) => {
+    if (!loadedRef.current) throw new Error('This page is still loading. Try again.');
+    // An unsaved draft is stored first: it becomes a body, and so a history
+    // entry, instead of being dropped by the restore.
+    const conflictsBefore = conflictsRef.current;
+    await saveNow();
+    if (conflictsRef.current !== conflictsBefore) throw new Error(RESTORE_CONFLICT);
+
+    // Hold the queue: an edit typed meanwhile waits behind the restore.
+    inFlightRef.current = true;
+    const write = window.electronAPI.invoke(
+      'personal-pages:update-body',
+      workspacePath,
+      documentId,
+      markdown,
+      versionRef.current,
+    ) as Promise<UpdateBodyResult>;
+    inFlightSaveRef.current = write.then(() => undefined, () => undefined);
+    let result: UpdateBodyResult;
+    try {
+      result = await write;
+    } finally {
+      inFlightRef.current = false;
+    }
+    versionRef.current = result.version;
+    // Text typed while the restore saved was typed over the replaced body.
+    if (pendingRef.current !== null) {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = null;
+      keepInHistory(pendingRef.current, 'Unsaved edits kept before a restore');
+      pendingRef.current = null;
+    }
+    // On a conflict the editor reloads on the stored copy; it has no draft left to lose.
+    const storedCopy = 'conflict' in result && result.conflict ? result.content : null;
+    if (mountedRef.current) {
+      setInitialContent(storedCopy ?? markdown);
+      setEditorEpoch((epoch) => epoch + 1);
+    }
+    if (storedCopy !== null) {
+      conflictsRef.current += 1;
+      throw new Error(RESTORE_CONFLICT);
+    }
+  }, [workspacePath, documentId, saveNow, keepInHistory]);
+
   useEffect(() => {
-    const key = flusherKey(workspacePath, documentId);
-    openPageFlushers.set(key, saveNow);
+    const key = openPageKey(workspacePath, documentId);
+    const page: OpenPage = { flush: saveNow, restore };
+    openPages.set(key, page);
     return () => {
-      if (openPageFlushers.get(key) === saveNow) openPageFlushers.delete(key);
+      if (openPages.get(key) === page) openPages.delete(key);
     };
-  }, [workspacePath, documentId, saveNow]);
+  }, [workspacePath, documentId, saveNow, restore]);
 
   // Closing the tab must not drop the last edit. A save still in flight takes
   // any pending text with it when it settles (see flush).

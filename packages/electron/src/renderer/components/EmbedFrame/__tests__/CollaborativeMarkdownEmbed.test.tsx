@@ -27,6 +27,9 @@ vi.mock('@nimbalyst/runtime/collab-lexical', () => ({
   },
 }));
 
+// Page history is opt-in and covered in HistoryDialog/__tests__/useCollabBodyHistory.
+vi.mock('../../HistoryDialog/useCollabBodyHistory', () => ({ useCollabBodyHistory: () => undefined }));
+
 vi.mock('../../UnifiedDiffHeader', () => ({
   LexicalDiffHeaderAdapter: ({ editor, filePath }: { editor?: unknown; filePath: string }) => (
     editor ? <div data-testid="diff-header" data-file-path={filePath} /> : null

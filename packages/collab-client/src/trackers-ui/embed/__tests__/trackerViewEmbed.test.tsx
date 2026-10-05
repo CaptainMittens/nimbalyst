@@ -123,6 +123,18 @@ describe('TrackerViewEmbed', () => {
     );
     await screen.findByText('2 items');
   });
+
+  it('leaves an archived typed page out of the view, as the tree and Tracker mode do', async () => {
+    const source = fakeSource();
+    render(
+      <TrackersUIProvider dataSource={source} identity={null}>
+        <TrackerViewEmbed view={createTypePageView('ev-target')} variant="page" typeIds={['ev-target', 'ev-cap']} />
+      </TrackersUIProvider>,
+    );
+    await screen.findByText('2 items');
+    act(() => source.emit({ type: 'items-upserted', items: [trackerRecordToItem({ ...braze('Braze'), archived: true })] }));
+    await screen.findByText('1 item');
+  });
 });
 
 describe('TrackerViewEmbed editing', () => {

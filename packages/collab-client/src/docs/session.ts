@@ -27,6 +27,7 @@ import {
   projectPagesAsFolders,
   TYPE_PAGE_DOCUMENT_PREFIX,
 } from './collabTree';
+import { pagesTrashedWith, restoredParentGone } from './collabTrash';
 import type { CollabDocsCommand, CollabDocsDataChange, CollabDocsDataSource } from './dataSource';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 
@@ -43,6 +44,8 @@ export type CollabTreeFilter = 'all' | 'favorites' | 'updated';
  * failed. The optimistic local state is never the answer.
  */
 export type CollabPlacementWriteResult = { ok: true } | { ok: false; error: string };
+/** A restore from Trash: how many pages came back, and whether the page had to go to the section root. */
+export type CollabRestoreResult = CollabPlacementWriteResult & { restored: number; movedToRoot: boolean };
 export type CollabDocsUIStatus = 'disconnected' | 'connecting' | 'syncing' | 'connected' | 'error';
 
 export interface CollabDiscoveryState {
@@ -717,7 +720,12 @@ export interface CollabDocsSession {
   removeDocument(documentId: string, options?: { purge?: true }): Promise<CollabPlacementWriteResult>;
   /** Recoverable: the page leaves the tree for Trash, keeping its body and place. */
   trashDocument(documentId: string): Promise<CollabPlacementWriteResult>;
-  restoreDocument(documentId: string): void;
+  /**
+   * Back from Trash with the pages that went with it, each in its place. A
+   * page whose parent is gone (deleted for good, or still in Trash) goes to
+   * the section root instead, and the result says so.
+   */
+  restoreDocument(documentId: string): Promise<CollabRestoreResult>;
   emptyTrash(): number;
   moveDocument(documentId: string, parentFolderId: string | null, options?: CollabPageMoveOptions): Promise<CollabPlacementWriteResult>;
   createFolder(name: string, parentFolderId: string | null): Promise<string>;
@@ -952,25 +960,36 @@ class CollabDocsSessionImpl implements CollabDocsSession {
     return this.send({ type: 'trash-document', documentId, trashedAt });
   }
 
-  restoreDocument(documentId: string): void {
-    if (this.otherProjectRefusal([documentId])) return;
+  restoreDocument(documentId: string): Promise<CollabRestoreResult> {
+    const refusal = this.otherProjectRefusal([documentId]);
+    if (refusal) return Promise.resolve({ ok: false, error: refusal, restored: 0, movedToRoot: false });
     const now = Date.now();
     const all = this.getAllDocuments();
-    const trashedAt = all.find((document) => document.documentId === documentId)?.trashedAt;
-    // The pages trashed with it (below it, same trash time) come back with it.
-    const restored = [documentId];
-    for (let index = 0; trashedAt != null && index < restored.length; index++) {
-      for (const document of all) {
-        if (document.parentFolderId === restored[index] && document.trashedAt === trashedAt
-          && !restored.includes(document.documentId)) restored.push(document.documentId);
-      }
-    }
+    const restored = pagesTrashedWith(all, documentId);
     const ids = new Set(restored);
-    store.set(documentsByScope(this.scope.scopeKey), (current) => current.map((document) =>
+    const toRoot = restoredParentGone(all, documentId, ids);
+    const before = new Map(all.filter((document) => ids.has(document.documentId))
+      .map((document) => [document.documentId, document.trashedAt ?? null]));
+    const target = documentsByScope(this.scope.scopeKey);
+    store.set(target, (current) => current.map((document) =>
       ids.has(document.documentId)
         ? { ...document, trashedAt: null, updatedAt: now }
         : document));
-    for (const id of restored) this.send({ type: 'restore-document', documentId: id });
+    const restores = restored.map((id) => this.send({ type: 'restore-document', documentId: id }));
+    return firstFailure(restores).then(async (outcome): Promise<CollabRestoreResult> => {
+      if (!outcome.ok) {
+        // Refused: the pages are still in Trash, unless something since moved them.
+        store.set(target, (current) => current.map((document) =>
+          before.has(document.documentId) && document.trashedAt == null && document.updatedAt === now
+            ? { ...document, trashedAt: before.get(document.documentId) }
+            : document));
+        return { ...outcome, restored: 0, movedToRoot: false };
+      }
+      // After the restore, so the store never moves a page that is still in Trash.
+      if (!toRoot) return { ok: true, restored: restored.length, movedToRoot: false };
+      const moved = await this.moveDocument(documentId, null);
+      return { ...moved, restored: restored.length, movedToRoot: moved.ok };
+    });
   }
 
   emptyTrash(): number {

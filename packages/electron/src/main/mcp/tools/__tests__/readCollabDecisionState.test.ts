@@ -59,6 +59,19 @@ it('leaves default source reads unchanged', async () => {
   expect(await handleReadCollabDoc({ filePath: 'collab://org:o:doc:d' })).toEqual({ content: [{ type: 'text', text: 'source' }], isError: false });
   expect(host.request.mock.calls[0][2]).not.toHaveProperty('includeDecisionState');
 });
+it('answers an empty page, or a reply without content, with an explicit status instead of no output', async () => {
+  host.request.mockResolvedValue({
+    status: 'received',
+    response: { success: true, content: ' \n', title: 'BigPictureWork', documentType: 'markdown' },
+  });
+  const empty = await handleReadCollabDoc({ filePath: 'collab://org:o:doc:d' });
+  expect(empty.isError).toBe(false);
+  expect(empty.content[0].text).toMatch(/^\(empty page\) "BigPictureWork" \(collab:\/\/org:o:doc:d, markdown\) is loaded/);
+
+  host.request.mockResolvedValue({ status: 'received', response: { success: true } });
+  const missing = await handleReadCollabDoc({ filePath: 'collab://org:o:doc:d' });
+  expect(missing).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('returned no content') }] });
+});
 it("reads another project's page, named by its link alone, through that project", async () => {
   host.request.mockResolvedValue({
     status: 'received',

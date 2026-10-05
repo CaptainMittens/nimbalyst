@@ -66,9 +66,10 @@ import {
 } from '@nimbalyst/runtime/plugins/TrackerPlugin/documentHeader/frontmatterUtils';
 import { globalRegistry } from '@nimbalyst/tracker-schema';
 import { database } from '../database/PGLiteDatabaseWorker';
-import { shouldExcludeDir, shouldExcludePath } from '../utils/fileFilters';
+import { isExcludedFromTrackerProjection, shouldExcludeDir, shouldExcludePath } from '../utils/fileFilters';
 import { isRendererUnsupportedImage, resolveImageExtension, sniffImageExtension } from '../utils/imageFormat';
 import { compressImage } from './ImageCompressor';
+import { recordTypedPageBodySnapshot } from './tracker/typedPageBodyHistory';
 import { getRegisteredExtensions } from '../extensions/RegisteredFileTypes';
 import { isPathInWorkspace, getRelativeWorkspacePath } from '../utils/workspaceDetection';
 import { syncTrackerItem, unsyncTrackerItem, isTrackerSyncActive } from './TrackerSyncManager';
@@ -1283,6 +1284,7 @@ export class ElectronDocumentService implements DocumentService {
       if (pathLower.includes('/agents/') || pathLower.includes('\\agents\\')) {
         continue;
       }
+      if (isExcludedFromTrackerProjection(metadata.path)) continue;
 
       const resolved = resolveFullDocumentFrontmatter(metadata.frontmatter);
       if (!resolved) continue;
@@ -1486,6 +1488,7 @@ export class ElectronDocumentService implements DocumentService {
     relativePath: string,
     expectedType?: string,
   ): Promise<TrackerItem | null> {
+    if (isExcludedFromTrackerProjection(relativePath)) return null;
     const fullPath = path.join(this.workspacePath, relativePath);
 
     let fileContent: string;
@@ -1526,11 +1529,13 @@ export class ElectronDocumentService implements DocumentService {
 
     const bodyMatch = fileContent.match(/^---\s*\n[\s\S]*?\n---\s*\n([\s\S]*)$/);
     const markdownBody = bodyMatch ? bodyMatch[1].trim() : '';
-    // A file that declares `trackerId` was already promoted (possibly on another
-    // member's machine, then committed): bind it to that id as a native row
-    // instead of minting a parallel `fm:` projection.
-    const canonicalId = declaredId || buildFullDocumentTrackerId(resolved.trackerType, relativePath);
-    const source = declaredId ? 'native' : 'frontmatter';
+    // A file whose `trackerId` names an item this workspace has returned above.
+    // Here the id names nothing we hold: a test fixture, a copied file, or a
+    // clone whose items have not synced down yet. Binding a native row to it
+    // let the reconnect drain create that id in the team tracker, so the file
+    // stays a local `fm:` projection until the item itself arrives.
+    const canonicalId = buildFullDocumentTrackerId(resolved.trackerType, relativePath);
+    const source = 'frontmatter';
 
     const data: Record<string, any> = { title };
     for (const [key, value] of Object.entries(resolved.trackerData)) {
@@ -1601,6 +1606,7 @@ export class ElectronDocumentService implements DocumentService {
     relativePath: string,
     frontmatter: Record<string, any>,
   ): Promise<void> {
+    if (isExcludedFromTrackerProjection(relativePath)) return;
     try {
       const resolved = resolveFullDocumentFrontmatter(frontmatter);
       if (!resolved) return; // not a tracker document -> nothing to do (no DB hit)
@@ -2378,6 +2384,7 @@ export class ElectronDocumentService implements DocumentService {
 
     if (updateResult.rows.length > 0) {
       const item = this.rowToTrackerItem(updateResult.rows[0]);
+      await recordTypedPageBodySnapshot(item.id, row.type, content);
       const changeEvent: TrackerItemChangeEvent = {
         added: [],
         updated: [item],
@@ -3173,6 +3180,9 @@ export class ElectronDocumentService implements DocumentService {
     // Only parse tracker items from markdown files
     const ext = path.extname(relativePath).toLowerCase();
     if (ext !== '.md' && ext !== '.markdown') {
+      return;
+    }
+    if (isExcludedFromTrackerProjection(relativePath)) {
       return;
     }
 

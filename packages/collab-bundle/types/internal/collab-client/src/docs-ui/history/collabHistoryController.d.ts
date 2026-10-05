@@ -40,13 +40,20 @@ export declare function canRestoreCollabRevisions(controller: CollabHistoryContr
 /**
  * Restore `revisionId` as the current version.
  *
- * 1. Record a `restore-pre` checkpoint of the current head, so the restore can
+ * 1. Load the selected revision, before anything is checkpointed.
+ * 2. Record a `restore-pre` checkpoint of the current head, so the restore can
  *    itself be undone from history.
- * 2. Load the selected revision and apply it through the live editor.
- * 3. Record a `restore-head` revision pointing back at the source.
+ * 3. Re-read the head and replace it through the live editor only if it is
+ *    still exactly what was checkpointed, with no await between that check and
+ *    the replace. A collaborator's edit that landed while the checkpoint was
+ *    posting would otherwise be erased and be absent from `restore-pre` too;
+ *    instead the head is checkpointed once more, and if it changes again the
+ *    restore is refused and the live page left alone.
+ * 4. Record a `restore-head` revision pointing back at the source.
  *
  * Returns false without writing anything when the document is not synced and
  * the controller cannot wait for it (an older controller); throws when it
- * waited and the document still has unsynced writes.
+ * waited and the document still has unsynced writes, when write access or the
+ * connection is lost mid-restore, or when the page keeps changing.
  */
 export declare function restoreCollabRevision(controller: CollabHistoryController, revisionId: string): Promise<boolean>;

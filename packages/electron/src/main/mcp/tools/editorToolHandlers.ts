@@ -455,6 +455,8 @@ async function readCollabDocLocally(
   const outcome = await requestFromRenderer<{
     success: boolean;
     content?: string;
+    title?: string;
+    documentType?: string;
     decisionState?: unknown;
     error?: string;
     code?: string;
@@ -482,15 +484,33 @@ async function readCollabDocLocally(
         : {}),
     };
   }
+  const { content, title, documentType } = outcome.response;
+  if (typeof content !== "string") {
+    return {
+      content: [{ type: "text", text: `Failed to read collab doc: the editor returned no content for ${targetFilePath}.` }],
+      isError: true,
+    };
+  }
   return {
     content: [
-      { type: "text", text: outcome.response.content ?? "" },
+      { type: "text", text: content.trim() ? content : emptyPageStatus(targetFilePath, title, documentType) },
       ...(args?.includeDecisionState === true && outcome.response.decisionState !== undefined
         ? [{ type: "text", text: `Read-only decision state (supplemental; do not write into document source). Agent recommendations are not human votes or quorum.\n${JSON.stringify(outcome.response.decisionState)}` }]
         : []),
     ],
     isError: false,
   };
+}
+
+/**
+ * An empty body read verbatim is an empty tool result, which the agent sees as
+ * "no output" and cannot tell from a failed read. Every failed read is an
+ * error above, so this text means the page was loaded and holds no text.
+ */
+function emptyPageStatus(uri: string, title?: string, documentType?: string): string {
+  const name = title ? `"${title}" (${[uri, documentType].filter(Boolean).join(", ")})` : uri;
+  const where = uri.startsWith("personal://") ? "is loaded" : "is loaded and in sync with the server";
+  return `(empty page) ${name} ${where}, and its body has no text.`;
 }
 
 /**

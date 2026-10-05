@@ -21,6 +21,11 @@ export type CollabPlacementWriteResult = {
     ok: false;
     error: string;
 };
+/** A restore from Trash: how many pages came back, and whether the page had to go to the section root. */
+export type CollabRestoreResult = CollabPlacementWriteResult & {
+    restored: number;
+    movedToRoot: boolean;
+};
 export type CollabDocsUIStatus = 'disconnected' | 'connecting' | 'syncing' | 'connected' | 'error';
 export interface CollabDiscoveryState {
     favorites?: string[];
@@ -203,7 +208,12 @@ export interface CollabDocsSession {
     }): Promise<CollabPlacementWriteResult>;
     /** Recoverable: the page leaves the tree for Trash, keeping its body and place. */
     trashDocument(documentId: string): Promise<CollabPlacementWriteResult>;
-    restoreDocument(documentId: string): void;
+    /**
+     * Back from Trash with the pages that went with it, each in its place. A
+     * page whose parent is gone (deleted for good, or still in Trash) goes to
+     * the section root instead, and the result says so.
+     */
+    restoreDocument(documentId: string): Promise<CollabRestoreResult>;
     emptyTrash(): number;
     moveDocument(documentId: string, parentFolderId: string | null, options?: CollabPageMoveOptions): Promise<CollabPlacementWriteResult>;
     createFolder(name: string, parentFolderId: string | null): Promise<string>;

@@ -31,6 +31,84 @@ import { PERSONAL_HOME_PAGE_ID } from '../personalPages/personalHomePage';
 const SCHEMA_DIR = path.resolve(__dirname, '..', '..', 'database', 'sqlite', 'schemas');
 const WS = '/ws/personal-pages';
 
+/** A permanent removal takes two calls: to Trash, then a purge of what is in Trash. */
+async function removeForGood(service: PersonalPagesService, folderId: string): Promise<void> {
+  await service.command(WS, { type: 'remove-folder', folderId });
+  await service.command(WS, { type: 'remove-folder', folderId, purge: true });
+}
+
+interface TestPagesDb {
+  query(sql: string, params?: unknown[]): Promise<{ rows: any[] }>;
+  runTransaction(statements: Array<{ sql: string; params?: unknown[] }>): Promise<void>;
+}
+
+/**
+ * RV-1: another window restores a page (or restores it and trashes it again)
+ * after a purge has read it in Trash and before the purge deletes. The purge
+ * must leave the page alone and report that nothing was purged.
+ */
+async function purgeLosesARaceWithARestore(base: TestPagesDb): Promise<void> {
+  const deps = { history: { createSnapshot: vi.fn(async () => undefined) }, notify: vi.fn() };
+  const other = new PersonalPagesService({ db: () => base, ...deps });
+  // Runs once, right before the purge's write reaches the database.
+  let interleave: (() => Promise<unknown>) | null = null;
+  const takeTurn = async () => {
+    const turn = interleave;
+    interleave = null;
+    await turn?.();
+  };
+  const purging = new PersonalPagesService({
+    db: () => ({
+      query: async (sql: string, params?: unknown[]) => {
+        if (/DELETE FROM personal_page_documents/.test(sql)) await takeTurn();
+        return base.query(sql, params);
+      },
+      runTransaction: async (statements: Array<{ sql: string; params?: unknown[] }>) => {
+        await takeTurn();
+        return base.runTransaction(statements);
+      },
+    }),
+    ...deps,
+  });
+  const page = (documentId: string, parentFolderId: string | null = null) =>
+    other.command(WS, { type: 'register-document', documentId, title: documentId, documentType: 'markdown', parentFolderId });
+  const trashedAt = async (documentId: string) =>
+    (await other.snapshot(WS)).items.find((item) => item.documentId === documentId)?.trashedAt;
+
+  await page('restored');
+  await other.command(WS, { type: 'trash-document', documentId: 'restored', trashedAt: 1_000 });
+  interleave = () => other.command(WS, { type: 'restore-document', documentId: 'restored' });
+  const restoredPurge = await purging.command(WS, { type: 'remove-document', documentId: 'restored', purge: true });
+  expect(await trashedAt('restored')).toBeNull();
+  expect(restoredPurge).toEqual({ ok: true, purged: 0 });
+
+  // Back in Trash by a later trashing: not the page the purge saw in Trash.
+  await page('retrashed');
+  await other.command(WS, { type: 'trash-document', documentId: 'retrashed', trashedAt: 1_000 });
+  interleave = async () => {
+    await other.command(WS, { type: 'restore-document', documentId: 'retrashed' });
+    await other.command(WS, { type: 'trash-document', documentId: 'retrashed', trashedAt: 2_000 });
+  };
+  const retrashedPurge = await purging.command(WS, { type: 'remove-document', documentId: 'retrashed', purge: true });
+  expect(await trashedAt('retrashed')).toBe(2_000);
+  expect(retrashedPurge).toEqual({ ok: true, purged: 0 });
+
+  await page('a');
+  await page('a-child', 'a');
+  await other.command(WS, { type: 'remove-folder', folderId: 'a' });
+  interleave = () => other.command(WS, { type: 'restore-document', documentId: 'a' });
+  const subtreePurge = await purging.command(WS, { type: 'remove-folder', folderId: 'a', purge: true });
+  expect(await trashedAt('a')).toBeNull();
+  expect(await trashedAt('a-child')).toEqual(expect.any(Number));
+  expect(subtreePurge).toEqual({ ok: true, purged: 0 });
+
+  // Uncontested, the same purges go through and say how many pages went.
+  expect(await purging.command(WS, { type: 'remove-document', documentId: 'retrashed', purge: true })).toEqual({ ok: true, purged: 1 });
+  await other.command(WS, { type: 'remove-folder', folderId: 'a' });
+  expect(await purging.command(WS, { type: 'remove-folder', folderId: 'a', purge: true })).toEqual({ ok: true, purged: 2 });
+  expect((await other.snapshot(WS)).items.map((item) => item.documentId).sort()).toEqual(['restored']);
+}
+
 describe('PersonalPagesService', () => {
   let tmp: string;
   let db: SQLiteDatabase;
@@ -144,8 +222,9 @@ describe('PersonalPagesService', () => {
     expect(rows.map((row) => row.folder_id)).toEqual(['f-arch', 'f-other', 'f-specs']);
     expect(rows.every((row) => typeof row.converted_at === 'string')).toBe(true);
 
-    // Delete a converted page; the second launch must not bring it back.
+    // Delete a converted page for good (Trash, then purge); the second launch must not bring it back.
     await service.command(WS, { type: 'remove-document', documentId: 'f-specs' });
+    await service.command(WS, { type: 'remove-document', documentId: 'f-specs', purge: true });
     service.dispose();
     await db.close();
     service = await open();
@@ -210,7 +289,7 @@ describe('PersonalPagesService', () => {
     // Same parent, new order: a reorder.
     await service.command(WS, { type: 'move-document', documentId: 'child', parentFolderId: 'item-1', parentKind: 'item', sortOrder: 5 });
     // Removing p drops item-1's placement; what sits under item-1 stays with it.
-    await service.command(WS, { type: 'remove-folder', folderId: 'p' });
+    await removeForGood(service, 'p');
     service.dispose();
     await db.close();
 
@@ -228,6 +307,57 @@ describe('PersonalPagesService', () => {
     expect((await service.snapshot(WS)).items[0].trashedAt).toBe(1_700_000_000_000);
     await service.command(WS, { type: 'restore-document', documentId: 'd1' });
     expect((await service.snapshot(WS)).items[0].trashedAt).toBeNull();
+  });
+
+  it('deletes a page for good only on a purge of a page already in Trash, as the team store does', async () => {
+    const service = await open();
+    await service.command(WS, { type: 'register-document', documentId: 'd1', title: 'Doc', documentType: 'markdown', parentFolderId: null });
+    const only = async () => (await service.snapshot(WS)).items.filter((item) => item.documentId === 'd1');
+
+    // A live page goes to Trash, purge or not: one call never removes it.
+    await service.command(WS, { type: 'remove-document', documentId: 'd1', purge: true });
+    const [trashed] = await only();
+    expect(trashed.trashedAt).toEqual(expect.any(Number));
+    // A plain remove of a page in Trash changes nothing.
+    await service.command(WS, { type: 'remove-document', documentId: 'd1' });
+    expect(await only()).toEqual([expect.objectContaining({ trashedAt: trashed.trashedAt })]);
+
+    await service.command(WS, { type: 'remove-document', documentId: 'd1', purge: true });
+    expect(await only()).toEqual([]);
+  });
+
+  it('sends a removed subtree to Trash and deletes it only on a purge of what is in Trash', async () => {
+    const service = await open();
+    const page = (documentId: string, parentFolderId: string | null) =>
+      service.command(WS, { type: 'register-document', documentId, title: documentId, documentType: 'markdown', parentFolderId });
+    await page('a', null);
+    await page('b', 'a');
+    await page('deep', 'b');
+    await page('earlier', 'a');
+    await service.command(WS, { type: 'trash-document', documentId: 'earlier', trashedAt: 5 });
+    await service.command(WS, { type: 'set-type-placement', typeId: 'bug', parentFolderId: 'b', sortOrder: 0 });
+    const state = async () => Object.fromEntries((await service.snapshot(WS)).items.map((doc) => [doc.documentId, doc.trashedAt]));
+
+    // An older renderer's delete, purge or not: one call never removes a live subtree.
+    await service.command(WS, { type: 'remove-folder', folderId: 'a', purge: true });
+    const trashed = await state();
+    expect(trashed.a).toEqual(expect.any(Number));
+    // One trash time for the subtree, so restore brings it back together; a page already in Trash keeps its own.
+    expect([trashed.b, trashed.deep]).toEqual([trashed.a, trashed.a]);
+    expect(trashed.earlier).toBe(5);
+    // Placements stay, so a restored page gets its types back.
+    expect((await service.snapshot(WS)).typePlacements).toEqual([expect.objectContaining({ typeId: 'bug', parentFolderId: 'b' })]);
+    await service.command(WS, { type: 'remove-folder', folderId: 'a' });
+    expect(await state()).toEqual(trashed);
+
+    await service.command(WS, { type: 'remove-folder', folderId: 'a', purge: true });
+    expect(await state()).toEqual({});
+    expect((await service.snapshot(WS)).typePlacements).toEqual([]);
+  });
+
+  it('never purges a page another window restored after the purge read it', async () => {
+    await open();
+    await purgeLosesARaceWithARestore(db);
   });
 
   it('refuses to move a page into its own descendant or under a missing page', async () => {
@@ -250,7 +380,7 @@ describe('PersonalPagesService', () => {
     await service.command(WS, { type: 'set-type-placement', typeId: 'bug', parentFolderId: 'b', sortOrder: 0 });
     await service.command(WS, { type: 'set-item-placement', itemId: 'in-b', parentId: 'b', sortOrder: 0 });
     await service.command(WS, { type: 'set-item-placement', itemId: 'at-root', parentId: null, sortOrder: 0 });
-    await service.command(WS, { type: 'remove-folder', folderId: 'a' });
+    await removeForGood(service, 'a');
     const snapshot = await service.snapshot(WS);
     expect(snapshot.typePlacements).toEqual([]);
     expect(snapshot.itemPlacements.map((p) => p.itemId)).toEqual(['at-root']);
@@ -279,7 +409,7 @@ describe('PersonalPagesService', () => {
       (await service.snapshot(WS)).items.find((doc) => doc.documentId === id)?.parentFolderId;
     expect(await parentOf('type-page:module')).toBe('q');
 
-    await service.command(WS, { type: 'remove-folder', folderId: 'p' });
+    await removeForGood(service, 'p');
     const ids = (await service.snapshot(WS)).items.map((doc) => doc.documentId).sort();
     // person's type was inside P, so its prose went too; stale's was outside, so it moved out.
     expect(ids).toEqual(['q', 'type-page:module', 'type-page:stale']);
@@ -298,9 +428,9 @@ describe('PersonalPagesService', () => {
     // Sequential: the move lands first.
     await seed(service);
     await service.command(WS, { type: 'move-folder', folderId: 'b', parentFolderId: null });
-    await service.command(WS, { type: 'remove-folder', folderId: 'a' });
+    await removeForGood(service, 'a');
     expect(await survivors()).toEqual(['b', 'in-b']);
-    await service.command(WS, { type: 'remove-folder', folderId: 'b' });
+    await removeForGood(service, 'b');
 
     // Interleaved: the move commits after remove-folder has started, right
     // before its transaction takes the write lock. Membership captured any
@@ -317,7 +447,7 @@ describe('PersonalPagesService', () => {
       history,
       notify,
     });
-    await racing.command(WS, { type: 'remove-folder', folderId: 'a' });
+    await removeForGood(racing, 'a');
     expect(await survivors()).toEqual(['b', 'in-b']);
   });
 
@@ -346,7 +476,11 @@ describe('PersonalPagesService', () => {
     expect((await service.snapshot(WS)).items).toEqual([expect.objectContaining({ documentId: PERSONAL_HOME_PAGE_ID, title: 'Start here' })]);
     expect((await service.getBody(WS, PERSONAL_HOME_PAGE_ID))?.content).toBe('My own notes');
 
+    // Trashed is not deleted, and the seed must not bring it back either way.
     await service.command(WS, { type: 'remove-document', documentId: PERSONAL_HOME_PAGE_ID });
+    service = await relaunch();
+    expect((await service.snapshot(WS)).items).toEqual([expect.objectContaining({ documentId: PERSONAL_HOME_PAGE_ID, trashedAt: expect.any(Number) })]);
+    await service.command(WS, { type: 'remove-document', documentId: PERSONAL_HOME_PAGE_ID, purge: true });
     service = await relaunch();
     expect((await service.snapshot(WS)).items).toEqual([]);
     // A workspace that already has pages gets its Home too.
@@ -409,7 +543,8 @@ describe('PersonalPagesService on PGLite', () => {
     }
   });
 
-  it('round-trips the tree, trash timestamps and a body conflict', async () => {
+  /** A PGLite on the current mirror schema, behind the store's database interface. */
+  const openPglite = async () => {
     const { PGlite } = await import('@electric-sql/pglite');
     const pglite = new PGlite();
     await pglite.exec(mirrorDdl('0049'));
@@ -426,6 +561,50 @@ describe('PersonalPagesService on PGLite', () => {
       },
     };
     const service = new PersonalPagesService({ db: () => db, history: { createSnapshot: vi.fn(async () => undefined) }, notify: vi.fn() });
+    return { pglite, db, service };
+  };
+
+  it('sends a removed subtree to Trash and deletes it only on a purge of what is in Trash', async () => {
+    const { pglite, service } = await openPglite();
+    try {
+      const page = (documentId: string, parentFolderId: string | null) =>
+        service.command(WS, { type: 'register-document', documentId, title: documentId, documentType: 'markdown', parentFolderId });
+      await page('a', null);
+      await page('b', 'a');
+      await page('deep', 'b');
+      await page('earlier', 'a');
+      await service.command(WS, { type: 'trash-document', documentId: 'earlier', trashedAt: 5 });
+      await service.command(WS, { type: 'set-type-placement', typeId: 'bug', parentFolderId: 'b', sortOrder: 0 });
+      const state = async () => Object.fromEntries((await service.snapshot(WS)).items.map((doc) => [doc.documentId, doc.trashedAt]));
+
+      await service.command(WS, { type: 'remove-folder', folderId: 'a', purge: true });
+      const trashed = await state();
+      expect(trashed.a).toEqual(expect.any(Number));
+      expect([trashed.b, trashed.deep]).toEqual([trashed.a, trashed.a]);
+      expect(trashed.earlier).toBe(5);
+      expect((await service.snapshot(WS)).typePlacements).toEqual([expect.objectContaining({ typeId: 'bug', parentFolderId: 'b' })]);
+      await service.command(WS, { type: 'remove-folder', folderId: 'a' });
+      expect(await state()).toEqual(trashed);
+
+      await service.command(WS, { type: 'remove-folder', folderId: 'a', purge: true });
+      expect(await state()).toEqual({});
+      expect((await service.snapshot(WS)).typePlacements).toEqual([]);
+    } finally {
+      await pglite.close();
+    }
+  });
+
+  it('never purges a page another window restored after the purge read it', async () => {
+    const { pglite, db } = await openPglite();
+    try {
+      await purgeLosesARaceWithARestore(db);
+    } finally {
+      await pglite.close();
+    }
+  });
+
+  it('round-trips the tree, trash timestamps and a body conflict', async () => {
+    const { pglite, db, service } = await openPglite();
     try {
       await service.command(WS, { type: 'register-folder', folderId: 'f1', name: 'Specs', parentFolderId: null, sortOrder: 1.5 });
       await service.command(WS, { type: 'set-type-placement', typeId: 'bug', parentFolderId: 'f1', sortOrder: 0 });
@@ -448,7 +627,7 @@ describe('PersonalPagesService on PGLite', () => {
       await service.command(WS, { type: 'set-type-placement', typeId: 'task', parentFolderId: null, sortOrder: 0 });
       await service.command(WS, { type: 'move-document', documentId: 'type-page:task', parentFolderId: 'f1' });
 
-      await service.command(WS, { type: 'remove-folder', folderId: 'f1' });
+      await removeForGood(service, 'f1');
       const after = await service.snapshot(WS);
       expect(after.items.map((doc) => [doc.documentId, doc.parentFolderId])).toEqual([['type-page:task', null]]);
       expect(after.itemPlacements).toEqual([]);

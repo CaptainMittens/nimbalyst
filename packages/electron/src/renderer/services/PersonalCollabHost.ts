@@ -27,7 +27,11 @@ import {
   type SharedDocument,
   type SharedFolder,
 } from '@nimbalyst/collab-client/docs';
+import { store } from '@nimbalyst/runtime/store';
+import { TYPE_PAGE_DOCUMENT_PREFIX } from '@nimbalyst/collab-client/docs';
 import { PERSONAL_PAGE_TAB_PREFIX } from '../contexts/TabsContext';
+import { historyDialogFileAtom } from '../store/atoms/historyDialog';
+import { personalPageHistoryKey, personalTypedPageHistoryKey } from '../../shared/personalPageUri';
 import { electronCollabDocumentAdapters } from './ElectronCollabHost';
 import { errorNotificationService } from './ErrorNotificationService';
 import { PersonalPagesDataSource } from './PersonalPagesDataSource';
@@ -166,15 +170,22 @@ export class PersonalCollabHost implements CollabHost<PersonalDocsCapability> {
     }
     if (ref.kind === 'tracker' || ref.kind === 'type') {
       this.openAdapter(ref, source);
+    } else if (ref.kind === 'document') {
+      this.openAdapter({
+        kind: 'personal-page',
+        documentId: ref.documentId,
+        path: personalPageTabPath(ref.documentId),
+        title: this.documentTitle(ref.documentId),
+      }, source);
+    } else {
       return;
     }
-    if (ref.kind !== 'document') return;
-    this.openAdapter({
-      kind: 'personal-page',
-      documentId: ref.documentId,
-      path: personalPageTabPath(ref.documentId),
-      title: this.documentTitle(ref.documentId),
-    }, source);
+    // Personal pages keep local history: a page's body, a typed page's body,
+    // or a type page's prose (a Personal page of its own).
+    if (source !== 'history') return;
+    store.set(historyDialogFileAtom, ref.kind === 'tracker'
+      ? personalTypedPageHistoryKey(ref.trackerId)
+      : personalPageHistoryKey(ref.kind === 'type' ? `${TYPE_PAGE_DOCUMENT_PREFIX}${ref.typeId}` : ref.documentId));
   }
 
   artifactUrl(): string | null {

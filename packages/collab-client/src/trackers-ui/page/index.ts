@@ -7,6 +7,7 @@
  */
 export { TrackerPageView, type TrackerPageViewProps } from './TrackerPageView';
 export { TrackerPageAddField, type TrackerPageAddFieldProps } from './TrackerPageAddField';
+export { PageHistoryButton } from './PageHistoryButton';
 export { TypePageTable, typePageTypeIds, type TypePageTableProps } from './TypePageTable';
 export { TrackerLinksSection, type TrackerLinksSectionProps } from './TrackerLinksSection';
 export { fieldRelationLinks } from './fieldRelationLinks';

@@ -281,8 +281,9 @@ describe('one page tree', () => {
       itemsOfType: () => [{ itemId: 'mod-1', title: 'Sync engine' }, { itemId: 'mod-2', title: 'Tracker engine' }],
       item: (itemId: string) => (itemId === 'mod-1' ? { itemId, title: 'Sync engine', typeId: 'module' } : null),
     };
-    const { container } = renderDocsUIWithHost(
-      <CollabSidebar typeResolver={typeResolver} />,
+    const archiveItem = vi.fn(async () => undefined);
+    const { container, host } = renderDocsUIWithHost(
+      <CollabSidebar typeResolver={typeResolver} onArchiveItem={archiveItem} />,
       [{ typeId: 'module', projectId: null, parentFolderId: 'arch', sortOrder: 0, createdBy: 'm', createdAt: 1, updatedAt: 1 }],
       {
         documents: [
@@ -312,7 +313,17 @@ describe('one page tree', () => {
     fireEvent.contextMenu(placed);
     await waitFor(() => expect(document.querySelector('.collab-item-new-inside')).not.toBeNull());
     expect(document.querySelector('.collab-item-place-type')).not.toBeNull();
-    fireEvent.keyDown(document.body, { key: 'Escape' });
+    // Agent edits land directly, so a typed page's history is one click from its row.
+    fireEvent.click(document.querySelector<HTMLElement>('.collab-page-history')!);
+    expect(host.openArtifact).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'tracker', trackerId: 'mod-1' }), 'history');
+    // A typed page is a tracker item with its own comments and sessions: it is
+    // archived, not moved to Pages Trash, and only after the in-app confirm.
+    fireEvent.contextMenu(placed);
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-item-archive')));
+    const confirm = await found(() => document.querySelector<HTMLElement>('[data-testid="collab-confirm-dialog"]'));
+    expect(archiveItem).not.toHaveBeenCalled();
+    fireEvent.click(confirm.querySelector('.collab-confirm-accept')!);
+    await waitFor(() => expect(archiveItem).toHaveBeenCalledWith('mod-1'));
 
     const architecture = [...container.querySelectorAll<HTMLElement>('.file-tree-file')].find((row) => row.textContent === 'Architecture')!;
     fireEvent.contextMenu(architecture);
@@ -523,7 +534,7 @@ describe('one page tree', () => {
     const placement = (typeId: string, sortOrder: number) => ({
       typeId, projectId: null, parentFolderId: null, sortOrder, createdBy: 'm', createdAt: 1, updatedAt: 1,
     });
-    const { container, session } = renderDocsUIWithHost(
+    const { container, session, host } = renderDocsUIWithHost(
       <CollabSidebar typeResolver={typeResolver} />,
       [placement('module', 10), placement('person', 30)],
       { documents: [page('arch', 'Architecture', null)], itemPlacements: [] },
@@ -536,6 +547,10 @@ describe('one page tree', () => {
     expect(session.placeType).toHaveBeenCalledWith('competitor', 'arch', undefined);
 
     const typeRow = (typeId: string) => container.querySelector<HTMLElement>(`.collab-tree-type-row[data-type-id="${typeId}"]`)!;
+    // The type page's prose has a history of its own.
+    fireEvent.contextMenu(typeRow('module'));
+    fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-page-history')));
+    expect(host.openArtifact).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'type', typeId: 'module' }), 'history');
     fireEvent.contextMenu(typeRow('person'));
     fireEvent.click(await found(() => document.querySelector<HTMLElement>('.collab-type-move-to')));
     fireEvent.click(await found(() => document.querySelector<HTMLElement>('[data-page-option="arch"]')));

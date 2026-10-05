@@ -148,6 +148,11 @@ export declare function legacyFilterChipsToClauses(filters: readonly TrackerFilt
  */
 export declare function filterTrackerItems(items: TrackerRecord[], def: TrackerItemFilterDefinition, ctx?: FilterContext): TrackerRecord[];
 /**
+ * The records a view starts from: archived ones only when it asks for them
+ * (the Archived filter, or a column filter on `archived`), otherwise none.
+ */
+export declare function selectArchivedForView(items: readonly TrackerRecord[], def: TrackerItemFilterDefinition): TrackerRecord[];
+/**
  * Count filtered records within a sidebar type or folder scope. The type scope
  * is applied before the row filters so `recently-updated` matches the selected
  * type/folder view rather than a workspace-global top 50.

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
-import { flushPersonalPageBody, usePersonalPageBody } from '../usePersonalPageBody';
+import { flushPersonalPageBody, restoreHistoryToPersonalPage, usePersonalPageBody } from '../usePersonalPageBody';
 
 let invoke: ReturnType<typeof vi.fn>;
 
@@ -157,5 +157,37 @@ describe('usePersonalPageBody', () => {
     expect(settled).toBe(true);
     // No open editor for a page: nothing to wait for.
     await expect(flushPersonalPageBody('/ws', 'other')).resolves.toBeUndefined();
+  });
+
+  it('restores history into the open page: draft stored first, editor shows the restore, next edit saves cleanly', async () => {
+    const { result } = await renderLoaded({ content: 'a', version: 3 });
+    const stored = { content: 'a', version: 3 };
+    invoke.mockImplementation(async (channel: string, _ws, _id, content: string, expected?: number) => {
+      if (channel === 'personal-pages:get-body') return { ...stored };
+      if (channel === 'personal-pages:update-body') {
+        if (expected !== stored.version) return { conflict: true, ...stored };
+        Object.assign(stored, { content, version: stored.version + 1 });
+        return { version: stored.version };
+      }
+      return undefined;
+    });
+    act(() => result.current.onEdit('a, unsaved draft'));
+    const epoch = result.current.editorEpoch;
+
+    await act(async () => {
+      await expect(restoreHistoryToPersonalPage('personal-doc://pdoc-1', '# Older text', '/ws')).resolves.toBe(true);
+    });
+    // The draft became a body (and so a history entry) before the restore replaced it.
+    expect(bodyCalls('personal-pages:update-body').map((call) => call.slice(3))).toEqual([
+      ['a, unsaved draft', 3],
+      ['# Older text', 4],
+    ]);
+    expect(result.current.initialContent).toBe('# Older text');
+    expect(result.current.editorEpoch).toBe(epoch + 1);
+
+    act(() => result.current.onEdit('# Older text, edited'));
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(stored).toEqual({ content: '# Older text, edited', version: 6 });
+    expect(result.current.notice).toBeNull();
   });
 });

@@ -508,6 +508,16 @@ export function filterTrackerItems(
 }
 
 /**
+ * The records a view starts from: archived ones only when it asks for them
+ * (the Archived filter, or a column filter on `archived`), otherwise none.
+ */
+export function selectArchivedForView(items: readonly TrackerRecord[], def: TrackerItemFilterDefinition): TrackerRecord[] {
+  const showArchived = def.activeFilters.includes('archived');
+  const filtersArchived = (def.columnFilters?.clauses ?? []).some(clause => clause.field === 'archived');
+  return filtersArchived ? [...items] : items.filter((record) => !!record.archived === showArchived);
+}
+
+/**
  * Count filtered records within a sidebar type or folder scope. The type scope
  * is applied before the row filters so `recently-updated` matches the selected
  * type/folder view rather than a workspace-global top 50.
@@ -519,11 +529,8 @@ export function countFilteredTrackerItemsByTypes(
   ctx: FilterContext = {},
 ): number {
   const wantedTypes = new Set(types);
-  const showArchived = def.activeFilters.includes('archived');
-  const filtersArchived = (def.columnFilters?.clauses ?? []).some(clause => clause.field === 'archived');
-  const scopedItems = items.filter((record) => (
-    (filtersArchived || record.archived === showArchived)
-    && (wantedTypes.has(record.primaryType) || record.typeTags.some((type) => wantedTypes.has(type)))
+  const scopedItems = selectArchivedForView(items, def).filter((record) => (
+    wantedTypes.has(record.primaryType) || record.typeTags.some((type) => wantedTypes.has(type))
   ));
 
   return filterTrackerItems(scopedItems, def, ctx).length;

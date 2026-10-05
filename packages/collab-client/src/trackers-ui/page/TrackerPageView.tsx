@@ -25,6 +25,8 @@ import type { PageLinksSource } from './pageLinks';
 import type { TrackerPageCrumb } from './trackerPageCrumb';
 import { TrackerLinksSection } from './TrackerLinksSection';
 import { TrackerPageAddField } from './TrackerPageAddField';
+import { PageHistoryButton } from './PageHistoryButton';
+import { confirmDestructive } from '../../ui-primitives/confirmDestructive';
 import { sanitizeTitleInput, useAutoSizedTitle } from './trackerTitleAutoSize';
 import './TrackerPageView.css';
 
@@ -55,6 +57,13 @@ export interface TrackerPageViewProps {
   linksRevision?: number;
   /** Open another typed page (a Links entry or a relationship chip). */
   onOpenItem?: (itemId: string) => void;
+  /** Open the body's page history; absent while the body has none to show. */
+  onShowHistory?: () => void;
+  /**
+   * Archive the typed page through the tracker's archive (after an in-app
+   * confirm). Absent where the host cannot write trackers.
+   */
+  onArchive?: () => void;
 }
 
 export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
@@ -73,6 +82,8 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
   linksSource,
   linksRevision = 0,
   onOpenItem,
+  onShowHistory,
+  onArchive,
 }) => {
   const itemId = item?.id ?? '';
   const model = useMemo(() => globalRegistry.get(item?.primaryType ?? ''), [item?.primaryType]);
@@ -148,12 +159,34 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
     <div className="tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="tracker-page-view" data-item-id={item.id}>
       <div className="tracker-page-view-scroller min-h-0 flex-1 overflow-y-auto">
         <div className="tracker-page-view-header">
-          <div className="tracker-page-view-crumb mb-2.5 truncate text-xs text-nim-faint select-text" data-testid="tracker-page-crumb">
-            {[...(crumb.section ? [crumb.section] : []), ...crumb.ancestors].map((part, index) => (
-              <span key={`${index}:${part}`}>{part} / </span>
-            ))}
-            {crumb.underType && <><span className="text-nim-muted">{typeName}</span>{' / '}</>}
-            {title}
+          <div className="tracker-page-view-crumb-row mb-2.5 flex items-center gap-2">
+            <div className="tracker-page-view-crumb min-w-0 flex-1 truncate text-xs text-nim-faint select-text" data-testid="tracker-page-crumb">
+              {[...(crumb.section ? [crumb.section] : []), ...crumb.ancestors].map((part, index) => (
+                <span key={`${index}:${part}`}>{part} / </span>
+              ))}
+              {crumb.underType && <><span className="text-nim-muted">{typeName}</span>{' / '}</>}
+              {title}
+            </div>
+            {item.archived
+              ? <span className="tracker-page-view-archived shrink-0 text-xs text-nim-faint">Archived</span>
+              : onArchive && (
+                <button
+                  type="button"
+                  className="tracker-page-view-archive flex shrink-0 items-center rounded border-none bg-transparent px-1.5 py-0.5 text-nim-faint cursor-pointer hover:bg-nim-hover hover:text-nim"
+                  title="Archive page"
+                  aria-label="Archive page"
+                  onClick={() => {
+                    void confirmDestructive(
+                      'Archive page',
+                      `Archive "${title}"? It leaves Pages and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
+                      'Archive',
+                    ).then((accepted) => { if (accepted) onArchive(); });
+                  }}
+                >
+                  <MaterialSymbol icon="archive" size={15} />
+                </button>
+              )}
+            {onShowHistory && <PageHistoryButton onClick={onShowHistory} />}
           </div>
           {editable ? (
             <textarea

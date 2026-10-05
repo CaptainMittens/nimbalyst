@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, type Mock } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { DocRevisionMetadata } from '@nimbalyst/collab-protocol';
 import { CollabHistoryDialog, type CollabHistoryDiffProps } from '../CollabHistoryDialog';
-import type { CollabHistoryController } from '../collabHistoryController';
+import { restoreCollabRevision, type CollabHistoryController } from '../collabHistoryController';
 
 vi.mock('@nimbalyst/runtime/ui/icons/MaterialSymbol', () => ({ MaterialSymbol: () => null }));
 
@@ -46,7 +46,26 @@ function controllerWith(texts: Record<string, string>, live = 'live page') {
     getBasisSequence: () => 7,
     getStatus: () => 'connected',
   };
-  return { controller, calls, body: () => body };
+  /** A collaborator's edit arriving through the live editor. */
+  const edit = (text: string) => { body = text; };
+  return { controller, calls, body: () => body, edit };
+}
+
+/** Lands `edit` while the given revision kind is being posted, `times` times. */
+function editDuringCreate(
+  controller: CollabHistoryController,
+  revisionKind: string,
+  edits: string[],
+  edit: (text: string) => void,
+) {
+  const create = controller.client.createRevision as Mock;
+  const original = create.getMockImplementation()!;
+  create.mockImplementation(async (input) => {
+    const result = await original(input);
+    const next = input.revisionKind === revisionKind ? edits.shift() : undefined;
+    if (next !== undefined) edit(next);
+    return result;
+  });
 }
 
 function renderDialog(controller: CollabHistoryController, onClose = vi.fn()) {
@@ -88,8 +107,8 @@ describe('shared page history dialog', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     expect(calls.filter((call) => !call.startsWith('load:r2'))).toEqual([
       'load:r1', // the diff preview
-      'create:restore-pre:live page',
       'load:r1',
+      'create:restore-pre:live page',
       'apply:first draft',
       'create:restore-head:first draft',
     ]);
@@ -106,5 +125,45 @@ describe('shared page history dialog', () => {
     fireEvent.click(await screen.findByTestId('collab-revision-r1'));
     await screen.findByText('first draft');
     expect((screen.getByRole('button', { name: 'Restore as Current Version' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+/**
+ * Restore replaces the whole live body. A collaborator's edit that lands while
+ * the checkpoint is being posted is in neither the checkpoint nor the restored
+ * text, so replacing the body then erases it without a trace.
+ */
+describe('restoring while a collaborator edits', () => {
+  it('checkpoints an edit that lands during the checkpoint before replacing the body', async () => {
+    const { controller, calls, body, edit } = controllerWith({ r1: 'first draft' });
+    editDuringCreate(controller, 'restore-pre', ['live page + their edit'], edit);
+
+    await expect(restoreCollabRevision(controller, 'r1')).resolves.toBe(true);
+
+    expect(calls).toContain('create:restore-pre:live page + their edit');
+    expect(calls.indexOf('create:restore-pre:live page + their edit')).toBeLessThan(calls.indexOf('apply:first draft'));
+    expect(body()).toBe('first draft');
+  });
+
+  it('refuses to replace a body that keeps changing, and keeps the edit', async () => {
+    const { controller, calls, body, edit } = controllerWith({ r1: 'first draft' });
+    editDuringCreate(controller, 'restore-pre', ['edit one', 'edit two'], edit);
+
+    await expect(restoreCollabRevision(controller, 'r1')).rejects.toThrow(/changed while restoring/);
+
+    expect(body()).toBe('edit two');
+    expect(calls.some((call) => call.startsWith('apply:'))).toBe(false);
+    expect(calls.some((call) => call.startsWith('create:restore-head'))).toBe(false);
+  });
+
+  it('does not replace the body when write access is lost during the checkpoint', async () => {
+    let readOnly = false;
+    const { controller, calls } = controllerWith({ r1: 'first draft' });
+    const create = controller.client.createRevision as Mock;
+    const original = create.getMockImplementation()!;
+    create.mockImplementation(async (input) => { const result = await original(input); readOnly = true; return result; });
+
+    await expect(restoreCollabRevision({ ...controller, isReadOnly: () => readOnly }, 'r1')).rejects.toThrow(/permission/);
+    expect(calls.some((call) => call.startsWith('apply:'))).toBe(false);
   });
 });

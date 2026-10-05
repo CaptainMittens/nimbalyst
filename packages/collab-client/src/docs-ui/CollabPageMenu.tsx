@@ -2,7 +2,8 @@
  * Context menu entries for the one page tree (documents nest in documents):
  * the page head block (New page inside, Set type, Rename, Move to..., Copy
  * link), the page delete entry with its child count, and the typed-page
- * entries (New page inside, Place type..., Move to..., Back under its type). The sidebar keeps its per-document extras (favorite, history, local
+ * entries (New page inside, Place type..., Move to..., Back under its type, Page
+ * history). The sidebar keeps its per-document extras (favorite, history, local
  * source) between the head and the delete entry. Lazy-loaded (and preloaded
  * once a tree is a page tree) to keep it out of the docs-ui eager bundle.
  */
@@ -79,7 +80,15 @@ export const CollabPageDeleteEntry: React.FC<{ childCount: number; onDelete: () 
   </>
 );
 
-/** A typed page's row: pages and types inside it, move it anywhere, or back under its type. */
+/**
+ * A typed page's body or a type page's prose history. Agent edits land in
+ * pages directly, so this is how a person reverts one.
+ */
+export const CollabPageHistoryEntry: React.FC<{ onClick: () => void }> = ({ onClick }) => (
+  <CollabMenuButton className="collab-page-history" icon="history" label="Page history" onClick={onClick} />
+);
+
+/** A typed page's row: pages and types inside it, move it anywhere, back under its type, its history, or archive it. */
 export const CollabItemMenu: React.FC<{
   placed: boolean;
   onNewPageInside: () => void;
@@ -87,7 +96,11 @@ export const CollabItemMenu: React.FC<{
   onPlaceType?: () => void;
   onMoveTo: () => void;
   onBackUnderType: () => void;
-}> = ({ placed, onNewPageInside, onPlaceType, onMoveTo, onBackUnderType }) => (
+  /** Absent where the host has no history to open. */
+  onHistory?: () => void;
+  /** Absent where the host cannot write trackers. */
+  onArchive?: () => void;
+}> = ({ placed, onNewPageInside, onPlaceType, onMoveTo, onBackUnderType, onHistory, onArchive }) => (
   <>
     <CollabMenuButton className="collab-item-new-inside" icon="note_add" label="New page" trailing="inside" onClick={onNewPageInside} />
     {onPlaceType && (
@@ -97,6 +110,18 @@ export const CollabItemMenu: React.FC<{
     <CollabMenuButton className="collab-item-move-to" icon="drive_file_move" label="Move to..." onClick={onMoveTo} />
     {placed && (
       <CollabMenuButton className="collab-item-back-under-type" icon="table" label="Back under its type" onClick={onBackUnderType} />
+    )}
+    {onHistory && (
+      <>
+        <Separator />
+        <CollabPageHistoryEntry onClick={onHistory} />
+      </>
+    )}
+    {onArchive && (
+      <>
+        <Separator />
+        <CollabMenuButton className="collab-item-archive" icon="archive" label="Archive" onClick={onArchive} />
+      </>
     )}
   </>
 );

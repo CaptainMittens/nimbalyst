@@ -6,7 +6,8 @@
  * the binding. Markdown has no registration and no hook: it is the app's own
  * Lexical editor, and its collaborative wiring lives in `CollaborativeTabEditor`
  * as a hand-rolled branch. This is that branch, reduced to what a card needs --
- * no tab header, no revision rail, no history controller. It keeps the tab's
+ * no tab header, no revision rail, and a history controller only when the host
+ * shows the document as a page (`publishHistory`). It keeps the tab's
  * Keep/Revert bar for pending diffs left in a room by older builds.
  *
  * What could NOT be reduced away, and why (all four are load-bearing; see the
@@ -53,7 +54,9 @@ import { MarkdownEditor, DocumentPathProvider } from '@nimbalyst/runtime';
 import { CollabLexicalProvider } from '@nimbalyst/runtime/collab-lexical';
 import { buildCollabUri } from '@nimbalyst/collab-protocol';
 
+import { CollabHistoryClient } from '@nimbalyst/runtime/sync/collabHistoryClient';
 import type { CollaborativeEmbedProviderResource } from '../../services/CollaborativeEmbedProviderCache';
+import { useCollabBodyHistory } from '../HistoryDialog/useCollabBodyHistory';
 import { LexicalDiffHeaderAdapter } from '../UnifiedDiffHeader';
 
 interface CollaborativeMarkdownEmbedProps {
@@ -61,11 +64,13 @@ interface CollaborativeMarkdownEmbedProps {
   resource: CollaborativeEmbedProviderResource;
   /** The fixed formatting toolbar while editable; a page body uses the floating one. */
   toolbar?: boolean;
+  /** Publish the document's page history (a body shown as a page, never a card). */
+  publishHistory?: boolean;
 }
 
 export const CollaborativeMarkdownEmbed: React.FC<
   CollaborativeMarkdownEmbedProps
-> = ({ host, resource, toolbar = true }) => {
+> = ({ host, resource, toolbar = true, publishHistory = false }) => {
   const [readOnly, setReadOnly] = useState(host.readOnly !== false);
   useEffect(() => {
     // `onReadOnlyChanged` invokes the callback immediately with the current
@@ -137,6 +142,20 @@ export const CollaborativeMarkdownEmbed: React.FC<
   // on screen with no way to resolve it.
   const [lexicalEditor, setLexicalEditor] = useState<any | null>(null);
   const handleEditorReady = useCallback((editor: any) => setLexicalEditor(editor), []);
+
+  const historyClient = useMemo(() => (publishHistory ? new CollabHistoryClient({
+    serverUrl: config.serverUrl,
+    getJwt: config.getJwt,
+    orgId: config.orgId,
+    documentId: config.documentId,
+  }) : null), [publishHistory, config]);
+  useCollabBodyHistory({
+    uri: publishHistory ? documentPath : null,
+    client: historyClient,
+    syncProvider: resource.syncProvider,
+    editor: lexicalEditor,
+    readOnly,
+  });
 
   if (epoch === 0) {
     return (

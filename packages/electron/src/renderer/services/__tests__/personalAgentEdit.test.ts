@@ -39,7 +39,7 @@ vi.mock('../collabAgentEditRevision', () => ({
 import { SQLiteDatabase } from '../../../main/database/sqlite/SQLiteDatabase';
 import { PersonalPagesService, personalDocHistoryKey } from '../../../main/services/PersonalPagesService';
 import { applyAgentDiff, readCollabDocForAgent } from '../agentDocumentAccess';
-import { applyPersonalPageAgentEdit, type PersonalPageIo } from '../personalAgentEdit';
+import { applyPersonalPageAgentEdit, restorePersonalTypedPageBody, type PersonalPageIo } from '../personalAgentEdit';
 
 const SCHEMA_DIR = path.resolve(__dirname, '../../../main/database/sqlite/schemas');
 const WS = '/ws/personal-agent-edit';
@@ -149,6 +149,7 @@ describe('agent edits to Personal pages', () => {
         return { version: stored.version };
       }),
       liveTypedPage: () => null,
+      keepInHistory: vi.fn(async () => undefined),
     } as unknown as PersonalPageIo;
 
     const result = await applyPersonalPageAgentEdit('personal://tracker-content/idea_1', [
@@ -157,6 +158,7 @@ describe('agent edits to Personal pages', () => {
 
     expect(result).toMatchObject({ success: true });
     expect(stored.content).toBe('# Idea\n\nTables: one shared DataTable.\n\nTyped meanwhile.\n');
+    expect(io.keepInHistory).toHaveBeenCalledWith('personal-doc://tracker-content/idea_1', '# Idea\n\nTables: undecided.\n', 'Before agent edit');
 
     // No cached text at the current version: the first write is refused, and
     // the version it reports is paired with a fresh read.
@@ -174,6 +176,64 @@ describe('agent edits to Personal pages', () => {
     expect(retried).toMatchObject({ success: true });
     expect(writes).toEqual([0, stored.version]);
     expect(stored.content).toContain('Typed meanwhile, then edited.');
+  });
+
+  it('restores a typed page from history through its open editor, else at the stored version', async () => {
+    const replaceContent = vi.fn();
+    const setTypedPageBody = vi.fn(async (_itemId: string, _content: string, expectedVersion: number) => (
+      expectedVersion === 4 ? { written: true as const } : { conflict: true as const, version: 4 }
+    ));
+    const io = {
+      getTypedPageBody: vi.fn(async () => ({ content: '# Agent text', version: null })),
+      setTypedPageBody,
+      liveTypedPage: () => ({ editor: {}, getContent: () => '# Agent text', replaceContent }),
+    } as unknown as PersonalPageIo;
+
+    // Open: the editor takes it, so its pending autosave cannot write over it.
+    await restorePersonalTypedPageBody('idea_1', '# Before the agent', io);
+    expect(replaceContent).toHaveBeenCalledWith('# Before the agent');
+    expect(setTypedPageBody).not.toHaveBeenCalled();
+
+    // Closed: written at the version the store reports.
+    io.liveTypedPage = () => null;
+    await restorePersonalTypedPageBody('idea_1', '# Before the agent', io);
+    expect(setTypedPageBody.mock.calls.map((call) => call[2])).toEqual([0, 4]);
+  });
+
+  it('never restores a typed page over a save that landed after its read', async () => {
+    const stored = { content: '# Read text', version: 4 as number | null };
+    let readCount = 0;
+    let afterRead: (() => void) | null = null;
+    const io = {
+      getTypedPageBody: vi.fn(async () => {
+        readCount += 1;
+        const body = { content: stored.content, version: stored.version };
+        afterRead?.();
+        afterRead = null;
+        return body;
+      }),
+      setTypedPageBody: vi.fn(async (_itemId: string, content: string, expectedVersion: number) => {
+        if ((stored.version ?? 7) !== expectedVersion) return { conflict: true as const, version: stored.version ?? 7 };
+        stored.content = content;
+        stored.version = (stored.version ?? 7) + 1;
+        return { written: true as const };
+      }),
+      liveTypedPage: () => null,
+    } as unknown as PersonalPageIo;
+
+    // Read at version 4; another window saves version 5 before the write.
+    afterRead = () => { stored.content = '# Another window'; stored.version = 5; };
+    await expect(restorePersonalTypedPageBody('idea_1', '# Restored', io)).rejects.toThrow(/changed/);
+    expect(stored).toEqual({ content: '# Another window', version: 5 });
+
+    // No version came with the text, and the text moved on before the version was learned.
+    stored.version = null;
+    stored.content = '# Read text';
+    readCount = 0;
+    afterRead = () => { stored.content = '# Another window'; };
+    await expect(restorePersonalTypedPageBody('idea_1', '# Restored', io)).rejects.toThrow(/changed/);
+    expect(stored.content).toBe('# Another window');
+    expect(readCount).toBe(2);
   });
 
   it('reports text that is not on the page instead of writing anything', async () => {

@@ -48,7 +48,8 @@ export type CollabDocsCommand =
     }
   | { type: 'rename-folder'; folderId: string; name: string }
   | { type: 'move-folder'; folderId: string; parentFolderId: string | null }
-  | { type: 'remove-folder'; folderId: string }
+  /** `purge` permanently deletes a page in Trash and the pages in Trash below it (Personal pages). */
+  | { type: 'remove-folder'; folderId: string; purge?: true }
   | { type: 'refresh-folders' }
   | {
       type: 'set-type-placement';
@@ -79,6 +80,12 @@ export interface CollabDocsCommandResult extends CollabCommandResult {
    * to decide whether the room is known-reachable yet (NIM-2472).
    */
   registrationAcked?: boolean;
+  /**
+   * Personal pages, `remove-document` / `remove-folder` with `purge`: how many
+   * pages were deleted for good. 0 when none was still in Trash as read, for
+   * example because another window restored it first.
+   */
+  purged?: number;
 }
 
 /**

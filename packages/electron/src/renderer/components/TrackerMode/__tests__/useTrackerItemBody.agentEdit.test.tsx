@@ -29,7 +29,7 @@ vi.mock('@nimbalyst/runtime/plugins/TrackerPlugin/models', () => ({
 }));
 
 import { useTrackerItemBody } from '../useTrackerItemBody';
-import { applyPersonalPageAgentEdit } from '../../../services/personalAgentEdit';
+import { applyPersonalPageAgentEdit, restorePersonalTypedPageBody } from '../../../services/personalAgentEdit';
 
 const STORED = '# Idea\n\nTables: undecided.\n';
 
@@ -44,11 +44,16 @@ function markdownOf(editor: LexicalEditor): string {
 
 describe('agent edit to an open Personal typed page', () => {
   let saved: string[];
+  let snapshots: Array<[string, string, string]>;
 
   beforeEach(() => {
     vi.useFakeTimers();
     saved = [];
+    snapshots = [];
     (window as any).electronAPI = {
+      invoke: vi.fn(async (channel: string, key: string, content: string, _type: string, description: string) => {
+        if (channel === 'history:create-snapshot') snapshots.push([key, content, description]);
+      }),
       documentService: {
         getTrackerItemContent: vi.fn(async () => ({ success: true, content: saved.at(-1) ?? STORED })),
         updateTrackerItemContent: vi.fn(async ({ content }: { content: string }) => {
@@ -64,7 +69,7 @@ describe('agent edit to an open Personal typed page', () => {
     delete (window as any).electronAPI;
   });
 
-  it('keeps the agent edit and the text typed before it', async () => {
+  it('keeps the agent edit and the text typed before it, and restores from history through the editor', async () => {
     const { result, unmount } = renderHook(() => useTrackerItemBody({
       itemId: item.id, item, workspacePath: '/ws', teamOrgId: null, forceFloatingToolbar: false,
     }));
@@ -104,6 +109,16 @@ describe('agent edit to an open Personal typed page', () => {
     const last = saved.at(-1) ?? '';
     expect(last).toContain('Tables: one shared DataTable.');
     expect(last).toContain('Typed just now.');
+    // The text the agent replaced, typing included, is in the page's history.
+    expect(result.current.historyKey).toBe('personal-doc://tracker-content/idea_1');
+    expect(snapshots).toEqual([['personal-doc://tracker-content/idea_1', expect.stringContaining('Typed just now.'), 'Before agent edit']]);
+    expect(snapshots[0]![1]).toContain('Tables: undecided.');
+
+    // Restoring that snapshot goes through the open editor and its autosave.
+    await restorePersonalTypedPageBody('idea_1', snapshots[0]![1]);
+    await act(async () => { await vi.runAllTimersAsync(); });
+    expect(markdownOf(editor)).toContain('Tables: undecided.');
+    expect(saved.at(-1)).toContain('Tables: undecided.');
 
     unregisterDiff();
     unmount();

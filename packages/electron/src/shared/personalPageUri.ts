@@ -32,3 +32,15 @@ export function parsePersonalPageUri(uri: string): PersonalPageTarget | null {
 export function personalTypedPageUri(itemId: string): string {
   return `${PERSONAL_TYPED_PAGE_PREFIX}${itemId}`;
 }
+
+/** The local-history key a Personal page's body is snapshotted under. */
+export function personalPageHistoryKey(documentId: string): string {
+  return `personal-doc://${documentId}`;
+}
+
+/** The local-history key a Personal typed page's body is snapshotted under. */
+export const PERSONAL_TYPED_PAGE_HISTORY_PREFIX = 'personal-doc://tracker-content/';
+
+export function personalTypedPageHistoryKey(itemId: string): string {
+  return `${PERSONAL_TYPED_PAGE_HISTORY_PREFIX}${itemId}`;
+}

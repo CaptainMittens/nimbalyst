@@ -68,3 +68,22 @@ describe('PersonalCollabHost document types', () => {
     }
   });
 });
+
+describe('PersonalCollabHost history', () => {
+  it('opens local history for a Personal page, typed page and type page', async () => {
+    const { store } = await import('@nimbalyst/runtime/store');
+    const { historyDialogFileAtom } = await import('../../store/atoms/historyDialog');
+    const host = new PersonalCollabHost('/workspace/history');
+    const opened = vi.fn();
+    host.setOpenArtifactAdapter(opened);
+    const scope = host.scope;
+
+    host.openArtifact({ kind: 'document', scope, documentId: 'pdoc-1', teamProjectId: null }, 'history');
+    expect(store.get(historyDialogFileAtom)).toBe('personal-doc://pdoc-1');
+    host.openArtifact({ kind: 'tracker', scope, trackerId: 'idea_1' }, 'history');
+    expect(store.get(historyDialogFileAtom)).toBe('personal-doc://tracker-content/idea_1');
+    host.openArtifact({ kind: 'type', scope, typeId: 'idea' }, 'history');
+    expect(store.get(historyDialogFileAtom)).toBe('personal-doc://type-page:idea');
+    expect(opened).toHaveBeenCalledTimes(3);
+  });
+});

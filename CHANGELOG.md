@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- New features go here -->
 - Pages mode: pages nest inside pages, and a tracker type placed in the tree opens as a page with its own prose above a table of every item of that type. Typed pages open as document pages with a header of single-valued fields and can hold their own child pages; pages and typed pages can be moved or reordered by drag, and a plain page, children included, can be given a type in place. A tracker type can extend another type and nests inside it. The Team and Personal sections collapse. Hovering a link in a page offers the named relations allowed between the two pages' types, and a Links section at the bottom lists each relation on one line, incoming ones under their inverse name, with the sentence that made the link. Each section starts with an editable Home page, and New page is offered from a right-click on empty space or a section header. A page that only holds other pages shows a folder icon until it gets content.
 - Pages: a sentence can be marked as decided or as an open question, with who and when; a page can cite a person's prompt, answer or comment, or a web source, with a Sources line under the page; and a type's editable table, a 2x2 chart, or a list of decisions and open questions across pages can be placed in any page.
+- Pages: every page, typed page and type page has history with compare and restore, and a Trash at the bottom of each section restores deleted pages with their child pages. Typed pages are archived instead of trashed.
 - Agents can list, create, place, reorder, retype and edit pages in both the Team and Personal sections and cite what you said in the session; each page an agent edits gets a line in the transcript. Agents can also read another project's pages in the same team by naming the project.
 - Pages mode has a Personal section that works with no account or team: personal pages and tracker types are stored on this device.
 
@@ -30,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 <!-- Bug fixes go here -->
+- Agents can archive or update a tracker item that is missing a required field the update does not change, instead of the update being rejected.
 - Pages: a page deleted by an agent, or a page with child pages deleted from the sidebar, now goes to Trash instead of being deleted permanently.
 - Team trackers: sync no longer fails to start in a workspace where one item had built up a backlog of unsent edits too large to load, and an edit that would make a shared item too large to sync is refused with an error instead of appearing saved.
 - Phone sync: a project file over the size limit no longer stops the other files in the same upload from syncing; the oversized file is skipped.

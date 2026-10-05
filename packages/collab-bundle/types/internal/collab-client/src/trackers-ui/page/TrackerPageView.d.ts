@@ -44,6 +44,13 @@ export interface TrackerPageViewProps {
     linksRevision?: number;
     /** Open another typed page (a Links entry or a relationship chip). */
     onOpenItem?: (itemId: string) => void;
+    /** Open the body's page history; absent while the body has none to show. */
+    onShowHistory?: () => void;
+    /**
+     * Archive the typed page through the tracker's archive (after an in-app
+     * confirm). Absent where the host cannot write trackers.
+     */
+    onArchive?: () => void;
 }
 export declare const TrackerPageView: React.FC<TrackerPageViewProps>;
 export {};

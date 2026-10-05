@@ -9,7 +9,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { atom, useAtomValue, type Atom } from 'jotai';
+import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import { NimbalystEditor } from '@nimbalyst/runtime/editor';
 import type { CollabScope } from '@nimbalyst/collab-client/core';
@@ -30,6 +30,7 @@ import { TrackerReferenceSourceProvider } from '@nimbalyst/runtime/plugins/Track
 import { resolveTrackerWriteAccess } from '@nimbalyst/runtime/plugins/TrackerPlugin/models/trackerLifecycle';
 import { trackerItemByIdAtom, trackerDataLoadedAtom, trackerItemsMapAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerDataAtoms';
 import { getElectronCollabDocsSession, getPersonalCollabDocsSession, resolveDesktopCollabScope } from '../../store/atoms/collabDocuments';
+import { historyDialogFileAtom } from '../../store/atoms/historyDialog';
 import { useMarkTrackerViewed } from '../../hooks/useTrackerUnread';
 import { useRecordTrackerOpened } from '../../hooks/useRecordTrackerOpened';
 import { isNativeItem } from './trackerContentMode';
@@ -38,6 +39,8 @@ import { useTrackerItemFields } from './useTrackerItemFields';
 import { desktopPageLinksSource } from './TrackerLinksSection';
 import { TrackerSavedDescription } from './TrackerSavedDescription';
 import { createCollectionItem } from './createCollectionItem';
+import { archiveTrackerItem } from '../../services/archiveTrackerItem';
+import { errorNotificationService } from '../../services/ErrorNotificationService';
 
 // Moved to collab-client with the shared layout; re-exported for existing imports.
 export { crumbItemLookup, legacyDescriptionToRecover, trackerPageCrumb, trackerPageCrumbFolders, type TrackerPageCrumb } from '@nimbalyst/collab-client/trackers-ui/page';
@@ -163,6 +166,16 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
     onRelationshipsReindexed: bumpLinks,
   });
   const handleRename = useCallback((title: string) => handleTextFieldChange('title', title), [handleTextFieldChange]);
+  // A team body's history is its room's revisions; a Personal body's is local.
+  const openHistory = useSetAtom(historyDialogFileAtom);
+  const { historyKey } = body;
+  const handleShowHistory = useMemo(() => (historyKey ? () => openHistory(historyKey) : undefined), [historyKey, openHistory]);
+  // A typed page is archived through the tracker, never moved to Pages Trash.
+  const handleArchive = useCallback(() => {
+    archiveTrackerItem(itemId).catch((error: unknown) => {
+      errorNotificationService.showError('Could not archive this page', error instanceof Error ? error.message : String(error));
+    });
+  }, [itemId]);
 
   const crumb = useTrackerPageCrumb(itemId, item?.primaryType ?? '', body.sharing, workspacePath, collabScope);
 
@@ -239,6 +252,8 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
       linksSource={linksSource}
       linksRevision={linksRevision}
       onOpenItem={onOpenItem}
+      onShowHistory={handleShowHistory}
+      onArchive={editable ? handleArchive : undefined}
     />
   );
 };

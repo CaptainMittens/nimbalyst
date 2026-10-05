@@ -529,6 +529,33 @@ describe('CollabDocsSession', () => {
     expect(harness.commands).toContainEqual(expect.objectContaining({ type: 'trash-document', documentId: 'other' }));
   });
 
+  it('restores a page whose parent is gone to the section root, and says so', async () => {
+    const at = (documentId: string, parentFolderId: string | null, trashedAt: number | null = null) =>
+      ({ ...document(documentId, documentId), parentFolderId, trashedAt });
+    const harness = createHarness(SCOPE);
+    (harness.dataSource.snapshot as ReturnType<typeof vi.fn>).mockResolvedValue({
+      // `notes` sat under a page that is now gone for good; `draft` under one still in Trash.
+      items: [at('notes', 'purged', 7), at('notes-child', 'notes', 7), at('parent', null, 3), at('draft', 'parent', 9), at('live', null)],
+      containers: [],
+      pageTree: true,
+    });
+    await harness.session.start();
+
+    await expect(harness.session.restoreDocument('notes')).resolves.toEqual({ ok: true, restored: 2, movedToRoot: true });
+    await expect(harness.session.restoreDocument('draft')).resolves.toEqual({ ok: true, restored: 1, movedToRoot: true });
+    // The restore lands before the move, so the store never moves a page still in Trash.
+    expect(harness.commands.filter((command) => command.type === 'restore-document' || command.type === 'move-document')
+      .map((command) => `${command.type}:${command.documentId}`))
+      .toEqual(['restore-document:notes', 'restore-document:notes-child', 'move-document:notes', 'restore-document:draft', 'move-document:draft']);
+    expect(harness.commands).toContainEqual(expect.objectContaining({ type: 'move-document', documentId: 'notes', parentFolderId: null }));
+    const restored = harness.session.getDocuments();
+    expect(restored.find((doc) => doc.documentId === 'notes')?.parentFolderId ?? null).toBeNull();
+    expect(restored.find((doc) => doc.documentId === 'notes-child')?.parentFolderId).toBe('notes');
+
+    // A parent that is back in the tree keeps its child.
+    await expect(harness.session.restoreDocument('parent')).resolves.toEqual({ ok: true, restored: 1, movedToRoot: false });
+  });
+
   it('answers a page tree write with the store outcome, not the optimistic state', async () => {
     const harness = createHarness(SCOPE, { documents: [document('arch', 'Architecture'), document('leaf', 'Leaf')] });
     (harness.dataSource.command as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Personal pages refused the write'));

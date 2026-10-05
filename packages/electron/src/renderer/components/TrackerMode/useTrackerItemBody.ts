@@ -25,6 +25,8 @@ import { useTrackerContentCollab } from '../../hooks/useTrackerContentCollab';
 import { useColdPaintFallback } from '../../hooks/useColdPaintFallback';
 import { useCollabSyncCurtain } from '../../hooks/useCollabSyncCurtain';
 import { registerLiveTypedPageEditor } from '../../services/personalAgentEdit';
+import { useCollabBodyHistory } from '../HistoryDialog/useCollabBodyHistory';
+import { personalTypedPageHistoryKey } from '../../../shared/personalPageUri';
 
 /** How this item's body is edited -- see `resolveTrackerContentMode`. */
 export type TrackerContentMode = 'file-backed' | 'local-pglite' | 'collaborative';
@@ -151,6 +153,12 @@ export interface TrackerItemBody {
   recoveryEditor: LexicalEditor | null;
   localEditorConfig: EditorConfig | null;
   collabEditorConfig: EditorConfig | null;
+  /**
+   * What the history dialog opens for this body: the room's `collab://` URI
+   * for a collaborative body, the local-history key for a Personal one. Null
+   * while neither applies (file-backed, or still connecting).
+   */
+  historyKey: string | null;
 }
 
 export function useTrackerItemBody({
@@ -297,6 +305,7 @@ export function useTrackerItemBody({
     commentsConfig,
     providerEpoch,
     bodyCacheMarkdown,
+    history: collabHistory,
   } = useTrackerContentCollab({
     itemId,
     title: item?.issueKey || (item ? getRecordTitle(item) : itemId),
@@ -511,6 +520,15 @@ export function useTrackerItemBody({
         unregisterLiveEditorRef.current = registerLiveTypedPageEditor(itemId, {
           editor,
           getContent: () => getContentFnRef.current?.() ?? contentMarkdown ?? '',
+          replaceContent: (markdown: string) => {
+            editor.update(() => {
+              // Clearing a selected node without moving selection first makes
+              // Lexical throw "selection has been lost ..." (NIM-2005).
+              $setSelection(null);
+              $getRoot().clear();
+              $convertFromEnhancedMarkdownString(markdown, getEditorTransformers());
+            });
+          },
         });
       },
     };
@@ -571,6 +589,18 @@ export function useTrackerItemBody({
     };
   }, [contentMode, collabConfig, collabLoading, commentsConfig, contentLoaded, contentMarkdown, forceFloatingToolbar, saveContent]);
 
+  // A collaborative body's page history: revisions in its room, restored
+  // through this editor.
+  useCollabBodyHistory({
+    uri: contentMode === 'collaborative' ? collabHistory?.uri ?? null : null,
+    client: collabHistory?.client ?? null,
+    syncProvider,
+    editor: contentMode === 'collaborative' ? recoveryEditor : null,
+  });
+  const historyKey = contentMode === 'collaborative'
+    ? collabHistory?.uri ?? null
+    : contentMode === 'local-pglite' && sharing === 'personal' ? personalTypedPageHistoryKey(itemId) : null;
+
   return {
     sharing,
     isItemPublished,
@@ -586,5 +616,6 @@ export function useTrackerItemBody({
     recoveryEditor,
     localEditorConfig,
     collabEditorConfig,
+    historyKey,
   };
 }

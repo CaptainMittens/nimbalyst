@@ -12,6 +12,12 @@ export interface CollabTypeResolverRecord {
     title: string;
     issueNumber?: number | null;
     archived?: boolean;
+    /**
+     * Exists only on this machine: never shared, like a frontmatter projection
+     * of a local file. Kept out of the team section even when its type is a
+     * team type, because it is not team data.
+     */
+    localOnly?: boolean;
 }
 /** Which Pages section a resolver serves. */
 export type CollabTypeLane = 'team' | 'personal';

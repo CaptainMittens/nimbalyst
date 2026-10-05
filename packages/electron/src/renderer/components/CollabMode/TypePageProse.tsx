@@ -106,7 +106,7 @@ export const TypePageProse: React.FC<TypePageProseProps> = ({
   return (
     <div className="type-page-prose tracker-page-view-body" data-testid="type-page-prose" data-document-id={documentId}>
       {resolution.status === 'ready' ? (
-        <CollaborativeEmbedEditor editor={resolution.editor} request={resolution.request} readOnly={false} toolbar={false} />
+        <CollaborativeEmbedEditor editor={resolution.editor} request={resolution.request} readOnly={false} toolbar={false} publishHistory />
       ) : (
         <div className="tracker-page-view-gutter py-3 text-sm text-nim-muted">{resolution.error}</div>
       )}

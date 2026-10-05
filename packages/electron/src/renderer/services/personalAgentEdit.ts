@@ -11,8 +11,8 @@
  * showing old text, and a typed page's pending autosave would write that old
  * text straight back over the agent's edit. Otherwise the stored body is
  * edited directly: read with its version, apply the replacements, write back
- * only if the version still matches (one retry on a race). A plain page keeps
- * its pre-edit text in history first.
+ * only if the version still matches (one retry on a race). Either kind keeps
+ * its pre-edit text in local history first.
  */
 import type { LexicalEditor } from 'lexical';
 import type { TextReplacement } from '@nimbalyst/runtime';
@@ -23,7 +23,7 @@ import {
   type ApplyMarkdownReplaceResult,
 } from '@nimbalyst/runtime/editor/plugins/DiffPlugin/DiffCommands';
 import { editorRegistry } from '@nimbalyst/runtime/ai/EditorRegistry';
-import { parsePersonalPageUri } from '../../shared/personalPageUri';
+import { parsePersonalPageUri, personalTypedPageHistoryKey } from '../../shared/personalPageUri';
 
 const PERSONAL_DOC_EDITOR_PREFIX = 'personal-doc://';
 
@@ -34,6 +34,8 @@ type TypedPageBodyWrite = { written: true } | { conflict: true; version: number 
 export interface LiveTypedPageEditor {
   editor: LexicalEditor;
   getContent(): string;
+  /** Replace the whole body (a history restore); the editor's autosave stores it. */
+  replaceContent(markdown: string): void;
 }
 
 export interface PersonalPageIo {
@@ -183,6 +185,7 @@ async function editStoredTypedPage(itemId: string, replacements: TextReplacement
     const current = markdownOf(body.content, `The typed page ${itemId}`);
     const next = applyTextReplacementsToString(current, replacements);
     if (next === current) return;
+    if (attempt === 0) await io.keepInHistory(personalTypedPageHistoryKey(itemId), current, 'Before agent edit');
     const written = await io.setTypedPageBody(itemId, next, version);
     if (!('conflict' in written)) return;
     knownVersion = written.version;
@@ -224,7 +227,10 @@ export async function applyPersonalPageAgentEdit(
   try {
     if (target.kind === 'typed-page') {
       const live = io.liveTypedPage(target.itemId);
-      if (live) return editLiveTypedPage(live, replacements);
+      if (live) {
+        await io.keepInHistory(personalTypedPageHistoryKey(target.itemId), live.getContent(), 'Before agent edit');
+        return editLiveTypedPage(live, replacements);
+      }
       await editStoredTypedPage(target.itemId, replacements, io);
       return { success: true };
     }
@@ -242,4 +248,39 @@ export async function applyPersonalPageAgentEdit(
   } catch (error) {
     return failure(error);
   }
+}
+
+const RESTORE_CONFLICT = 'This page changed while restoring. Its current text was kept; try again.';
+
+/**
+ * Restore a Personal typed page's body from its local history. An open body
+ * editor takes the restored text itself, so its pending autosave cannot write
+ * the replaced text back over it; otherwise the stored body is written at the
+ * version it was read at.
+ *
+ * A restore replaces the whole body, so a refused write means someone saved
+ * after the read, and it rejects rather than overwrite that save. A body read
+ * without its version is written at the version a refused write reports, and
+ * only while the text is still what was read.
+ */
+export async function restorePersonalTypedPageBody(
+  itemId: string,
+  markdown: string,
+  io: PersonalPageIo = rendererIo,
+): Promise<void> {
+  const live = io.liveTypedPage(itemId);
+  if (live) {
+    live.replaceContent(markdown);
+    return;
+  }
+  const read = await io.getTypedPageBody(itemId);
+  const written = await io.setTypedPageBody(itemId, markdown, read.version ?? 0);
+  if (!('conflict' in written)) return;
+  if (read.version !== null) throw new Error(RESTORE_CONFLICT);
+  const reread = await io.getTypedPageBody(itemId);
+  const moved = JSON.stringify(reread.content) !== JSON.stringify(read.content)
+    || (reread.version !== null && reread.version !== written.version);
+  if (moved) throw new Error(RESTORE_CONFLICT);
+  const retried = await io.setTypedPageBody(itemId, markdown, written.version);
+  if ('conflict' in retried) throw new Error(RESTORE_CONFLICT);
 }

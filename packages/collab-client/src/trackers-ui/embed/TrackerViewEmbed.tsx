@@ -12,7 +12,7 @@ import { computeReadiness } from '@nimbalyst/runtime/plugins/TrackerPlugin/model
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { getRecordStatus, getRecordTitle } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
-import type { SavedView, SavedViewDefinition, TrackerIdentity } from '@nimbalyst/collab-client/trackers';
+import { selectArchivedForView, type SavedView, type SavedViewDefinition, type TrackerIdentity } from '@nimbalyst/collab-client/trackers';
 import { useTrackersUI } from '../TrackersUIProvider';
 import { useTrackerDataSelector } from '../useTrackerData';
 import { useTrackerViewRows } from '../useTrackerViewRows';
@@ -130,10 +130,13 @@ function LoadedViewEmbed({
   const readinessByItemId = useMemo(() => computeReadiness(records, getRecordStatus), [records]);
   const typeKey = typeIds?.join('\u001f');
   const scoped = useMemo(() => {
-    if (!typeIds) return { records, definition };
+    // An archived item is out of every view that does not ask for it, as in
+    // Tracker mode; a type page then drops a typed page once it is archived.
+    const active = selectArchivedForView(records, definition);
+    if (!typeIds) return { records: active, definition };
     const wanted = new Set(typeIds);
     return {
-      records: records.filter((record) => record.typeTags.some((tag) => wanted.has(tag))),
+      records: active.filter((record) => record.typeTags.some((tag) => wanted.has(tag))),
       definition: { ...definition, selectedType: 'all' },
     };
     // typeKey stands for typeIds, which callers rebuild on every render.

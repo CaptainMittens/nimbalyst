@@ -18,6 +18,7 @@ import { ElectronCollabDocsUIRoot } from './ElectronCollabDocsUIProvider';
 import { useCollabTypeResolver } from './useCollabTypeResolver';
 import { useSetPageType } from './useSetPageType';
 import { usePagesSidebarCollapse } from './usePagesSidebarCollapse';
+import { archiveTrackerItem } from '../../services/archiveTrackerItem';
 
 interface PagesSidebarSectionsProps {
   workspacePath: string;
@@ -82,6 +83,7 @@ export function PagesSidebarSections({
               homeActive={homeActive}
               registerCreateMenu={registerTeamCreateMenu}
               typeResolver={teamTypeResolver}
+              onArchiveItem={archiveTrackerItem}
               collapsed={collapsed.team}
               onToggleCollapsed={() => toggle('team')}
               onSetPageType={(page) => setTypingPage({ lane: 'team', page })}
@@ -105,6 +107,7 @@ export function PagesSidebarSections({
             activeTypeId={activeRow.typeId}
             registerCreateMenu={registerPersonalCreateMenu}
             typeResolver={personalTypeResolver}
+            onArchiveItem={archiveTrackerItem}
             collapsed={collapsed.personal}
             onToggleCollapsed={() => toggle('personal')}
             onSetPageType={(page) => setTypingPage({ lane: 'personal', page })}

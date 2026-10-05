@@ -24,6 +24,9 @@ export function buildCollabTypeResolver(
     title: getRecordTitle(record).trim(),
     issueNumber: record.issueNumber,
     archived: record.archived,
+    // 'pending' is a shared item on its way to the room; 'local' never left
+    // this machine (unshared items and frontmatter projections of local files).
+    localOnly: record.syncStatus === 'local',
   }));
   return buildSharedCollabTypeResolver(registry, items, lane);
 }

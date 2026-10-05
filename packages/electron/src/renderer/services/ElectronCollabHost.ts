@@ -19,6 +19,7 @@ import type {
   SharedDocument,
   SharedFolder,
 } from '@nimbalyst/collab-client/docs';
+import { TYPE_PAGE_DOCUMENT_PREFIX } from '@nimbalyst/collab-client/docs';
 import { store } from '@nimbalyst/runtime/store';
 import { errorNotificationService } from './ErrorNotificationService';
 import {
@@ -379,9 +380,12 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
       throw new Error('This Electron host was created without a navigation adapter');
     }
     this.openArtifactImpl(ref, source);
-    if (source === 'history' && ref.kind === 'document') {
-      store.set(historyDialogFileAtom, buildCollabUri(ref.scope.orgId, ref.documentId));
-    }
+    if (source !== 'history') return;
+    // A typed page's body and a type page's prose are document rooms of their own.
+    const historyDocumentId = ref.kind === 'document' ? ref.documentId
+      : ref.kind === 'tracker' ? `tracker-content/${ref.trackerId}`
+        : ref.kind === 'type' ? `${TYPE_PAGE_DOCUMENT_PREFIX}${ref.typeId}` : null;
+    if (historyDocumentId) store.set(historyDialogFileAtom, buildCollabUri(ref.scope.orgId, historyDocumentId));
   }
 
   artifactUrl(ref: CollabArtifactRef): string | null {

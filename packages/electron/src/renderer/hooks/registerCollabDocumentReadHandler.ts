@@ -54,6 +54,8 @@ export function registerCollabDocumentReadHandler(
         window.electronAPI.sendMcpReadCollabDocResult(resultChannel, {
           success: true,
           content: result.content,
+          title: result.title,
+          documentType: result.documentType,
           ...(includeDecisionState
             ? { decisionState: result.decisionState }
             : {}),

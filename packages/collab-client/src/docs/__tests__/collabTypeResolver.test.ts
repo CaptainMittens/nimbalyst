@@ -41,6 +41,20 @@ describe('buildCollabTypeResolver', () => {
     expect(resolver.typeLabel?.('scratch')).toBe('scratch');
   });
 
+  it('keeps an item that exists only on this machine out of the team section, even under a team type', () => {
+    const models = [model('decision', 'team')];
+    const resolver = buildCollabTypeResolver(
+      { get: (type) => models.find((candidate) => candidate.type === type), getListed: () => models },
+      [
+        { id: 'dec_1', typeId: 'decision', title: 'Shared', issueNumber: 1 },
+        // A frontmatter projection of a local file, never shared.
+        { id: 'fm:decision:temptests/wiki/decision/second.md', typeId: 'decision', title: 'Second', localOnly: true },
+      ],
+    );
+    expect(resolver.itemsOfType('decision').map((item) => item.itemId)).toEqual(['dec_1']);
+    expect(resolver.item?.('fm:decision:temptests/wiki/decision/second.md')).toBeNull();
+  });
+
   it('marks types that take no new pages, so Set type can leave them out', () => {
     const models = [model('module', 'team'), { ...model('ledger', 'team'), creatable: false } as TrackerDataModel];
     const resolver = buildCollabTypeResolver({ get: (type) => models.find((candidate) => candidate.type === type), getListed: () => models }, []);

@@ -9,11 +9,13 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { atom, useAtomValue, useStore, type Atom } from 'jotai';
+import { atom, useAtomValue, useSetAtom, useStore, type Atom } from 'jotai';
 import type { CollabScope } from '@nimbalyst/collab-client/core';
 import type { SharedDocument } from '@nimbalyst/collab-client/docs';
 import { DESKTOP_TRACKER_UI_CAPABILITIES, TrackersUIProvider } from '@nimbalyst/collab-client/trackers-ui';
-import { TypePageTable, crumbItemLookup, trackerPageCrumbFolders, typePageTypeIds } from '@nimbalyst/collab-client/trackers-ui/page';
+import { PageHistoryButton, TypePageTable, crumbItemLookup, trackerPageCrumbFolders, typePageTypeIds } from '@nimbalyst/collab-client/trackers-ui/page';
+import { TYPE_PAGE_DOCUMENT_PREFIX } from '@nimbalyst/collab-client/docs';
+import { buildCollabUri } from '@nimbalyst/collab-protocol';
 import '@nimbalyst/collab-client/trackers-ui/page.css';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
@@ -30,6 +32,8 @@ import { useDesktopTrackerIdentity } from '../EmbedFrame/useDesktopTrackerIdenti
 import { isTeamTrackerSharing } from '../Settings/panels/trackerConfigUpgrade';
 import { typePageTitle } from './collabPageTabs';
 import { TypePageProse } from './TypePageProse';
+import { personalPageHistoryKey } from '../../../shared/personalPageUri';
+import { historyDialogFileAtom } from '../../store/atoms/historyDialog';
 import './TypePageTab.css';
 
 type Lane = 'team' | 'personal';
@@ -122,17 +126,25 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
   const parentFolderId = typePlacements.find((placement) => placement.typeId === typeId)?.parentFolderId ?? null;
   const fieldLabels = useMemo(() => typeFieldLabels(typeId), [typeId, model]);
   const itemTitle = useMemo(() => (itemId: string) => itemLookup(itemId)?.title ?? null, [itemLookup]);
+  // The prose's history, once someone has started writing it.
+  const proseId = `${TYPE_PAGE_DOCUMENT_PREFIX}${typeId}`;
+  const proseExists = documents.some((document) => document.documentId === proseId);
+  const historyKey = !proseExists ? null : lane === 'personal' ? personalPageHistoryKey(proseId) : scope ? buildCollabUri(scope.orgId, proseId) : null;
+  const openHistory = useSetAtom(historyDialogFileAtom);
 
   return (
     <div className="type-page-tab tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="type-page-tab" data-type-id={typeId}>
       <div className="type-page-tab-scroller min-h-0 flex-1 overflow-y-auto">
         <div className="type-page-tab-column">
           <div className="tracker-page-view-header">
-            <div className="tracker-page-view-crumb mb-2.5 truncate text-xs text-nim-faint select-text" data-testid="type-page-crumb">
-              {crumb.map((part, index) => (
-                <span key={`${index}:${part}`}>{part} / </span>
-              ))}
-              <span className="text-nim-muted">{typeName}</span>
+            <div className="tracker-page-view-crumb-row mb-2.5 flex items-center gap-2">
+              <div className="tracker-page-view-crumb min-w-0 flex-1 truncate text-xs text-nim-faint select-text" data-testid="type-page-crumb">
+                {crumb.map((part, index) => (
+                  <span key={`${index}:${part}`}>{part} / </span>
+                ))}
+                <span className="text-nim-muted">{typeName}</span>
+              </div>
+              {historyKey && <PageHistoryButton onClick={() => openHistory(historyKey)} />}
             </div>
             <h1 className="type-page-tab-title m-0 mb-3 flex items-center gap-2 break-words text-[28px] font-medium leading-tight text-nim select-text">
               {model?.icon ? <MaterialSymbol icon={model.icon} size={26} style={{ color: model.color }} /> : null}
