@@ -598,6 +598,23 @@ describe('CollabDocsSession', () => {
     expect(leaf()).toMatchObject({ parentFolderId: 'arch' });
   });
 
+  it('rolls back a refused rename without replacing a newer remote title', async () => {
+    const harness = createHarness(SCOPE, { documents: [document('page', 'Before')] });
+    await harness.session.start();
+    const command = harness.dataSource.command as ReturnType<typeof vi.fn>;
+    command.mockRejectedValueOnce(new Error('rename unconfirmed'));
+    expect(await harness.session.updateDocumentTitle('page', 'After')).toMatchObject({ ok: false });
+    expect(harness.session.getDocuments()[0].title).toBe('Before');
+
+    let reject!: (error: Error) => void;
+    command.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    const pending = harness.session.updateDocumentTitle('page', 'After');
+    harness.emitData({ type: 'items-upserted', items: [document('page', 'Teammate title')] });
+    reject(new Error('rename unconfirmed'));
+    await pending;
+    expect(harness.session.getDocuments()[0].title).toBe('Teammate title');
+  });
+
   it('does not let the echo of an earlier move revert a later one still in flight', async () => {
     const at = (parentFolderId: string | null, sortOrder: number | null) => ({ ...document('leaf', 'Leaf'), parentFolderId, sortOrder, updatedAt: 30 });
     const harness = createHarness(SCOPE, { documents: [document('a', 'A'), document('b', 'B'), document('c', 'C'), document('leaf', 'Leaf')] });

@@ -4,9 +4,8 @@
  * A mark lives in a page's markdown body (`[sentence]{decided by=...}`); a
  * host answers `listMarks`. Team pages come from the server's marks index
  * (`pageMarksQuery`, mapped by `pageMarkRecordsFromTeamIndex`). The desktop
- * adds what it reads locally -- typed pages, Personal pages and Personal type
- * pages -- and merges the two; the web console uses the index alone, so it
- * lists no typed-page marks. A source's `subscribe` (`PageMarksChangeFeed`)
+ * adds its local bodies and merges the two; web uses the index alone. Typed
+ * pages are accepted only with server-checked live membership metadata. A source's `subscribe` (`PageMarksChangeFeed`)
  * tells open lists to load again.
  *
  * Logic and contracts only -- no React, no DOM.
@@ -63,6 +62,8 @@ export interface PageMarksQuery {
 
 export interface PageMarksSource {
   listMarks(query: PageMarksQuery): Promise<PageMarkRecord[]>;
+  /** Hosts with completeness support return this to avoid claiming partial emptiness. */
+  listMarksResult?(query: PageMarksQuery): Promise<{ marks: PageMarkRecord[]; status: 'ready' | 'partial' }>;
   /** Called when marks may have changed; returns the unsubscribe. Optional. */
   subscribe?(listener: () => void): () => void;
 }
@@ -118,22 +119,22 @@ export interface TeamIndexMappingOptions {
 
 /**
  * Records for the marks the server's index returned. A typed page's body is
- * never taken from the index (an older server listed them, deleted items
- * included); the desktop reads those locally.
+ * accepted only with live membership metadata. Older unchecked rows are ignored.
  */
 export function pageMarkRecordsFromTeamIndex(entries: readonly PageMarkEntry[], options: TeamIndexMappingOptions): PageMarkRecord[] {
   const out: PageMarkRecord[] = [];
   for (const entry of entries) {
-    if (entry.documentId.startsWith(TRACKER_CONTENT_PREFIX)) continue;
+    const typed = entry.documentId.startsWith(TRACKER_CONTENT_PREFIX);
+    if (typed && (!entry.typedPage || entry.typedPage.itemId !== entry.documentId.slice(TRACKER_CONTENT_PREFIX.length))) continue;
     const typeId = entry.documentId.startsWith(TYPE_PAGE_PREFIX) ? entry.documentId.slice(TYPE_PAGE_PREFIX.length) : null;
     const page: PageMarkRecord['page'] = {
-      kind: typeId ? 'type-page' : 'page',
+      kind: typed ? 'typed-page' : typeId ? 'type-page' : 'page',
       scope: 'team',
-      id: entry.documentId,
+      id: typed ? entry.typedPage!.itemId : entry.documentId,
       title: entry.title ?? typeId ?? 'Untitled',
-      uri: buildCollabUri(options.orgId, entry.documentId),
-      typeId,
-      issueKey: null,
+      uri: typed ? `tracker://${entry.typedPage!.itemId}` : buildCollabUri(options.orgId, entry.documentId),
+      typeId: typed ? entry.typedPage!.typeId : typeId,
+      issueKey: typed ? entry.typedPage!.issueKey : null,
     };
     out.push({
       id: `${page.uri}#${entry.offset}`,

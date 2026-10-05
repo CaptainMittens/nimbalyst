@@ -4,8 +4,7 @@
  * bodies. The server extracts them when a body changes and keeps them in the
  * TeamRoom, so a client can list marks from pages it has never opened.
  *
- * Only pages in the team's doc index are covered; a typed page's body
- * (`tracker-content/<itemId>`) is not, so clients read those locally.
+ * New servers also cover typed pages with live TrackerRoom membership checks.
  * A member is answered only with marks from documents they can read; trashed
  * documents are never included.
  */
@@ -20,6 +19,8 @@ export interface PageMarkEntry {
   projectId: string | null;
   /** Page title from the doc index; null when it cannot be read. */
   title: string | null;
+  /** Present only after live typed-item membership and archive checks. */
+  typedPage?: { itemId: string; typeId: string | null; issueKey: string | null };
   kind: PageMarkEntryKind;
   /** The marked sentence as inline markdown. */
   text: string;
@@ -43,6 +44,7 @@ export interface TeamPageMarksQueryMessage {
   type: 'pageMarksQuery';
   /** Echoed on the response so a client can run several queries at once. */
   requestId: string;
+  projectId?: string;
   kind?: PageMarkEntryKind;
   /** Only marks by this person (case-insensitive). */
   email?: string;
@@ -57,6 +59,8 @@ export interface TeamPageMarksResponseMessage {
   marks: PageMarkEntry[];
   /** `partial` until the server has indexed every page once. */
   status: 'ready' | 'partial';
+  /** Absent on older servers that exclude typed-page bodies. */
+  coverage?: 'all-page-kinds';
 }
 
 /**

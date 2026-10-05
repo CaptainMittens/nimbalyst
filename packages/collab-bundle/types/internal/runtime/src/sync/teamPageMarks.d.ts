@@ -9,10 +9,11 @@
  * from: a marks source asks its active team again.
  */
 import type { PageMarkEntry, TeamPageMarksQueryMessage, TeamPageMarksResponseMessage } from '@nimbalyst/collab-protocol';
-export type TeamPageMarksFilters = Pick<TeamPageMarksQueryMessage, 'kind' | 'email' | 'documentIds'>;
+export type TeamPageMarksFilters = Pick<TeamPageMarksQueryMessage, 'kind' | 'email' | 'documentIds' | 'projectId'>;
 export interface TeamPageMarksResult {
     marks: PageMarkEntry[];
     status: TeamPageMarksResponseMessage['status'];
+    coverage?: TeamPageMarksResponseMessage['coverage'];
 }
 /** Called when a team's marks may have changed; returns the unsubscribe. */
 export declare function onTeamPageMarksChanged(listener: () => void): () => void;

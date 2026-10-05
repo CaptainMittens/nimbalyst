@@ -19,6 +19,13 @@ function record(text: string): PageMarkRecord {
 afterEach(() => setPageMarksSource(null));
 
 describe('MarksListEmbed', () => {
+  it('never claims there are no decisions while the result is partial', async () => {
+    setPageMarksSource({ listMarks: async () => [], listMarksResult: async () => ({ marks: [], status: 'partial' }) });
+    render(<MarksListEmbed kind="decided" label="" attrs={{}} />);
+    expect((await screen.findByRole('status')).textContent).toContain('incomplete');
+    expect(screen.queryByText('No sentences are marked decided yet.')).toBeNull();
+  });
+
   it('reloads on change, ignores a slower older answer, and keeps its rows when a reload fails', async () => {
     const answers: Array<{ resolve: (marks: PageMarkRecord[]) => void; reject: (error: Error) => void }> = [];
     let changed = () => {};

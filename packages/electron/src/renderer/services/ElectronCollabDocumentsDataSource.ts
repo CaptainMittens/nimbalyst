@@ -154,6 +154,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
   private readonly placementConfirmations: ItemPlacementConfirmations;
   /** Confirmed page moves and type placements (Set type moves a page's children). */
   private readonly documentConfirmations: CollabWriteConfirmations<TeamDocIndexEntry>;
+  private readonly titleConfirmations: CollabWriteConfirmations<TeamDocIndexEntry>;
   private readonly typeConfirmations: CollabWriteConfirmations<TypePlacementNode>;
   /** Page and subtree deletes, keyed by the removed id; only when the server echoes them. */
   private readonly removalConfirmations: CollabWriteConfirmations<true>;
@@ -171,6 +172,8 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     const typeConfirmations = new CollabWriteConfirmations<TypePlacementNode>(options.placementConfirmTimeoutMs, 'placement');
     const removalConfirmations = new CollabWriteConfirmations<true>(options.placementConfirmTimeoutMs, 'delete');
     this.documentConfirmations = documentConfirmations;
+    const titleConfirmations = new CollabWriteConfirmations<TeamDocIndexEntry>(options.placementConfirmTimeoutMs, 'rename');
+    this.titleConfirmations = titleConfirmations;
     this.typeConfirmations = typeConfirmations;
     this.removalConfirmations = removalConfirmations;
     const emitSnapshot = () => this.emit({
@@ -187,6 +190,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       onDocumentsLoaded: emitSnapshot,
       onDocumentChanged: (document) => {
         documentConfirmations.changed(document.documentId, document);
+        titleConfirmations.changed(document.documentId, document);
         // A page-tree server moves a live page to Trash instead of deleting it,
         // and the trashed row is its answer to the delete.
         if (document.trashedAt != null) removalConfirmations.changed(document.documentId, true);
@@ -209,6 +213,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       },
       onWriteRefused: (requestId, error) => {
         documentConfirmations.refused(requestId, error.message);
+        titleConfirmations.refused(requestId, error.message);
         removalConfirmations.refused(requestId, error.message);
       },
       // Placement changes ride the snapshot change; see CollabDocsSnapshot.
@@ -237,6 +242,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
       onStatusChange: (status) => {
         confirmations.connectionChanged(status === 'connected');
         documentConfirmations.connectionChanged(status === 'connected');
+        titleConfirmations.connectionChanged(status === 'connected');
         typeConfirmations.connectionChanged(status === 'connected');
         removalConfirmations.connectionChanged(status === 'connected');
         this.emit({ type: 'status', status });
@@ -335,9 +341,13 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
         );
         return { ok: true, registrationAcked };
       }
-      case 'update-document-title':
-        await this.provider.updateDocumentTitle(command.documentId, command.title);
+      case 'update-document-title': {
+        if (!this.provider.echoesTitleWrites?.()) throw new Error('This server cannot confirm page renames yet. Try again after the server is updated.');
+        const requestId = crypto.randomUUID();
+        const confirmed = this.titleConfirmations.expect(command.documentId, (row) => row.title === command.title, requestId);
+        await Promise.all([this.provider.updateDocumentTitle(command.documentId, command.title, { requestId }), confirmed]);
         return { ok: true };
+      }
       case 'remove-document': {
         const requestId = this.authorEchoRequestId();
         const confirmed = requestId ? this.removalConfirmations.expect(command.documentId, () => true, requestId) : null;
@@ -438,6 +448,7 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
     this.listeners.clear();
     this.placementConfirmations.dispose();
     this.documentConfirmations.dispose();
+    this.titleConfirmations.dispose();
     this.typeConfirmations.dispose();
     this.removalConfirmations.dispose();
     this.provider.destroy();

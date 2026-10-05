@@ -27,6 +27,7 @@ import {
   type SearchPagesResultEntry,
 } from '@nimbalyst/collab-protocol';
 import { mergePageSearchHits, nameTypedHits, pageSearchTitleHits } from './pageSearch';
+import { pageTreeListing } from './pageTreeListing';
 
 // For a worker session's `searchPages`; `pageSearch.ts` has no package entry of its own.
 export { searchSectionPages } from './pageSearch';
@@ -229,10 +230,14 @@ function consoleScopeOf(context: TreeContext): ConsoleLinkScope | null {
 function describeNode(context: TreeContext, env: PageTreeToolEnv, node: CollabTreeNode, depth: number): PageTreeNodeSummary | null {
   const parentNodeId = context.parents.get(node.id)?.id ?? null;
   const scope = consoleScopeOf(context);
+  const childCount = childrenOf(node).length;
   if (node.type === 'document') {
     return {
       nodeId: node.id,
       kind: 'page',
+      childCount,
+      updatedAt: node.document.updatedAt,
+      ...(node.document.hasContent !== undefined ? { hasContent: node.document.hasContent } : {}),
       id: node.document.documentId,
       title: pageDisplayName(node.document.title, node.document.documentType),
       parentNodeId,
@@ -247,6 +252,7 @@ function describeNode(context: TreeContext, env: PageTreeToolEnv, node: CollabTr
     return {
       nodeId: node.id,
       kind: 'typedPage',
+      childCount,
       id: node.itemId,
       ...(item?.issueKey ? { issueKey: item.issueKey } : {}),
       typeId: node.typeId,
@@ -262,6 +268,7 @@ function describeNode(context: TreeContext, env: PageTreeToolEnv, node: CollabTr
     return {
       nodeId: node.id,
       kind: 'type',
+      childCount,
       id: node.typeId,
       title: node.name,
       parentNodeId,
@@ -276,8 +283,8 @@ function describeNode(context: TreeContext, env: PageTreeToolEnv, node: CollabTr
   return null;
 }
 
-export async function listPagesTool(env: PageTreeToolEnv, args: Record<string, unknown>): Promise<PageTreeToolResult> {
-  const context = await readTree(env, sectionOf(args.section));
+/** Internal complete tree, also used by search so public pagination cannot hide hits. */
+function describeTree(context: TreeContext, env: PageTreeToolEnv): PageTreeNodeSummary[] {
   const nodes: PageTreeNodeSummary[] = [];
   const walk = (list: CollabTreeNode[], depth: number) => {
     for (const node of list) {
@@ -287,12 +294,27 @@ export async function listPagesTool(env: PageTreeToolEnv, args: Record<string, u
     }
   };
   walk(context.tree, 0);
+  return nodes;
+}
+
+export async function listPagesTool(env: PageTreeToolEnv, args: Record<string, unknown>): Promise<PageTreeToolResult> {
+  const context = await readTree(env, sectionOf(args.section));
+  let root: string | null = null;
+  if (args.root !== undefined) {
+    if (typeof args.root !== 'string' || !(root = resolveNodeRef(env, context, args.root))) return fail('No such subtree in this Pages section.');
+  }
+  let listing;
+  try {
+    listing = await pageTreeListing(describeTree(context, env), JSON.stringify([context.section, consoleScopeOf(context)]), args, root);
+  } catch (error) {
+    return fail(error instanceof Error ? error.message : 'Could not list pages.');
+  }
   const scope = consoleScopeOf(context);
   const result: ListPagesResult = {
     section: context.section,
     consoleScope: scope,
     ...(scope ? { openMarksViewLink: buildConsoleLink({ kind: 'view', scope, view: { kind: 'marks', marks: 'open' } }) } : {}),
-    nodes,
+    ...listing,
   };
   return { success: true, ...result };
 }
@@ -497,10 +519,9 @@ export async function searchPagesTool(env: PageTreeToolEnv, args: Record<string,
   const section: PageTreeSection = args.section === 'personal' ? 'personal' : 'team';
   const limit = typeof args.limit === 'number' ? args.limit : undefined;
 
-  const listed = await listPagesTool(env, { section });
-  if (!listed.success) return listed;
-  const { nodes } = listed as unknown as ListPagesResult & { success: true };
-  const session = await env.session(section);
+  const context = await readTree(env, section);
+  const nodes = describeTree(context, env);
+  const session = context.session;
   if (!session.searchPages) return { success: false, error: 'This Pages section cannot search page text.' };
   // Only the types the tree shows: a typed page it would drop must not use up the limit.
   const typeIds = [...new Set(nodes.flatMap((node) => (node.kind === 'typedPage' ? [node.typeId] : [])))];

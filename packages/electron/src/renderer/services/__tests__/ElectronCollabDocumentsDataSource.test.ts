@@ -17,6 +17,50 @@ const scope: CollabScope = {
 };
 
 describe('ElectronCollabDocumentsDataSource', () => {
+  it('confirms a rename only from the stored title, and exposes refusal, lost acknowledgement and old servers', async () => {
+    vi.useFakeTimers();
+    let config!: TeamSyncConfig;
+    const provider = {
+      connect: vi.fn(async () => undefined), getStatus: () => 'connected',
+      echoesTitleWrites: vi.fn(() => true), updateDocumentTitle: vi.fn(async (_id: string, _title: string, _options: { requestId: string }) => undefined), destroy: vi.fn(),
+    };
+    const source = new ElectronCollabDocumentsDataSource({
+      scope, getJwt: async () => asTeamJwt('team-jwt'), placementConfirmTimeoutMs: 100,
+      createProvider: (next) => { config = next; return provider as any; },
+    });
+    const rename = () => source.command({ type: 'update-document-title', documentId: 'page-1', title: 'Design' });
+    const row = { documentId: 'page-1', title: 'design', documentType: 'markdown', createdBy: 'member', createdAt: 1, updatedAt: 2 };
+    try {
+      let done = false;
+      const pending = rename().then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done).toBe(false);
+      config.onDocumentChanged?.(row);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done).toBe(false);
+      config.onDocumentChanged?.({ ...row, title: 'Design' });
+      await pending;
+      expect(done).toBe(true);
+
+      const refused = rename().catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(0);
+      const requestId = provider.updateDocumentTitle.mock.calls.at(-1)![2].requestId;
+      config.onWriteRefused?.(requestId, { code: 'forbidden', message: 'Access removed' });
+      expect(await refused).toMatch(/Access removed/);
+
+      const lost = rename().catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(await lost).toMatch(/did not confirm the rename/);
+      provider.echoesTitleWrites.mockReturnValue(false);
+      const sent = provider.updateDocumentTitle.mock.calls.length;
+      await expect(rename()).rejects.toThrow(/server.*rename/i);
+      expect(provider.updateDocumentTitle).toHaveBeenCalledTimes(sent);
+    } finally {
+      source.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('projects provider snapshots/events and routes commands through the provider', async () => {
     let config!: TeamSyncConfig;
     const observeStatus = vi.fn();
@@ -72,7 +116,10 @@ describe('ElectronCollabDocumentsDataSource', () => {
       registerDocument: vi.fn(async () => true),
       moveDocument: vi.fn(),
       getTeamState: vi.fn(() => ({ members: [], metadata: { teamProjectId: 'project-primary' } })),
-      updateDocumentTitle: vi.fn(async () => undefined),
+      echoesTitleWrites: vi.fn(() => true),
+      updateDocumentTitle: vi.fn(async (documentId: string, title: string) => {
+        config.onDocumentChanged?.({ documentId, title, documentType: 'markdown', createdBy: 'member-one', createdAt: 1, updatedAt: 5 });
+      }),
       refreshFolders: vi.fn(async () => []),
       setTypePlacement: vi.fn(),
       removeTypePlacement: vi.fn(),
@@ -142,7 +189,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
     await expect(source.command({ type: 'refresh-item-placements' }))
       .resolves.toEqual({ ok: true, itemPlacements: null });
 
-    expect(changes).toEqual(['items-upserted', 'containers-removed', 'snapshot', 'status']);
+    expect(changes).toEqual(['items-upserted', 'containers-removed', 'snapshot', 'status', 'items-upserted']);
     expect(provider.setTypePlacement).toHaveBeenCalledWith('module', 'item-9', 4, 'item');
     expect(provider.removeTypePlacement).toHaveBeenCalledWith('module');
     // No server list yet (older server): the snapshot must not claim an empty one.
@@ -154,7 +201,7 @@ describe('ElectronCollabDocumentsDataSource', () => {
     expect(olderServer).not.toHaveProperty('itemPlacements');
     expect(olderServer).not.toHaveProperty('pageTree');
     expect(observeStatus).toHaveBeenCalledWith('connected');
-    expect(provider.updateDocumentTitle).toHaveBeenCalledWith('doc-1', 'Renamed');
+    expect(provider.updateDocumentTitle).toHaveBeenCalledWith('doc-1', 'Renamed', { requestId: expect.any(String) });
     expect(provider.connect).toHaveBeenCalledTimes(1);
     source.dispose();
     expect(provider.destroy).toHaveBeenCalledTimes(1);

@@ -51,12 +51,13 @@ function useMarksSource(): PageMarksSource | null {
  * load lands; a failed reload keeps the rows already shown for the same query,
  * never rows from another source or query.
  */
-function useMarks(source: PageMarksSource | null, queryKey: string): { marks: PageMarkRecord[] | null; error: string | null } {
+function useMarks(source: PageMarksSource | null, queryKey: string): { marks: PageMarkRecord[] | null; error: string | null; status?: 'ready' | 'partial' } {
   const [state, setState] = useState<{
     source: PageMarksSource | null;
     queryKey: string;
     marks: PageMarkRecord[] | null;
     error: string | null;
+    status?: 'ready' | 'partial';
   }>({ source: null, queryKey: '', marks: null, error: null });
   useEffect(() => {
     if (!source) return undefined;
@@ -66,8 +67,9 @@ function useMarks(source: PageMarksSource | null, queryKey: string): { marks: Pa
     const load = () => {
       const attempt = ++latest;
       const current = () => !cancelled && attempt === latest;
-      source.listMarks(query).then(
-        (marks) => { if (current()) setState({ source, queryKey, marks, error: null }); },
+      const result = source.listMarksResult ? source.listMarksResult(query) : source.listMarks(query).then(marks => ({ marks, status: 'ready' as const }));
+      result.then(
+        ({ marks, status }) => { if (current()) setState({ source, queryKey, marks, status, error: null }); },
         (cause: unknown) => {
           if (!current()) return;
           const error = cause instanceof Error ? cause.message : String(cause);
@@ -76,6 +78,7 @@ function useMarks(source: PageMarksSource | null, queryKey: string): { marks: Pa
             queryKey,
             marks: previous.source === source && previous.queryKey === queryKey ? previous.marks : null,
             error,
+            status: previous.status,
           }));
         },
       );
@@ -89,7 +92,7 @@ function useMarks(source: PageMarksSource | null, queryKey: string): { marks: Pa
   }, [source, queryKey]);
   // Until the new query answers, show it as loading rather than the old rows.
   if (state.source !== source || state.queryKey !== queryKey) return { marks: null, error: null };
-  return { marks: state.marks, error: state.error };
+  return { marks: state.marks, error: state.error, status: state.status };
 }
 
 function metaLine(mark: PageMarkRecord): string {
@@ -105,7 +108,7 @@ const EMPTY: Record<PlacedViewMarksKind, string> = {
 export function MarksListEmbed({ kind, label, attrs, onOpenPage }: MarksListEmbedProps): JSX.Element {
   const source = useMarksSource();
   const queryKey = JSON.stringify(marksQuery(kind, attrs));
-  const { marks, error } = useMarks(source, queryKey);
+  const { marks, error, status } = useMarks(source, queryKey);
   const name = label || (kind === 'open' ? 'Open questions' : 'Decisions');
   if (!source) return <PlacedViewNote>{name}: this host cannot read page marks yet.</PlacedViewNote>;
 
@@ -120,7 +123,8 @@ export function MarksListEmbed({ kind, label, attrs, onOpenPage }: MarksListEmbe
       <div className="marks-list-embed-body flex flex-col bg-nim text-sm">
         {error ? <div className="px-3 py-2 text-xs text-nim-error" role="alert">{error}</div> : null}
         {marks === null && !error ? <div className="px-3 py-2 text-xs text-nim-muted">Loading...</div> : null}
-        {marks?.length === 0 ? <div className="px-3 py-2 text-xs text-nim-muted">{EMPTY[kind]}</div> : null}
+        {status === 'partial' ? <div className="px-3 py-2 text-xs text-nim-muted" role="status">Results are incomplete. Some pages may still be indexing, offline, or unsupported by this server.</div> : null}
+        {marks?.length === 0 && status !== 'partial' && !error ? <div className="px-3 py-2 text-xs text-nim-muted">{EMPTY[kind]}</div> : null}
         {marks?.map((mark) => (
           <div key={mark.id} className="marks-list-row flex items-baseline gap-2 border-b border-nim px-3 py-1.5 last:border-b-0">
             <span

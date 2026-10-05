@@ -88,7 +88,7 @@ function formatValueParts(
 }
 
 /** Human-readable text for a stored value, by column render type. */
-function formatValue(
+export function formatValue(
   col: TrackerColumnDef,
   value: unknown,
   trackerType: string,

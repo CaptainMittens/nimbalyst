@@ -71,6 +71,8 @@ export interface SavedViewDefinition {
   sortBy: SortColumn;
   /** Flat list/table sort direction. */
   sortDirection: SortDirection;
+  /** Ordered field sorts for placed views; empty uses the legacy single sort. */
+  sortColumns?: Array<{ field: string; direction: SortDirection }>;
   /** Genuine-open lookback in days; null means any time. */
   recentlyViewedDays: 7 | 30 | 90 | null;
   /**
@@ -120,6 +122,7 @@ export function createDefaultViewDefinition(): SavedViewDefinition {
     groupBy: 'none',
     ordering: MANUAL_TRACKER_ORDERING,
     sortBy: 'lastIndexed',
+    sortColumns: [],
     sortDirection: 'desc',
     recentlyViewedDays: 30,
     columnConfig: null,
@@ -174,6 +177,7 @@ export function normalizeViewDefinition(raw: Partial<SavedViewDefinition> | unde
     groupBy: normalizeTrackerGroupBy(raw.groupBy ?? legacyColumnGroupBy(raw.columnConfig)),
     ordering: normalizeTrackerOrdering(raw.ordering),
     sortBy: typeof raw.sortBy === 'string' ? raw.sortBy : base.sortBy,
+    sortColumns: Array.isArray(raw.sortColumns) ? raw.sortColumns.filter(sort => sort && typeof sort.field === 'string' && (sort.direction === 'asc' || sort.direction === 'desc')) : [],
     sortDirection: raw.sortDirection === 'asc' || raw.sortDirection === 'desc'
       ? raw.sortDirection
       : base.sortDirection,

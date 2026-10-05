@@ -30,7 +30,7 @@ export const desktopPageMarksSource: PageMarksSource = createDesktopPageMarksSou
   teamIndex() {
     const scope = store.get(activeCollabScopeAtom);
     const provider = scope ? getTeamSyncProvider(scope) : null;
-    return scope && provider ? { orgId: scope.orgId, query: (filters) => provider.queryPageMarks(filters) } : null;
+    return scope && provider ? { orgId: scope.orgId, query: (filters) => provider.queryPageMarks({ ...filters, projectId: scope.indexConfig.teamProjectId ?? undefined }) } : null;
   },
 });
 

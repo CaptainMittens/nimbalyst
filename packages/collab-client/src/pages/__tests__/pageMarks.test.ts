@@ -57,6 +57,16 @@ describe('pageMarkRecordsFromTeamIndex', () => {
     expect(records[0]).toMatchObject({ by: 'Ann', email: 'ann@x.io', on: '2026-10-01', line: 2, page: { scope: 'team', id: 'page-1' } });
   });
 
+  it('accepts typed pages only when the server supplies checked membership metadata', () => {
+    const records = pageMarkRecordsFromTeamIndex([
+      entry('tracker-content/item-1', { typedPage: { itemId: 'item-1', typeId: 'decision', issueKey: 'NIM-1' } }),
+      entry('tracker-content/item-2'),
+      entry('tracker-content/item-3', { typedPage: { itemId: 'different', typeId: 'decision', issueKey: null } }),
+    ], { orgId: 'org-1' });
+    expect(records).toHaveLength(1);
+    expect(records[0].page).toMatchObject({ kind: 'typed-page', id: 'item-1', uri: 'tracker://item-1', typeId: 'decision', issueKey: 'NIM-1' });
+  });
+
   it('asks lists to load again while the team index answer is missing or partial, backing off, until it is complete', () => {
     vi.useFakeTimers();
     try {

@@ -14,7 +14,7 @@ EmbeddedFileNodeDecorator.set((node) => (
   <EmbedFrameSlot
     src={node.__src}
     label={node.__label}
-    attrs={node.__attrs}
+    attrs={node.getAttrs()}
     nodeKey={node.__key}
   />
 ));

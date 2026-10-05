@@ -1,5 +1,7 @@
 import React from 'react';
-import { cleanup, render, screen } from '@testing-library/react';
+import { LexicalComposer } from '@lexical/react/LexicalComposer';
+const render = (ui: React.ReactElement) => baseRender(ui, { wrapper: ({ children }) => <LexicalComposer initialConfig={{ namespace: 'embed-test', onError: error => { throw error; } }}>{children}</LexicalComposer> });
+import { cleanup, render as baseRender, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { getEmbedPluginCallbacks } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/EmbedPluginCallbacks';
 import { registerBrowserDocumentEmbeds, setBrowserPlacedViewRenderer } from '../documentEmbeds';

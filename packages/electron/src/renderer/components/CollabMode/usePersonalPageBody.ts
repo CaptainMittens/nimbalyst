@@ -90,12 +90,13 @@ export async function restoreHistoryToPersonalPage(
     workspacePath,
     documentId,
   )) as PersonalPageBody | null;
+  if (!current) throw new Error('This page is unavailable. Restore it from Trash before restoring its history.');
   const result = (await window.electronAPI.invoke(
     'personal-pages:update-body',
     workspacePath,
     documentId,
     content,
-    current?.version,
+    current.version,
   )) as UpdateBodyResult;
   if ('conflict' in result && result.conflict) {
     throw new Error(RESTORE_CONFLICT);
@@ -110,7 +111,8 @@ export interface UsePersonalPageBodyOptions {
 }
 
 export interface PersonalPageBodyState {
-  status: 'loading' | 'ready' | 'error';
+  status: 'loading' | 'ready' | 'unavailable' | 'error';
+  retryLoad: () => void;
   /** The body the editor mounts with; replaced when a conflict reloads it. */
   initialContent: string;
   /** Bumped when the body is reloaded under the editor; key the editor on it. */
@@ -131,8 +133,10 @@ export function usePersonalPageBody({
   const [initialContent, setInitialContent] = useState('');
   const [editorEpoch, setEditorEpoch] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const retryLoad = useCallback(() => setLoadAttempt((attempt) => attempt + 1), []);
 
-  // A page with no stored body yet saves without an expected version.
+  // Even an empty page has a row and version; a missing row is not editable.
   const versionRef = useRef<number | undefined>(undefined);
   const pendingRef = useRef<string | null>(null);
   const inFlightRef = useRef(false);
@@ -156,8 +160,12 @@ export function usePersonalPageBody({
           documentId,
         )) as PersonalPageBody | null;
         if (cancelled) return;
-        versionRef.current = body?.version;
-        setInitialContent(body?.content ?? '');
+        if (!body) {
+          setStatus('unavailable');
+          return;
+        }
+        versionRef.current = body.version;
+        setInitialContent(body.content);
         loadedRef.current = true;
         setStatus('ready');
       } catch (error) {
@@ -169,7 +177,7 @@ export function usePersonalPageBody({
     return () => {
       cancelled = true;
     };
-  }, [workspacePath, documentId]);
+  }, [workspacePath, documentId, loadAttempt]);
 
   /** Keep text that cannot become the body in the page's local history. */
   const keepInHistory = useCallback((markdown: string, description: string) => {
@@ -272,7 +280,7 @@ export function usePersonalPageBody({
   // restored text, so the editor never shows the replaced body and its next
   // save is made against the restored version.
   const restore = useCallback(async (markdown: string) => {
-    if (!loadedRef.current) throw new Error('This page is still loading. Try again.');
+    if (!loadedRef.current) throw new Error('This page is unavailable or still loading. Try again after it loads.');
     // An unsaved draft is stored first: it becomes a body, and so a history
     // entry, instead of being dropped by the restore.
     const conflictsBefore = conflictsRef.current;
@@ -340,5 +348,5 @@ export function usePersonalPageBody({
 
   const dismissNotice = useCallback(() => setNotice(null), []);
 
-  return { status, initialContent, editorEpoch, notice, dismissNotice, onEdit };
+  return { status, retryLoad, initialContent, editorEpoch, notice, dismissNotice, onEdit };
 }

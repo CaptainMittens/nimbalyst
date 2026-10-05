@@ -17,7 +17,7 @@ export interface PlacedViewTypeOption {
   type: string;
   displayName?: string;
   displayNamePlural?: string;
-  fields: ReadonlyArray<{ name: string; type: string }>;
+  fields: ReadonlyArray<{ name: string; type: string; multiValue?: boolean; role?: string }>;
 }
 
 const command = INSERT_PLACED_VIEW_COMMAND as UserCommand['command'];
@@ -32,6 +32,11 @@ export function buildPlacedViewCommandEntries(types: readonly PlacedViewTypeOpti
     const name = model.displayNamePlural || model.displayName || model.type;
     const target = { kind: 'type', typeId: model.type } as const;
     commands.push(entry(`Table: ${name}`, `A live table of ${name}; editing a cell edits the page`, 'table_view', ['table', name], { target, label: name }));
+    const grouping = model.fields.find(field => field.type === 'select' && !field.multiValue && (field.name === 'status' || field.role === 'status'))
+      ?? model.fields.find(field => field.type === 'select' && !field.multiValue);
+    if (grouping) commands.push(entry(`Board: ${name}`, `${name} grouped by ${grouping.name}`, 'view_kanban', ['board', name], {
+      target, label: name, attrs: { mode: 'board', group: grouping.name, ordering: 'manual' },
+    }));
     const numbers = model.fields.filter((field) => field.type === 'number');
     if (numbers.length >= 2) {
       commands.push(entry(`2x2: ${name}`, `${name} placed by ${numbers[0].name} and ${numbers[1].name}`, 'grid_view', ['2x2', 'quadrant', 'chart', name], {

@@ -934,13 +934,16 @@ class CollabDocsSessionImpl implements CollabDocsSession {
     const refused = this.refusedWrite([documentId]);
     if (refused) return refused;
     const now = Date.now();
-    store.set(documentsByScope(this.scope.scopeKey), (current) => {
-      const existing = current.find((document) => document.documentId === documentId);
-      return existing
-        ? [{ ...existing, title, updatedAt: now }, ...current.filter((document) => document.documentId !== documentId)]
-        : current;
-    });
-    return this.settle(this.dataSource.command({ type: 'update-document-title', documentId, title }), 'Failed to update document title');
+    const target = documentsByScope(this.scope.scopeKey);
+    const existing = store.get(target).find((document) => document.documentId === documentId);
+    const optimistic = existing ? { ...existing, title, updatedAt: now } : null;
+    if (optimistic) store.set(target, (current) => [optimistic, ...current.filter((document) => document.documentId !== documentId)]);
+    const result = await this.settle(this.dataSource.command({ type: 'update-document-title', documentId, title }), 'Failed to update document title');
+    if (!result.ok && existing && optimistic) {
+      // A later rename or server row is authoritative, even on our timeout.
+      store.set(target, (current) => current.map((document) => document === optimistic ? existing : document));
+    }
+    return result;
   }
 
   removeDocument(documentId: string, options: { purge?: true } = {}): Promise<CollabPlacementWriteResult> {

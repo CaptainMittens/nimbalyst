@@ -183,8 +183,16 @@ export const PAGE_TOOL_CONTRACT: readonly PageToolContract[] = [
     availability: 'shared',
     readOnly: true,
     description:
-      "List the project's pages as a tree: pages, placed types and typed pages, each with nodeId, kind, id, title, parentNodeId, depth, sortOrder and the https link to write in page content (types also a viewLink); pages carry the uri to read and edit their body, typed pages their issueKey and whether they are placed outside their type.",
-    inputSchema: { type: 'object', properties: { section: SECTION } },
+      "List the project's pages as a paginated tree (100 nodes by default, maximum 500): use nextCursor with the same query until truncated is false; changed trees require restarting. Supports root/maxDepth/kinds and compact projection. Nodes include childCount and available updatedAt/hasContent. Pages, placed types and typed pages, each with nodeId, kind, id, title, parentNodeId, depth, sortOrder and the https link to write in page content (types also a viewLink); pages carry the uri to read and edit their body, typed pages their issueKey and whether they are placed outside their type.",
+    inputSchema: { type: 'object', properties: {
+      section: SECTION,
+      root: { type: 'string', description: 'Only this subtree, including its root: nodeId, page id, type id, or typed-page issue key.' },
+      maxDepth: { type: 'integer', minimum: 0, maximum: 100, description: 'Depth below the root (0 returns the root only; without root, top-level nodes only).' },
+      kinds: { type: 'array', minItems: 1, items: { type: 'string', enum: ['page', 'typedPage', 'type'] } },
+      limit: { type: 'integer', minimum: 1, maximum: 500, description: 'Maximum nodes per response. Default 100; at most 500.' },
+      cursor: { type: 'string', description: 'nextCursor from the previous response. Keep the same query; restart if the tree changes.' },
+      projection: { type: 'string', enum: ['full', 'compact'], description: 'Compact omits content links; full (default) preserves all navigation fields.' },
+    } },
     remoteAcceptedValues: TEAM_SECTION_ONLY,
     desktopProjectArg: true,
   },
@@ -639,6 +647,9 @@ interface PageTreeNodeBase {
   sortOrder: number | null;
   /** The https link to write in page content; absent when the section has no console scope yet. */
   link?: string;
+  childCount?: number;
+  updatedAt?: number;
+  hasContent?: boolean;
 }
 
 export type PageTreeNodeSummary =
@@ -658,6 +669,9 @@ export interface ListPagesResult {
   consoleScope: ConsoleLinkScope | null;
   openMarksViewLink?: string;
   nodes: PageTreeNodeSummary[];
+  total?: number;
+  truncated?: boolean;
+  nextCursor?: string | null;
   /** Desktop, team section: the project listed, and the org's other projects to pass as `project`. */
   project?: PageToolProjectSummary;
   otherProjects?: PageToolProjectSummary[];

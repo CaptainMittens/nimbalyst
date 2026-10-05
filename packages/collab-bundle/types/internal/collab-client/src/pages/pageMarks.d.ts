@@ -4,9 +4,8 @@
  * A mark lives in a page's markdown body (`[sentence]{decided by=...}`); a
  * host answers `listMarks`. Team pages come from the server's marks index
  * (`pageMarksQuery`, mapped by `pageMarkRecordsFromTeamIndex`). The desktop
- * adds what it reads locally -- typed pages, Personal pages and Personal type
- * pages -- and merges the two; the web console uses the index alone, so it
- * lists no typed-page marks. A source's `subscribe` (`PageMarksChangeFeed`)
+ * adds its local bodies and merges the two; web uses the index alone. Typed
+ * pages are accepted only with server-checked live membership metadata. A source's `subscribe` (`PageMarksChangeFeed`)
  * tells open lists to load again.
  *
  * Logic and contracts only -- no React, no DOM.
@@ -57,6 +56,11 @@ export interface PageMarksQuery {
 }
 export interface PageMarksSource {
     listMarks(query: PageMarksQuery): Promise<PageMarkRecord[]>;
+    /** Hosts with completeness support return this to avoid claiming partial emptiness. */
+    listMarksResult?(query: PageMarksQuery): Promise<{
+        marks: PageMarkRecord[];
+        status: 'ready' | 'partial';
+    }>;
     /** Called when marks may have changed; returns the unsubscribe. Optional. */
     subscribe?(listener: () => void): () => void;
 }
@@ -71,8 +75,7 @@ export interface TeamIndexMappingOptions {
 }
 /**
  * Records for the marks the server's index returned. A typed page's body is
- * never taken from the index (an older server listed them, deleted items
- * included); the desktop reads those locally.
+ * accepted only with live membership metadata. Older unchecked rows are ignored.
  */
 export declare function pageMarkRecordsFromTeamIndex(entries: readonly PageMarkEntry[], options: TeamIndexMappingOptions): PageMarkRecord[];
 /**

@@ -10,7 +10,7 @@
 import { useCallback, useMemo, type JSX, type ReactNode } from 'react';
 import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { computeReadiness } from '@nimbalyst/runtime/plugins/TrackerPlugin/models/trackerReadiness';
-import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
+import { globalRegistry, groupTrackerRecordsByAxis } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { getRecordStatus, getRecordTitle } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
 import { selectArchivedForView, type SavedView, type SavedViewDefinition, type TrackerIdentity } from '@nimbalyst/collab-client/trackers';
@@ -18,15 +18,19 @@ import { useTrackersUI } from '../TrackersUIProvider';
 import { useTrackerDataSelector } from '../useTrackerData';
 import { useTrackerViewRows } from '../useTrackerViewRows';
 import { resolveViewMode } from '../resolveViewMode';
+import { TrackerTimelineView } from '../TrackerTimelineView';
 import { TrackerListView } from '../TrackerListView';
 import { TrackerBoardSurface } from '../board/TrackerBoardSurface';
 import { TrackerGridSurface, type TrackerGridDerivedColumn, type TrackerGridUpdateEntry } from '../grid/TrackerGridSurface';
+import { ViewCardFields } from './ViewCardFields';
+import { ViewNewItem } from './ViewNewItem';
+import { createViewItem } from './createViewItem';
 import { isViewRecordEditable, writeViewEdits } from './viewItemEdits';
 
 const DEFAULT_BODY_HEIGHT_PX = 420;
 const MODE_LABEL: Record<string, string> = {
   list: 'list', table: 'table', kanban: 'board',
-  timeline: 'list', radar: 'list', 'tag-board': 'list', inbox: 'list',
+  timeline: 'timeline', radar: 'list', 'tag-board': 'list', inbox: 'list',
 };
 
 function describeQuery(definition: SavedViewDefinition, mode: string): string {
@@ -61,6 +65,9 @@ export interface TrackerViewEmbedProps {
   typeIds?: readonly string[];
   /** Table cells edit their items unless this is set (or the host has no data source). */
   readOnly?: boolean;
+  hiddenColumns?: readonly string[];
+  onSortChange?: (field: string, direction: 'asc' | 'desc') => void;
+  onWidthsChange?: (widths: Record<string, number>) => void;
 }
 
 /** Draws a view the caller supplies, without looking it up among the saved views. */
@@ -73,6 +80,9 @@ export function TrackerViewEmbed({
   derivedColumns,
   typeIds,
   readOnly,
+  hiddenColumns,
+  onSortChange,
+  onWidthsChange,
 }: TrackerViewEmbedProps): JSX.Element {
   const { identity, capabilities, dataSource } = useTrackersUI();
   const records = useTrackerDataSelector((state) => state.records);
@@ -94,7 +104,11 @@ export function TrackerViewEmbed({
       variant={variant}
       derivedColumns={derivedColumns}
       typeIds={typeIds}
+      hiddenColumns={hiddenColumns}
+      onSortChange={onSortChange}
+      onWidthsChange={onWidthsChange}
       onItemsUpdate={readOnly || !dataSource ? undefined : writeEdits}
+      onCreate={readOnly || !dataSource || view.definition.selectedType === 'all' ? undefined : (title, fields, requestId) => createViewItem(dataSource, view.definition, title, fields, requestId)}
     />
   );
 }
@@ -112,6 +126,10 @@ function LoadedViewEmbed({
   derivedColumns,
   typeIds,
   onItemsUpdate,
+  onCreate,
+  hiddenColumns,
+  onSortChange,
+  onWidthsChange,
 }: {
   view: SavedView;
   records: TrackerRecord[];
@@ -125,6 +143,10 @@ function LoadedViewEmbed({
   derivedColumns?: readonly TrackerGridDerivedColumn[];
   typeIds?: readonly string[];
   onItemsUpdate?: (entries: readonly TrackerGridUpdateEntry[]) => Promise<void>;
+  hiddenColumns?: readonly string[];
+  onSortChange?: (field: string, direction: 'asc' | 'desc') => void;
+  onWidthsChange?: (widths: Record<string, number>) => void;
+  onCreate?: (title: string, fields?: Record<string, unknown>, requestId?: string) => Promise<void>;
 }): JSX.Element {
   const { definition } = view;
   // Readiness is a property of the whole dependency graph, so it reads every record.
@@ -156,14 +178,17 @@ function LoadedViewEmbed({
 
   let body: ReactNode;
   switch (mode) {
-    case 'table':
-      body = (
+    case 'table': {
+      const grid = (groupRows: TrackerRecord[]) => (
         <TrackerGridSurface
-          rows={rows}
+          rows={groupRows}
           trackerType={definition.selectedType}
           columnConfig={definition.columnConfig}
           sortBy={definition.sortBy}
           sortDirection={definition.sortDirection}
+          sortColumns={definition.sortColumns}
+          onSortChange={onSortChange}
+          onWidthsChange={onWidthsChange}
           columnFilters={definition.columnFilters}
           resolveRelationshipLabel={resolveRelationshipLabel}
           onOpenItem={onOpenItem}
@@ -173,7 +198,14 @@ function LoadedViewEmbed({
           onItemsUpdate={onItemsUpdate}
         />
       );
+      body = definition.groupBy === 'none' || !rows.length ? grid(rows) : <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+        {groupTrackerRecordsByAxis(rows, definition.groupBy, resolveRelationshipLabel).map(group => <details key={group.key} open className="border-b border-nim">
+          <summary className="cursor-pointer bg-nim-secondary px-3 py-2 text-xs">{group.label} · {group.items.length}</summary>
+          <div style={{ height: Math.max(100, Math.min(360, 42 + group.items.length * 32)) }}>{grid(group.items)}</div>
+        </details>)}
+      </div>;
       break;
+    }
     case 'kanban':
       body = (
         <TrackerBoardSurface
@@ -185,13 +217,25 @@ function LoadedViewEmbed({
           resolveRelationshipLabel={resolveRelationshipLabel}
           onOpenItem={openItem}
           currentIdentity={identity}
+          sortDirection={definition.sortDirection}
+          onCreateItem={onCreate}
+          hiddenColumns={hiddenColumns}
+          preserveRowOrder={!!definition.sortColumns?.length}
+          renderCardFields={definition.columnConfig ? item => <ViewCardFields item={item} columns={definition.columnConfig!.visibleColumns} resolveLabel={resolveRelationshipLabel} /> : undefined}
+          onItemUpdate={onItemsUpdate ? (item, updates) => {
+            if (!isViewRecordEditable(item)) return Promise.reject(new Error('This item is read-only'));
+            return onItemsUpdate([{ itemId: item.id, updates }]);
+          } : undefined}
         />
       );
+      break;
+    case 'timeline':
+      body = <TrackerTimelineView items={rows} groupBy={definition.groupBy} ordering={definition.ordering} onItemSelect={openItem} resolveRelationshipLabel={resolveRelationshipLabel} />;
       break;
     default:
       body = (
         <TrackerListView
-          rows={rows}
+          rows={!definition.sortColumns?.length && definition.ordering !== 'manual' && definition.sortDirection === 'desc' ? [...rows].reverse() : rows}
           groupBy={definition.groupBy}
           showType={definition.selectedType === 'all'}
           onOpenItem={openItem}
@@ -231,6 +275,7 @@ function LoadedViewEmbed({
       >
         {body}
       </div>
+      {onCreate && mode !== 'kanban' ? <ViewNewItem onCreate={(title, requestId) => onCreate(title, undefined, requestId)} /> : null}
       <div className="tracker-saved-view-embed-foot flex items-center gap-3.5 px-3 py-1.5 text-[11px] text-nim-faint">
         <span>{rows.length} {rows.length === 1 ? 'item' : 'items'}</span>
         {onOpenAsTable ? (

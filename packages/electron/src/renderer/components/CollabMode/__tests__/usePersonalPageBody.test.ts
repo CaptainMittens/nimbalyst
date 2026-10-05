@@ -31,6 +31,36 @@ async function renderLoaded(body: { content: string; version: number } | null) {
 }
 
 describe('usePersonalPageBody', () => {
+  it('keeps a missing page unavailable and refuses edits and history restore', async () => {
+    const { result, unmount } = await renderLoaded(null);
+    expect(result.current.status).toBe('unavailable');
+    act(() => result.current.onEdit('must not create a replacement page'));
+    await act(async () => { vi.advanceTimersByTime(500); });
+    await expect(restoreHistoryToPersonalPage('personal-doc://pdoc-1', 'old body', '/ws')).rejects.toThrow(/unavailable/i);
+    unmount();
+    await expect(restoreHistoryToPersonalPage('personal-doc://pdoc-1', 'old body', '/ws')).rejects.toThrow(/unavailable/i);
+    expect(bodyCalls('personal-pages:update-body')).toHaveLength(0);
+  });
+
+  it('allows an existing empty page to be edited', async () => {
+    const { result } = await renderLoaded({ content: '', version: 0 });
+    expect(result.current.status).toBe('ready');
+    invoke.mockImplementation(async () => ({ version: 1 }));
+    act(() => result.current.onEdit('first words'));
+    await act(async () => { vi.advanceTimersByTime(500); });
+    expect(bodyCalls('personal-pages:update-body')).toEqual([
+      ['personal-pages:update-body', '/ws', 'pdoc-1', 'first words', 0],
+    ]);
+  });
+
+  it('can retry an unavailable page once its body is present', async () => {
+    const { result } = await renderLoaded(null);
+    invoke.mockImplementation(async () => ({ content: 'recovered', version: 2 }));
+    await act(async () => result.current.retryLoad());
+    expect(result.current.status).toBe('ready');
+    expect(result.current.initialContent).toBe('recovered');
+  });
+
   it('loads the body once and exposes it as the initial content', async () => {
     const { result, rerender } = await renderLoaded({ content: '# Notes', version: 3 });
     rerender();

@@ -119,8 +119,13 @@ export const PersonalPageBodyEditor: React.FC<PersonalPageBodyEditorProps> = ({ 
             <NimbalystEditor key={`${documentId}-${body.editorEpoch}`} config={editorConfig} />
           </DocumentPathProvider>
         ) : (
-          <div className="py-4 text-center text-sm text-nim-faint">
-            {body.status === 'error' ? 'This page could not be loaded.' : 'Loading...'}
+          <div className="py-4 text-center text-sm text-nim-faint" role="status">
+            {body.status === 'unavailable'
+              ? 'This page is unavailable on this device. It may have been deleted. Check Pages Trash for a recoverable copy.'
+              : body.status === 'error' ? 'This page could not be loaded.' : 'Loading...'}
+            {(body.status === 'unavailable' || body.status === 'error') && (
+              <button type="button" className="ml-2 text-nim-link hover:underline" onClick={body.retryLoad}>Try again</button>
+            )}
           </div>
         )}
       </div>

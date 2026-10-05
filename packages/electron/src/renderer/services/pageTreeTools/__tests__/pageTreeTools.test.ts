@@ -112,6 +112,37 @@ function envFor(sessions: Partial<Record<PageTreeSection, FakeSession>>, overrid
 }
 
 describe('page tree agent tools', () => {
+  it('bounds large tree responses and pages without duplicates', async () => {
+    const session = new FakeSession(Array.from({ length: 205 }, (_, i) => page(`p-${i}`, `Page ${i}`)));
+    const env = envFor({ team: session });
+    const first = await listPagesTool(env, {});
+    expect(first.success).toBe(true);
+    if (!first.success) return;
+    expect(first.nodes).toHaveLength(100);
+    expect(first.truncated).toBe(true);
+    const second = await listPagesTool(env, { cursor: first.nextCursor });
+    expect(second.success).toBe(true);
+    if (!second.success) return;
+    const a = first.nodes as Array<{ nodeId: string }>;
+    const b = second.nodes as Array<{ nodeId: string }>;
+    expect(b).toHaveLength(100);
+    expect(b.every((node) => !a.some((before) => before.nodeId === node.nodeId))).toBe(true);
+    session.documents.push(page('new', 'A new page'));
+    expect(await listPagesTool(env, { cursor: second.nextCursor })).toMatchObject({ success: false, error: expect.stringMatching(/changed.*restart/i) });
+  });
+
+  it('inspects a subtree by depth and kind, with compact results and child counts', async () => {
+    const env = envFor({ team: tree() });
+    const result = await listPagesTool(env, { root: 'arch', maxDepth: 1, kinds: ['page'], projection: 'compact' });
+    expect(result).toMatchObject({ success: true, truncated: false, nextCursor: null });
+    if (!result.success) return;
+    expect((result.nodes as Array<{ id: string }>).map((node) => node.id)).toEqual(['arch', 'overview']);
+    expect(result.nodes).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'overview', childCount: 1, updatedAt: 1 })]));
+    expect((result.nodes as Array<object>).every((node) => !('link' in node))).toBe(true);
+    expect(await listPagesTool(env, { root: 'not-present' })).toMatchObject({ success: false });
+    expect(await listPagesTool(env, { kinds: ['typo'] })).toMatchObject({ success: false });
+  });
+
   it('lists pages, types and typed pages with their parents, order and uri', async () => {
     const result = await listPagesTool(envFor({ team: tree() }), { section: 'team' });
     expect(result.success).toBe(true);

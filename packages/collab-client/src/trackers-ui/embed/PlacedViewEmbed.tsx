@@ -8,7 +8,7 @@
  * (`LazyPlacedViewEmbed`) so a page with no view does not pay for the grid.
  */
 
-import { useMemo, type JSX } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
 import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { createPlacedViewUrl, type PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
 import { QuadrantChart } from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/QuadrantChart';
@@ -22,11 +22,17 @@ import { placedViewDefinition, placedViewInReach, type PlacedQuadrant, type Plac
 import { quadrantData } from './quadrantData';
 import { PlacedViewNote } from './PlacedViewNote';
 import { MarksListEmbed } from './MarksListEmbed';
+import { getDefaultColumnConfig, resolveColumnsForType } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerColumns';
+import { PlacedViewSettings } from './PlacedViewSettings';
+import { createTrackerFilterFields } from '../createTrackerFilterFields';
+
+const subscribeSchema = (listener: () => void) => globalRegistry.onChange(listener);
 
 export interface PlacedViewEmbedProps {
   target: PlacedViewTarget;
   label: string;
   attrs: Readonly<Record<string, string>>;
+  onAttrsChange?: (patch: Readonly<Record<string, string | null>>) => void;
   /**
    * The scopes the mounted data source serves. A link naming any other scope
    * is never drawn from (or edited through) this host's items.
@@ -45,14 +51,14 @@ function parseHeight(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? Math.max(parsed, 120) : undefined;
 }
 
-export function PlacedViewEmbed({ target, label, attrs, reach, onOpenItem, onOpenAsTable, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element {
+export function PlacedViewEmbed({ target, label, attrs, onAttrsChange, reach, onOpenItem, onOpenAsTable, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element {
   if (!placedViewInReach(target.scope, reach)) {
     return <OutOfScopeViewNote target={target} label={label} onOpenLink={onOpenLink} />;
   }
   if (target.kind === 'marks') {
     return <MarksListEmbed kind={target.marks} label={label} attrs={attrs} onOpenPage={onOpenPage} />;
   }
-  return <TypeViewEmbed typeId={target.typeId} label={label} attrs={attrs} onOpenItem={onOpenItem} onOpenAsTable={onOpenAsTable} />;
+  return <TypeViewEmbed typeId={target.typeId} label={label} attrs={attrs} onAttrsChange={onAttrsChange} onOpenItem={onOpenItem} onOpenAsTable={onOpenAsTable} />;
 }
 
 /** A view of another project (or of someone's own items, on a shared page): its link, never these items. */
@@ -77,28 +83,66 @@ function OutOfScopeViewNote({ target, label, onOpenLink }: {
   );
 }
 
-function TypeViewEmbed({ typeId, label, attrs, onOpenItem, onOpenAsTable }: {
+function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpenItem, onOpenAsTable }: {
   typeId: string;
   label: string;
   attrs: Readonly<Record<string, string>>;
+  onAttrsChange?: (patch: Readonly<Record<string, string | null>>) => void;
   onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
   onOpenAsTable?: (view: SavedView) => void;
 }): JSX.Element {
+  const [day, setDay] = useState(() => new Date().toDateString());
+  useEffect(() => {
+    const timer = setInterval(() => setDay(new Date().toDateString()), 60_000);
+    return () => clearInterval(timer);
+  }, []);
+  const [temporary, setTemporary] = useState<Record<string, string | null>>({});
+  const [writeError, setWriteError] = useState<string | null>(null);
+  const attrs = Object.fromEntries(Object.entries({ ...savedAttrs, ...(!onAttrsChange ? temporary : {}) }).filter((entry): entry is [string, string] => entry[1] !== null));
+  const change = (patch: Readonly<Record<string, string | null>>) => {
+    setWriteError(null);
+    try {
+      const next = Object.fromEntries(Object.entries({ ...attrs, ...patch }).filter((entry): entry is [string, string] => entry[1] !== null));
+      placedViewDefinition(typeId, label, next, model ? createTrackerFilterFields(resolveColumnsForType(typeId), typeId, [model]) : undefined);
+      if (onAttrsChange) onAttrsChange(patch);
+      else setTemporary(current => ({ ...current, ...patch }));
+    } catch (error) { setWriteError(error instanceof Error ? error.message : 'Could not save view settings'); }
+  };
   const loaded = useTrackerDataSelector((state) => state.loaded);
+  const model = useSyncExternalStore(subscribeSchema, () => globalRegistry.get(typeId), () => globalRegistry.get(typeId));
   // Re-read when the attrs change; the object identity changes on every node update.
   const attrsKey = JSON.stringify(attrs);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const placed = useMemo(() => placedViewDefinition(typeId, label, attrs), [typeId, label, attrsKey]);
-  if (loaded && !globalRegistry.get(typeId)) {
+  const parsed = useMemo(() => {
+    try {
+      const fields = model ? createTrackerFilterFields(resolveColumnsForType(typeId), typeId, [model]) : undefined;
+      return { placed: placedViewDefinition(typeId, label, attrs, fields) };
+    } catch (error) {
+      return { error: error instanceof Error ? error.message : 'Invalid view definition.' };
+    }
+  }, [typeId, label, attrsKey, model, day]);
+
+  if (loaded && !model) {
     return <PlacedViewNote>{label || typeId}: there is no {typeId} type in this project.</PlacedViewNote>;
   }
+  if (!model) return <PlacedViewNote>Loading {label || typeId}…</PlacedViewNote>;
+  const fields = createTrackerFilterFields(resolveColumnsForType(typeId), typeId, [model]);
+  const wrap = (view: JSX.Element) => <div className="placed-view-configurable">
+    <PlacedViewSettings defaultColumns={getDefaultColumnConfig(typeId).visibleColumns} attrs={attrs} fields={fields} temporary={!onAttrsChange} onChange={change} />
+    {writeError ? <div role="alert" className="text-xs text-nim-error">{writeError}</div> : null}{view}
+  </div>;
+  if (parsed.error || !parsed.placed) return wrap(<PlacedViewNote><span role="alert">{label || typeId}: {parsed.error}</span></PlacedViewNote>);
+  const placed = parsed.placed;
   if (placed.mode === '2x2' && placed.quadrant) {
-    return <QuadrantViewEmbed view={placed.view} quadrant={placed.quadrant} onOpenItem={onOpenItem} />;
+    return wrap(<QuadrantViewEmbed view={placed.view} quadrant={placed.quadrant} onOpenItem={onOpenItem} />);
   }
-  return (
+  return wrap(
     <TrackerViewEmbed
       view={placed.view}
       height={parseHeight(attrs.height)}
+      hiddenColumns={attrs.hide?.split(',')}
+      onSortChange={(field, direction) => change({ sort: `${field}:${direction}` })}
+      onWidthsChange={widths => change({ w: Object.entries({ ...placed.view.definition.columnConfig?.columnWidths, ...widths }).map(([field, width]) => `${field}:${Math.round(width)}`).join(',') })}
       onOpenItem={onOpenItem}
       onOpenAsTable={onOpenAsTable}
     />

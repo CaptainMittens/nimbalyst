@@ -36,11 +36,13 @@ import { MarkdownEditor, MonacoEditor, DocumentPathProvider } from '@nimbalyst/r
 import { $convertFromEnhancedMarkdownString, getEditorTransformers, type CommentsConfig } from '@nimbalyst/runtime/editor';
 import {
   getTeamSyncProvider,
+  getElectronCollabHost,
   getSharedDocumentsForScopeKey,
   sharedDocumentsAtom,
   sharedFoldersAtom,
 } from '../../store/atoms/collabDocuments';
 import { buildCollabUri } from '@nimbalyst/collab-protocol';
+import { PagesHomeHelp } from '@nimbalyst/collab-client/docs-ui';
 import { FixedTabHeaderContainer, FixedTabHeaderRegistry } from '@nimbalyst/runtime/plugins/shared/fixedTabHeader';
 import { LexicalDiffHeaderAdapter } from '../UnifiedDiffHeader';
 import { useDocumentDecisionsConfig } from './useDocumentDecisionsConfig';
@@ -1488,6 +1490,9 @@ export const CollaborativeTabEditor: React.FC<CollaborativeTabEditorProps> = ({
       />
 
       <CollabRenderFailureBanner filePath={filePath} />
+      {activeConfig.documentId === `home:${activeConfig.scope.indexConfig.teamProjectId}` && (
+        <PagesHomeHelp key={activeConfig.scope.scopeKey} host={getElectronCollabHost(activeConfig.scope)} scope={activeConfig.scope} />
+      )}
 
       {/* Editor area */}
       <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }}>

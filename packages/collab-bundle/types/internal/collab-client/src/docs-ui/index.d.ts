@@ -11,3 +11,4 @@ export * from './primitives/CollabSearchInput';
 export * from './primitives/EditorHeaderBar';
 export * from './primitives/ScopeSummaryHeader';
 export * from './SharedDocsListView';
+export { PagesHomeHelp } from './PagesHomeHelp';

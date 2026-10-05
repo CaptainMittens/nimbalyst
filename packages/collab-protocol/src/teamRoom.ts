@@ -115,6 +115,8 @@ export interface TeamDocIndexUpdateMessage {
   documentId: string;
   encryptedTitle: string;
   titleIv: string;
+  /** Correlates a refused rename with its caller. */
+  requestId?: string;
 }
 
 /** Remove a document from the index. */
@@ -680,6 +682,8 @@ export interface TeamState {
    * so a client can wait for the echo to confirm such a write.
    */
   authorWriteEcho?: true;
+  /** Rename broadcasts reach the author; refusals carry the rename requestId. */
+  authorTitleEcho?: true;
   /** Tracker-type placements in the page tree (omitted by older servers). */
   typePlacements?: TypePlacementNode[];
   /** Tracker-item placements in the page tree (omitted by older servers). */

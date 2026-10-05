@@ -9,6 +9,17 @@ function model(type: string, plural: string, fields: TrackerDataModel['fields'])
 }
 
 describe('buildPlacedViewCommandEntries', () => {
+  it('offers a board grouped by status, falling back to the first single-select', () => {
+    const commands = buildPlacedViewCommandEntries([
+      model('work', 'Work', [{ name: 'tier', type: 'select' }, { name: 'status', type: 'select' }]),
+      model('company', 'Companies', [{ name: 'tags', type: 'select', multiValue: true }, { name: 'tier', type: 'select' }]),
+    ]);
+    expect(commands.filter(command => command.title.startsWith('Board:')).map(command => command.payload)).toEqual([
+      { target: { kind: 'type', typeId: 'work' }, label: 'Work', attrs: { mode: 'board', group: 'status', ordering: 'manual' } },
+      { target: { kind: 'type', typeId: 'company' }, label: 'Companies', attrs: { mode: 'board', group: 'tier', ordering: 'manual' } },
+    ]);
+  });
+
   it('offers a table per type, a 2x2 for types with two number fields, and the marks lists', () => {
     const commands = buildPlacedViewCommandEntries([
       model('competitor', 'Competitors', [

@@ -62,12 +62,14 @@ export function createDesktopPageMarksSource(deps: DesktopPageMarksDeps): PageMa
   const feed = new PageMarksChangeFeed();
   const watchTeam = deps.watchTeam ?? onTeamPageMarksChanged;
   const watchLocal = deps.watchLocal ?? watchLocalPageMarks;
+  const read: NonNullable<PageMarksSource['listMarksResult']> = async (query) => {
+    const [local, team] = await Promise.all([deps.listLocal(query), teamMarks(deps.teamIndex(), query)]);
+    feed.settled(team.complete);
+    return { marks: filterPageMarks(mergePageMarks(local, team.records), query), status: team.complete ? 'ready' : 'partial' };
+  };
   return {
-    async listMarks(query) {
-      const [local, team] = await Promise.all([deps.listLocal(query), teamMarks(deps.teamIndex(), query)]);
-      feed.settled(team.complete);
-      return filterPageMarks(mergePageMarks(local, team.records), query);
-    },
+    listMarks: async query => (await read(query)).marks,
+    listMarksResult: read,
     subscribe(listener) {
       const stopRetries = feed.subscribe(listener);
       const stopTeam = watchTeam(listener);

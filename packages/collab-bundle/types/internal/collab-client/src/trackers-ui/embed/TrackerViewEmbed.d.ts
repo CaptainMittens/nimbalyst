@@ -31,6 +31,9 @@ export interface TrackerViewEmbedProps {
     typeIds?: readonly string[];
     /** Table cells edit their items unless this is set (or the host has no data source). */
     readOnly?: boolean;
+    hiddenColumns?: readonly string[];
+    onSortChange?: (field: string, direction: 'asc' | 'desc') => void;
+    onWidthsChange?: (widths: Record<string, number>) => void;
 }
 /** Draws a view the caller supplies, without looking it up among the saved views. */
-export declare function TrackerViewEmbed({ view, onOpenAsTable, onOpenItem, variant, height, derivedColumns, typeIds, readOnly, }: TrackerViewEmbedProps): JSX.Element;
+export declare function TrackerViewEmbed({ view, onOpenAsTable, onOpenItem, variant, height, derivedColumns, typeIds, readOnly, hiddenColumns, onSortChange, onWidthsChange, }: TrackerViewEmbedProps): JSX.Element;

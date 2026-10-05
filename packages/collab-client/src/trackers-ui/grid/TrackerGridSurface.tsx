@@ -33,7 +33,6 @@ import type {
   BeforeSaveDataDetails,
   ColumnRegular,
   FocusAfterRenderEvent,
-  SortingConfig,
 } from '@revolist/revogrid';
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
 import {
@@ -63,8 +62,9 @@ import { buildDerivedGridColumn, buildGridActionsColumn, buildGridColumns } from
 import { LazyTrackerColumnFilterPopover } from './LazyTrackerColumnFilterPopover';
 import { useGridKeyOriginGuard } from './gridKeyOrigin';
 import './trackerGrid.css';
+import { useGridViewSettings, type GridViewSettings } from './useGridViewSettings';
 
-export interface TrackerGridSurfaceProps {
+export interface TrackerGridSurfaceProps extends GridViewSettings {
   rows: TrackerRecord[];
   /** `'all'` for a mixed-type grid; a tracker type resolves one schema. */
   trackerType: string;
@@ -157,6 +157,9 @@ export function TrackerGridSurface({
   columnConfig,
   sortBy,
   sortDirection = 'desc',
+  sortColumns,
+  onSortChange,
+  onWidthsChange,
   columnFilters,
   onColumnFiltersChange,
   resolveRelationshipLabel,
@@ -221,6 +224,7 @@ export function TrackerGridSurface({
     () => [
       ...placeDerivedColumns(buildGridColumns(visibleColumnDefs, {
         trackerType: schemaType,
+        sortingEnabled: !!onSortChange,
         columnWidths: effectiveConfig.columnWidths,
         isRowEditable,
         filteredColumnIds,
@@ -230,8 +234,6 @@ export function TrackerGridSurface({
         // The favorite star is a personal-lane affordance; a host that has one
         // renders it through its own grid. Not reconstructed here.
         rowActions: false,
-        // No document surface in the browser yet, so the key opens the detail
-        // only -- the expand icon is omitted rather than rendered inert.
         keyLink: onOpenItem ? { onOpenDetail: onOpenItem } : undefined,
         resolveRelationshipLabel,
       }), derivedColumns ?? []),
@@ -239,6 +241,7 @@ export function TrackerGridSurface({
     ],
     [
       visibleColumnDefs,
+      onSortChange,
       schemaType,
       effectiveConfig.columnWidths,
       isRowEditable,
@@ -274,11 +277,7 @@ export function TrackerGridSurface({
     [gridSource, selectedItemId]
   );
 
-  const gridSorting = useMemo<SortingConfig | undefined>(() => {
-    if (!sortBy || !visibleColumnDefs.some((column) => column.id === sortBy))
-      return undefined;
-    return { columns: [{ prop: sortBy, order: sortDirection }] };
-  }, [sortBy, sortDirection, visibleColumnDefs]);
+  const gridSorting = useGridViewSettings(gridCanvasRef, { sortBy, sortDirection, sortColumns, onSortChange, onWidthsChange }, visibleColumnDefs);
 
   const rowsById = useMemo(
     () => new Map(rows.map((row) => [row.id, row])),
@@ -585,7 +584,7 @@ export function TrackerGridSurface({
           />
         ) : (
           <RevoGrid
-            key={`${schemaType}:${sortBy ?? ''}:${sortDirection}`}
+            key={`${schemaType}:${sortBy ?? ''}:${sortDirection}:${JSON.stringify(sortColumns)}`}
             columns={gridColumns}
             source={markedGridSource}
             rowClass={ROW_CLASS_KEY}

@@ -15,11 +15,12 @@ import type {
   TeamPageMarksResponseMessage,
 } from '@nimbalyst/collab-protocol';
 
-export type TeamPageMarksFilters = Pick<TeamPageMarksQueryMessage, 'kind' | 'email' | 'documentIds'>;
+export type TeamPageMarksFilters = Pick<TeamPageMarksQueryMessage, 'kind' | 'email' | 'documentIds' | 'projectId'>;
 
 export interface TeamPageMarksResult {
   marks: PageMarkEntry[];
   status: TeamPageMarksResponseMessage['status'];
+  coverage?: TeamPageMarksResponseMessage['coverage'];
 }
 
 let nextRequest = 0;
@@ -50,7 +51,7 @@ export class TeamPageMarksRequests {
   }
 
   receive(message: TeamPageMarksResponseMessage): void {
-    this.settle(message.requestId, { marks: message.marks, status: message.status });
+    this.settle(message.requestId, { marks: message.marks, status: message.status, ...(message.coverage ? { coverage: message.coverage } : {}) });
   }
 
   /** Every open query answers null (disconnect, destroy). */

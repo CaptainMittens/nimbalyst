@@ -345,6 +345,7 @@ export type BrowserPlacedViewRenderer = (view: {
   label: string;
   target: PlacedViewTarget;
   attrs: Readonly<Record<string, string>>;
+  onAttrsChange?: (patch: Readonly<Record<string, string | null>>) => void;
 }) => ReactNode | null;
 /** What a placed-view link shows: a type's items, or the team's marks. */
 export type PlacedViewTarget =
@@ -354,6 +355,7 @@ export interface PlacedViewEmbedProps {
   target: PlacedViewTarget;
   label: string;
   attrs: Readonly<Record<string, string>>;
+  onAttrsChange?: (patch: Readonly<Record<string, string | null>>) => void;
   /** The scopes the host's items serve; a link naming any other shows its link instead. */
   reach?: { team: { orgId: string; projectId: string } | null; local: boolean };
   onOpenItem?: (itemId: string) => void;

@@ -458,6 +458,13 @@ export class WindowedTreeMatcher {
 
         if (sourceIdx >= sourceNodes.length || targetIdx >= targetNodes.length) continue;
 
+        // TOPT and the text guideposts may choose different valid alignments.
+        // Combining them must still preserve order: crossing a guidepost
+        // turns a requested move into an unchanged node at its old position.
+        if ([...targetToSource].some(([target, source]) =>
+          (target < targetIdx && source >= sourceIdx)
+          || (target > targetIdx && source <= sourceIdx))) continue;
+
         // Dedupe equal/replace ops by (sourceIdx, targetIdx) pair. Forced
         // guidepost ops are prepended to TOPT's own ops, and they often
         // collide on the same pair -- without this skip we end up creating

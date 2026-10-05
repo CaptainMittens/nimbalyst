@@ -130,7 +130,7 @@ export function NewTypeDialog({ lane, resolver, session, parent, defineType, onC
         <div className="px-4 pt-3 pb-2 border-b border-nim">
           <div className="text-sm font-medium text-nim">New type</div>
           <div className="text-xs text-nim-faint mt-0.5">
-            {lane === 'team' ? 'In Team pages. Everyone on the team can use it.' : 'In Personal pages. Only you can use it.'}
+            {lane === 'team' ? 'Team · shared with this project.' : 'Personal · on this device. Available offline.'}
           </div>
         </div>
 
@@ -192,6 +192,7 @@ export function NewTypeDialog({ lane, resolver, session, parent, defineType, onC
 
           <div>
             <span className={labelClass}>Fields</span>
+            {fields.some((field) => field.kind === 'relation') && <p className="mb-2 text-xs text-nim-muted">Link to type adds a reference field. Named relations in page sentences use the project's relation definitions.</p>}
             <div className="flex flex-col gap-1.5">
               {fields.map((field, index) => (
                 <div key={index} className="new-type-field-row flex items-center gap-1.5">

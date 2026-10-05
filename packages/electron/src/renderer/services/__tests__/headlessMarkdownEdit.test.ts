@@ -16,6 +16,7 @@
 import * as Y from 'yjs';
 import { describe, expect, it } from 'vitest';
 import { MarkdownCollabContentAdapter } from '@nimbalyst/runtime/sync/MarkdownCollabContentAdapter';
+import { $isEmbeddedFileNode, $createEmbeddedFileNode } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/EmbeddedFileNodeCore';
 import { $wrapSelectionInMarkNode } from '@lexical/mark';
 import {
   $createRangeSelection,
@@ -68,6 +69,65 @@ function seeded(): Y.Doc {
 }
 
 describe('applyMarkdownReplacementsToYDoc', () => {
+  it('merges different placed-view settings edited concurrently on two clients', () => {
+    const doc = new Y.Doc();
+    withHeadlessLexicalBridge(doc, { nodes: HeadlessBodyNodes }, bridge => bridge.editor.update(() => {
+      $getRoot().append($createEmbeddedFileNode({ src: 'https://console.nimbalyst.com/app/view/type/task', label: 'Tasks', attrs: { cols: 'title', custom: 'keep' } }));
+    }, { discrete: true }));
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    const change = (target: Y.Doc, patch: Record<string, string>) => withHeadlessLexicalBridge(target, { nodes: HeadlessBodyNodes }, bridge => {
+      bridge.editor.update(() => {
+        const node = $getRoot().getFirstChild();
+        if (!$isEmbeddedFileNode(node)) throw new Error('Expected placed view');
+        node.patchViewAttrs(patch);
+      }, { discrete: true });
+    });
+    change(doc, { sort: 'title:asc' });
+    change(peer, { cols: 'title,status' });
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    const result = MarkdownCollabContentAdapter.exportToFile(doc) as string;
+    expect(result).toContain('sort=title:asc');
+    expect(result).toContain('cols=title,status');
+    expect(result).toContain('custom=keep');
+    expect(MarkdownCollabContentAdapter.exportToFile(peer)).toBe(result);
+  });
+
+  it.each([[2, 0, 1], [1, 2, 0], [2, 1, 0], [1, 0, 2], [0, 2, 1]].map((order) => ({ order })))('keeps table/list order $order and concurrent human text in one edit', ({ order }) => {
+    const doc = new Y.Doc();
+    const table = '| Area | Purpose |\n| --- | --- |\n| Product | What we build |\n| Design | How it works |\n| Archive | Earlier work |';
+    const tableRows = table.split('\n');
+    const reorderedTable = [...tableRows.slice(0, 2), ...order.map((index) => tableRows[index + 2])].join('\n');
+    const list = '- Read the overview\n- Find the decision\n- Open the initiative';
+    const reorderedList = order.map((index) => list.split('\n')[index]).join('\n');
+    MarkdownCollabContentAdapter.seedFromFile(doc, `# Home\n\n${table}\n\n## Start here\n\n${list}\n\n${UNTOUCHED}\n`);
+    // Use the same exported representation an agent gets from readCollabDoc.
+    const before = MarkdownCollabContentAdapter.exportToFile(doc) as string;
+    const exportedTable = before.slice(before.indexOf('|'), before.indexOf('\n\n## Start here'));
+    const exportedList = before.slice(before.indexOf('- Read'), before.indexOf(`\n\n${UNTOUCHED}`));
+    const expected = new Y.Doc();
+    MarkdownCollabContentAdapter.seedFromFile(expected, before.replace(exportedTable, reorderedTable).replace(exportedList, reorderedList));
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    applyMarkdownReplacementsToYDoc(peer, [{ oldText: UNTOUCHED, newText: `${UNTOUCHED} A human added this concurrently.` }]);
+    const vector = Y.encodeStateVector(doc);
+
+    applyMarkdownReplacementsToYDoc(doc, [
+      { oldText: exportedTable, newText: reorderedTable },
+      { oldText: exportedList, newText: reorderedList },
+    ]);
+
+    expect(MarkdownCollabContentAdapter.exportToFile(doc)).toBe(MarkdownCollabContentAdapter.exportToFile(expected));
+    expect(deltaText(doc, vector)).not.toContain(UNTOUCHED);
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    expect(MarkdownCollabContentAdapter.exportToFile(doc)).toBe(
+      (MarkdownCollabContentAdapter.exportToFile(expected) as string).replace(UNTOUCHED, `${UNTOUCHED} A human added this concurrently.`),
+    );
+    expect(MarkdownCollabContentAdapter.exportToFile(peer)).toBe(MarkdownCollabContentAdapter.exportToFile(doc));
+  });
+
   it('applies the replacement to the document', () => {
     const doc = seeded();
 

@@ -109,6 +109,7 @@ export class TeamSyncProvider {
   private pageTree = false;
   /** Set by a snapshot from a TeamRoom that echoes the author's page writes back to it. */
   private authorWriteEcho = false;
+  private authorTitleEcho = false;
 
   /**
    * Resolvers waiting for a `docIndexRegistered` ack, keyed by document id.
@@ -319,10 +320,10 @@ export class TeamSyncProvider {
     for (const waiter of waiters) waiter(acked);
   }
 
-  async updateDocumentTitle(documentId: string, newTitle: string): Promise<void> {
+  async updateDocumentTitle(documentId: string, newTitle: string, options: { requestId?: string } = {}): Promise<void> {
     const { encryptedTitle, titleIv } = await this.encodeTitleForWire(newTitle);
     this.send({
-      type: 'docIndexUpdate', documentId, encryptedTitle, titleIv,
+      type: 'docIndexUpdate', documentId, encryptedTitle, titleIv, ...requestIdField(options.requestId),
     });
   }
 
@@ -532,6 +533,10 @@ export class TeamSyncProvider {
     return this.authorWriteEcho;
   }
 
+  echoesTitleWrites(): boolean {
+    return this.authorTitleEcho;
+  }
+
   /**
    * Place an item (or move its placement). `parentId` is a page id, or an item
    * id with `parentKind: 'item'`; null = root level. The server refuses a
@@ -730,6 +735,7 @@ export class TeamSyncProvider {
     const server: ServerTeamState = msg.team;
     this.pageTree = server.pageTree === true;
     this.authorWriteEcho = server.authorWriteEcho === true;
+    this.authorTitleEcho = server.authorTitleEcho === true;
 
     // Decrypt document titles. NIM-910: in server-managed mode this teamSync
     // path returns titles RAW (DEK-ciphertext the client cannot read); the

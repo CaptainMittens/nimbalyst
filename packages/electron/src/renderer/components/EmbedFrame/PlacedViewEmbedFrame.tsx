@@ -33,6 +33,7 @@ export interface PlacedViewEmbedFrameProps {
   target: PlacedViewTarget;
   label: string;
   attrs: Record<string, string>;
+  onAttrsChange?: (patch: Readonly<Record<string, string | null>>) => void;
 }
 
 export const PlacedViewEmbedFrame: React.FC<PlacedViewEmbedFrameProps> = (props) => {
@@ -48,6 +49,7 @@ const WorkspacePlacedView: React.FC<PlacedViewEmbedFrameProps & { workspacePath:
   target,
   label,
   attrs,
+  onAttrsChange,
 }) => {
   const store = useStore();
   const identity = useDesktopTrackerIdentity(workspacePath);
@@ -90,6 +92,7 @@ const WorkspacePlacedView: React.FC<PlacedViewEmbedFrameProps & { workspacePath:
             target={target}
             label={label}
             attrs={attrs}
+            onAttrsChange={onAttrsChange}
             reach={reach}
             onOpenItem={openItem}
             onOpenPage={openPage}

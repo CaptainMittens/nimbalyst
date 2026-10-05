@@ -11,6 +11,8 @@ import { type TrackerRelationshipLabelResolver } from '../../../../runtime/src/p
 import { type TrackerEditorContext } from './trackerGridEditors';
 import { buildGridSource, ROW_ACTIONS, ROW_ITEM_ID, ROW_ITEM_TYPE } from '../../trackers/index';
 export { buildGridSource, ROW_ACTIONS, ROW_ITEM_ID, ROW_ITEM_TYPE };
+/** Human-readable text for a stored value, by column render type. */
+export declare function formatValue(col: TrackerColumnDef, value: unknown, trackerType: string, resolveLabel?: TrackerRelationshipLabelResolver): string;
 export interface FavoritesOptions {
     favoriteItemIds: ReadonlySet<string>;
     onToggleFavorite: (itemId: string) => void;
