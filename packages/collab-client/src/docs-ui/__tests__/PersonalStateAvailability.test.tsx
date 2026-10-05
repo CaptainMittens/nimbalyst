@@ -175,7 +175,7 @@ it('collapses a section to its header row and reports the toggle', async () => {
   const sidebar = view.getByTestId('collab-sidebar');
   const toggle = sidebar.querySelector<HTMLButtonElement>('.collab-sidebar-section-toggle')!;
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
-  expect(sidebar.querySelector('.collab-tree-filter, .session-history-search, .file-tree-file')).toBeNull();
+  expect(sidebar.querySelector('.collab-tree-filter, .file-tree-file')).toBeNull();
   fireEvent.click(toggle);
   expect(onToggleCollapsed).toHaveBeenCalledOnce();
 
@@ -187,7 +187,6 @@ it('collapses a section to its header row and reports the toggle', async () => {
     </Provider>,
   );
   expect(view.container.querySelector('.collab-sidebar-section-toggle')!.getAttribute('aria-expanded')).toBe('true');
-  expect(view.container.querySelector('.session-history-search')).not.toBeNull();
   expect(view.container.querySelector('.file-tree-file')).not.toBeNull();
 });
 
@@ -215,5 +214,5 @@ it.each(['Favorite', 'Unfavorite'])('cancels native document navigation when cli
     scope,
     documentId: document.documentId,
     teamProjectId: document.teamProjectId,
-  }, 'sidebar');
+  }, 'sidebar', { newTab: false });
 });

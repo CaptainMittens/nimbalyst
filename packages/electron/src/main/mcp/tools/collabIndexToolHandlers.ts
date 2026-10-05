@@ -48,6 +48,21 @@ export function getCollabIndexToolSchemas() {
       inputSchema: { type: "object", properties: { section: SECTION, project: PAGE_TOOL_DESKTOP_PROJECT_ARG } },
     },
     {
+      name: "searchPages",
+      description:
+        "Search a Pages section by the text in page bodies and titles: pages, typed pages and type pages. Every word must match; the last also matches as a word start. Returns the best matches first, each with kind, id, title, the uri to read with readCollabDoc, the https link to write in page content, and a snippet of the matching text. Use it to find what the pages say about a topic (for example what was decided about X) instead of reading pages one by one. Pass `project` to search another project of the team.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Words to find." },
+          section: SECTION,
+          limit: { type: "number", description: "At most this many results (default 20, at most 50)." },
+          project: PAGE_TOOL_DESKTOP_PROJECT_ARG,
+        },
+        required: ["query"],
+      },
+    },
+    {
       name: "createSharedDoc",
       description:
         "Create a page in Pages, under a page, under a typed page, or at the top of the section. Returns the documentId, the uri of its body and the https link to it.",
@@ -217,6 +232,8 @@ function invalidArguments(tool: string, args: any): string | null {
       return args?.kind === "doc" || args?.kind === "folder" ? null : "deleteSharedItem requires kind 'doc' or 'folder'.";
     case "setPageType":
       return nonEmpty(args?.pageId) && nonEmpty(args?.typeId) ? null : "setPageType requires pageId and typeId.";
+    case "searchPages":
+      return nonEmpty(args?.query) ? null : "searchPages requires a non-empty query.";
     default:
       return null;
   }
@@ -249,6 +266,7 @@ function describeSuccess(tool: string, args: any, result: RendererResult): strin
 
 const TOOL_NAMES = new Set([
   "listPages",
+  "searchPages",
   "createSharedDoc",
   "createSharedFolder",
   "moveSharedItem",
@@ -278,9 +296,9 @@ async function runInRenderer(
 async function runPageTreeTool(tool: string, args: any, workspacePath: string | undefined): Promise<McpToolResult> {
   const invalid = invalidArguments(tool, args);
   if (invalid) return errorResult(`Error: ${invalid}`);
-  // listPages reads another project when `project` names one; writes stay in this one.
-  if (tool === "listPages") {
-    return routePageRead("listPages", args, workspacePath, (localArgs, extra) => runInRenderer(tool, localArgs, workspacePath, extra));
+  // listPages and searchPages read another project when `project` names one; writes stay in this one.
+  if (tool === "listPages" || tool === "searchPages") {
+    return routePageRead(tool, args, workspacePath, (localArgs, extra) => runInRenderer(tool, localArgs, workspacePath, extra));
   }
   const refused = await refuseOtherProjectWrite(tool, args, workspacePath);
   if (refused) return errorResult(`Error: ${refused}`);
@@ -297,6 +315,7 @@ export function handleCollabIndexTool(
 }
 
 export const handleListPages = (args: any, workspacePath: string | undefined) => runPageTreeTool("listPages", args, workspacePath);
+export const handleSearchPages = (args: any, workspacePath: string | undefined) => runPageTreeTool("searchPages", args, workspacePath);
 export const handleCreateSharedDoc = (args: any, workspacePath: string | undefined) => runPageTreeTool("createSharedDoc", args, workspacePath);
 export const handleCreateSharedFolder = (args: any, workspacePath: string | undefined) => runPageTreeTool("createSharedFolder", args, workspacePath);
 export const handleMoveSharedItem = (args: any, workspacePath: string | undefined) => runPageTreeTool("moveSharedItem", args, workspacePath);

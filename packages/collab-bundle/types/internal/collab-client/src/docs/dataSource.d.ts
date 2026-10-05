@@ -1,4 +1,5 @@
 import type { CollabCommandResult, CollabDataChange, CollabDataSnapshot, CollabDataSource, Unsubscribe } from '../core/index';
+import type { PageSearchRequest, PageSearchResponse } from '@nimbalyst/collab-protocol';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 export type { SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 export type CollabDocsCommand = {
@@ -147,4 +148,10 @@ export type CollabDocsDataChange = Exclude<CollabDataChange<SharedDocument, Shar
 export interface CollabDocsDataSource extends Omit<CollabDataSource<SharedDocument, SharedFolder, CollabDocsCommand, CollabDocsCommandResult>, 'snapshot' | 'subscribe'> {
     snapshot(): Promise<CollabDocsSnapshot>;
     subscribe(cb: (change: CollabDocsDataChange) => void): Unsubscribe;
+    /**
+     * Pages whose bodies match `request` (see `@nimbalyst/collab-protocol`
+     * `pageSearch.ts`). Null when this section cannot answer now (offline, not
+     * connected yet). Absent on a source with no body search.
+     */
+    searchPages?(request: PageSearchRequest): Promise<PageSearchResponse | null>;
 }

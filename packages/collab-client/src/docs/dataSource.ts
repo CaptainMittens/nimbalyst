@@ -6,6 +6,7 @@ import type {
   CollabDataSource,
   Unsubscribe,
 } from '@nimbalyst/collab-client/core';
+import type { PageSearchRequest, PageSearchResponse } from '@nimbalyst/collab-protocol';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 
 // Re-exported here because the docs barrel only re-exports document and folder.
@@ -126,6 +127,12 @@ export interface CollabDocsDataSource extends Omit<
 > {
   snapshot(): Promise<CollabDocsSnapshot>;
   subscribe(cb: (change: CollabDocsDataChange) => void): Unsubscribe;
+  /**
+   * Pages whose bodies match `request` (see `@nimbalyst/collab-protocol`
+   * `pageSearch.ts`). Null when this section cannot answer now (offline, not
+   * connected yet). Absent on a source with no body search.
+   */
+  searchPages?(request: PageSearchRequest): Promise<PageSearchResponse | null>;
 }
 
 // Compile-time assertion that the document command union stays compatible

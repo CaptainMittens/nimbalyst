@@ -97,6 +97,7 @@ export function isPermanentTrackerRejection(code: TrackerMutationRejectCode): bo
     || code === 'legacy_encryption_retired'
     || code === 'issueKeyPrefixConflict'
     || code === 'adminRequired'
+    || code === 'schemaExists'
     || code === 'malformed';
 }
 

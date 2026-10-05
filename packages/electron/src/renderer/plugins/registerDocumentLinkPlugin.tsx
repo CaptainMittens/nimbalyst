@@ -176,7 +176,7 @@ function DocumentLinkPluginWrapper() {
             // rather than a plain reference.
             embedType: sharedDocumentFileExtension(doc),
           })),
-      openReference: (target: string) => {
+      openReference: (target: string, options?: { newTab: boolean }) => {
         const targetDocumentId = parseCollabReferenceDocumentId(target);
         if (!targetDocumentId) return;
 
@@ -191,6 +191,8 @@ function DocumentLinkPluginWrapper() {
           scopeKey: scope.scopeKey,
           orgId: scope.orgId,
           analyticsSource: 'deep_link',
+          // A reference in a page navigates like any page link in Pages.
+          openOptions: options ?? { newTab: false },
         });
       },
     };

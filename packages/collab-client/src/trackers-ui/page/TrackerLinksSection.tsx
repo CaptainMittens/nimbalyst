@@ -5,6 +5,7 @@
  * the sentence that made each link. Hidden when the page has no links.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { collabOpenOptions, type CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { globalRegistry } from '@nimbalyst/tracker-schema';
 import { groupTrackerPageLinks, type LinkedPage, type PageLinksSource, type TrackerPageLink } from './pageLinks';
 
@@ -15,7 +16,7 @@ export interface TrackerLinksSectionProps {
   itemType?: string;
   /** Bumped by the host after a save that may have re-indexed links. */
   revision?: number;
-  onOpenItem?: (itemId: string) => void;
+  onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
 }
 
 export const TrackerLinksSection: React.FC<TrackerLinksSectionProps> = ({ linksSource, itemId, itemType, revision = 0, onOpenItem }) => {
@@ -61,7 +62,7 @@ export const TrackerLinksSection: React.FC<TrackerLinksSectionProps> = ({ linksS
       type="button"
       className={`tracker-links-page inline-flex items-baseline gap-1 min-w-0 text-nim hover:underline disabled:cursor-default disabled:no-underline ${className}`}
       disabled={!onOpenItem}
-      onClick={(e) => { e.stopPropagation(); onOpenItem?.(page.itemId); }}
+      onClick={(e) => { e.stopPropagation(); onOpenItem?.(page.itemId, collabOpenOptions(e)); }}
     >
       <span className="text-[11px] text-nim-faint">{globalRegistry.get(page.typeId)?.displayName ?? page.typeId}</span>
       <span className="truncate">{page.title}</span>

@@ -8,7 +8,7 @@ import {
   setTrackerReferenceHomeScope,
   setTrackerReferenceHrefBuilder,
 } from '@nimbalyst/runtime/plugins/TrackerLinkPlugin/trackerReferenceHref';
-import type { CollabArtifactRef, CollabScope } from '@nimbalyst/collab-client/core';
+import type { CollabArtifactRef, CollabOpenOptions, CollabScope } from '@nimbalyst/collab-client/core';
 
 import {
   activeCollabScopeAtom,
@@ -30,17 +30,17 @@ function artifactRef(page: PageRef, scope: CollabScope): CollabArtifactRef {
 }
 
 /** Opens an item or type as a page: through the team host when there is a team and it is not personal, else the personal host. */
-function openPage(page: PageRef, personal: boolean, workspacePath: string | null): void {
+function openPage(page: PageRef, personal: boolean, workspacePath: string | null, options?: CollabOpenOptions): void {
   store.set(setWindowModeAtom, 'collab');
   const scope = store.get(activeCollabScopeAtom);
   if (scope && !personal) {
-    getElectronCollabHost(scope).openArtifact(artifactRef(page, scope), SOURCE);
+    getElectronCollabHost(scope).openArtifact(artifactRef(page, scope), SOURCE, options);
     return;
   }
   if (!workspacePath) return;
   const host = getPersonalCollabHost(workspacePath);
   void host.resolveScope().then((personalScope) => {
-    host.openArtifact(artifactRef(page, personalScope), SOURCE);
+    host.openArtifact(artifactRef(page, personalScope), SOURCE, options);
   });
 }
 
@@ -72,7 +72,8 @@ export function installTrackerReferenceLinks(): () => void {
   };
 }
 
-export function openConsoleLinkInWindow(href: string): boolean {
+/** `options`: a click on a link in a page shown in Pages, which navigates like any page link there. */
+export function openConsoleLinkInWindow(href: string, options?: CollabOpenOptions): boolean {
   const workspacePath = store.get(activeWorkspacePathAtom);
   const plan = planConsoleLinkOpen(href, {
     team: activeTeam(),
@@ -82,20 +83,20 @@ export function openConsoleLinkInWindow(href: string): boolean {
 
   switch (plan.action) {
     case 'team-document':
-      return openSharedDocumentInTab(plan.documentId, SOURCE);
+      return openSharedDocumentInTab(plan.documentId, SOURCE, options);
     case 'item':
       // A key resolves in either store; the team host opens team and personal items alike.
-      openPage({ kind: 'tracker', id: plan.itemId }, false, workspacePath);
+      openPage({ kind: 'tracker', id: plan.itemId }, false, workspacePath, options);
       return true;
     case 'type':
-      openPage({ kind: 'type', id: plan.typeId }, plan.personal, workspacePath);
+      openPage({ kind: 'type', id: plan.typeId }, plan.personal, workspacePath, options);
       return true;
     case 'personal-page': {
       if (!workspacePath) return false;
       const host = getPersonalCollabHost(workspacePath);
       void host.resolveScope().then((personalScope) => {
         store.set(setWindowModeAtom, 'collab');
-        host.openArtifact({ kind: 'document', scope: personalScope, documentId: plan.pageId, teamProjectId: null }, SOURCE);
+        host.openArtifact({ kind: 'document', scope: personalScope, documentId: plan.pageId, teamProjectId: null }, SOURCE, options);
       });
       return true;
     }

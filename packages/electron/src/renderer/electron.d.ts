@@ -732,6 +732,13 @@ interface ElectronAPI {
     }>;
     setArchived: (payload: { workspacePath: string; type: string; archived: boolean }) =>
       Promise<{ success: boolean; error?: string }>;
+    defineType: (payload: { workspacePath: string; schema: Record<string, unknown> }) => Promise<{
+      success: boolean;
+      type?: string;
+      scope?: 'team' | 'personal';
+      status?: 'created' | 'syncing';
+      error?: string;
+    }>;
   };
 
   // Document Service

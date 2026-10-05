@@ -64,6 +64,7 @@ export const PAGE_TOOL_NAMES = [
   'pages_bind_repo',
   'pages_create_project',
   'listPages',
+  'searchPages',
   'readCollabDoc',
   'applyCollabDocEdit',
   'createSharedDoc',
@@ -184,6 +185,24 @@ export const PAGE_TOOL_CONTRACT: readonly PageToolContract[] = [
     description:
       "List the project's pages as a tree: pages, placed types and typed pages, each with nodeId, kind, id, title, parentNodeId, depth, sortOrder and the https link to write in page content (types also a viewLink); pages carry the uri to read and edit their body, typed pages their issueKey and whether they are placed outside their type.",
     inputSchema: { type: 'object', properties: { section: SECTION } },
+    remoteAcceptedValues: TEAM_SECTION_ONLY,
+    desktopProjectArg: true,
+  },
+  {
+    name: 'searchPages',
+    availability: 'shared',
+    readOnly: true,
+    description:
+      "Search the project's pages by the text in their bodies and their titles: pages, typed pages and type pages. Every word must match; the last also matches as a word start. Returns the best matches first, each with kind, title, uri to read with readCollabDoc, the https link to write in page content, and a snippet of the matching text. Use it to find what the pages say about a topic (for example what was decided about X) before reading pages one by one.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Words to find.' },
+        section: SECTION,
+        limit: { type: 'number', description: 'At most this many results (default 20, at most 50).' },
+      },
+      required: ['query'],
+    },
     remoteAcceptedValues: TEAM_SECTION_ONLY,
     desktopProjectArg: true,
   },
@@ -642,6 +661,30 @@ export interface ListPagesResult {
   /** Desktop, team section: the project listed, and the org's other projects to pass as `project`. */
   project?: PageToolProjectSummary;
   otherProjects?: PageToolProjectSummary[];
+}
+
+/** One `searchPages` result. `kind`, `id` and `link` match the `listPages` node it names. */
+export interface SearchPagesResultEntry {
+  kind: 'page' | 'typedPage' | 'type';
+  id: string;
+  title: string;
+  issueKey?: string;
+  /** Where to read the body with readCollabDoc. */
+  uri: string | null;
+  link?: string;
+  /** Plain text around the match in the body; empty for a title-only match. */
+  snippet: string;
+  matchedIn: 'body' | 'title' | 'both';
+  updatedAt: number | null;
+}
+
+/** `searchPages`: the text answer is this object as JSON. */
+export interface SearchPagesResult {
+  section: 'team' | 'personal';
+  query: string;
+  /** `partial` while the team index has not read every page once yet. */
+  status: 'ready' | 'partial';
+  results: SearchPagesResultEntry[];
 }
 
 export interface CreateSharedDocResult {

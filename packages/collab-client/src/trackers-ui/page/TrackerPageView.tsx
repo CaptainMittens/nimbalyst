@@ -11,6 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import type { FieldDefinition } from '@nimbalyst/tracker-schema';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
@@ -56,7 +57,7 @@ export interface TrackerPageViewProps {
   /** Bumped by the host after a save that may have re-indexed links. */
   linksRevision?: number;
   /** Open another typed page (a Links entry or a relationship chip). */
-  onOpenItem?: (itemId: string) => void;
+  onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
   /** Open the body's page history; absent while the body has none to show. */
   onShowHistory?: () => void;
   /**

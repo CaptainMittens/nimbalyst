@@ -29,6 +29,7 @@ export const PAGES_VERBS = {
   'create-project': 'pages_create_project',
   list: 'listPages',
   read: 'readCollabDoc',
+  search: 'searchPages',
   edit: 'applyCollabDocEdit',
   create: 'createSharedDoc',
   'create-folder': 'createSharedFolder',
@@ -169,6 +170,7 @@ const BUILDERS: Record<ToolVerb, (args: ParsedArgs) => Record<string, unknown>> 
     return { ...TEAM, itemId: operandAt(args, 0, 'a page id'), kind };
   },
   'set-type': (args) => ({ ...TEAM, pageId: operandAt(args, 0, 'a page id'), typeId: operandAt(args, 1, 'a type id') }),
+  search: (args) => ({ ...TEAM, query: operandAt(args, 0, 'a query'), limit: flagInt(args, 'limit') }),
   members: (args) => ({ query: args.positionals[0] }),
   types: (args) => ({ search: flagStr(args, 'search') }),
   'define-type': (args) => {
@@ -252,6 +254,13 @@ const TYPE_COLUMNS: Column[] = [
   { header: 'extends', get: (t) => t.extends },
 ];
 
+const SEARCH_COLUMNS: Column[] = [
+  { header: 'title', get: (r) => r.title },
+  { header: 'kind', get: (r) => r.kind },
+  { header: 'snippet', get: (r) => r.snippet },
+  { header: 'link', get: (r) => r.link ?? r.uri },
+];
+
 const MEMBER_COLUMNS: Column[] = [
   { header: 'name', get: (m) => m.displayName },
   { header: 'email', get: (m) => m.email },
@@ -279,6 +288,7 @@ function renderResult(ctx: PagesCtx, toolName: string, result: any): string {
     toolName === 'listPages' ? table(rowsOf(result, 'nodes'), NODE_COLUMNS, (n) => n.nodeId)
     : toolName === 'tracker_list' ? table(rowsOf(result, 'items'), ITEM_COLUMNS, (r) => field(r, 'issueKey') ?? r.id)
     : toolName === 'tracker_list_types' ? table(rowsOf(result, 'types'), TYPE_COLUMNS, (t) => t.type ?? t.id)
+    : toolName === 'searchPages' ? table(rowsOf(result, 'results'), SEARCH_COLUMNS, (r) => r.issueKey ?? r.id)
     : toolName === 'findOrgMembers' ? table(rowsOf(result, 'members'), MEMBER_COLUMNS, (m) => m.email)
     : toolName === 'list_citable_inputs' ? table(rowsOf(result, 'inputs'), INPUT_COLUMNS, (i) => i.key)
     : undefined;

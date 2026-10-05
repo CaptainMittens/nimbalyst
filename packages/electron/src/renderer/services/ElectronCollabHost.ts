@@ -6,6 +6,7 @@ import {
   type CollabDocsViewPreferences,
   type CollabDocumentTypeDescriptor,
   type CollabHost,
+  type CollabOpenOptions,
   type CollabOpenSource,
   type CollabPersonalStateCapability,
   type CollabPersonalStateRow,
@@ -54,7 +55,7 @@ interface LegacyCollabDiscoveryState {
 
 export interface ElectronCollabHostOptions {
   scopeKey: string;
-  openArtifact?: (ref: CollabArtifactRef, source: CollabOpenSource) => void;
+  openArtifact?: (ref: CollabArtifactRef, source: CollabOpenSource, options?: CollabOpenOptions) => void;
 }
 
 type ElectronDocsCapability = CollabDocsCapability<
@@ -375,11 +376,11 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
     };
   }
 
-  openArtifact(ref: CollabArtifactRef, source: CollabOpenSource): void {
+  openArtifact(ref: CollabArtifactRef, source: CollabOpenSource, options?: CollabOpenOptions): void {
     if (!this.openArtifactImpl) {
       throw new Error('This Electron host was created without a navigation adapter');
     }
-    this.openArtifactImpl(ref, source);
+    this.openArtifactImpl(ref, source, options);
     if (source !== 'history') return;
     // A typed page's body and a type page's prose are document rooms of their own.
     const historyDocumentId = ref.kind === 'document' ? ref.documentId
@@ -605,6 +606,7 @@ export class ElectronCollabHost implements CollabHost<ElectronDocsCapability> {
         };
       },
       command: async (command) => (await this.ensureDataSource()).command(command),
+      searchPages: async (query) => (await this.ensureDataSource()).searchPages?.(query) ?? null,
       status: () => this.dataSource?.status() ?? 'disconnected',
       dispose: () => {
         this.releaseDataSource();

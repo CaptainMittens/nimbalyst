@@ -19,6 +19,7 @@ import { useAtomValue, useStore } from 'jotai';
 import type { PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
 import { DESKTOP_TRACKER_UI_CAPABILITIES, TrackersUIProvider } from '@nimbalyst/collab-client/trackers-ui';
 import { PlacedViewEmbed, PlacedViewNote } from '@nimbalyst/collab-client/trackers-ui/embed';
+import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { ElectronTrackerDataSource } from '../../services/ElectronTrackerDataSource';
 import { activeWorkspacePathAtom } from '../../store/atoms/openProjects';
 import { activeCollabScopeAtom } from '../../store/atoms/collabDocuments';
@@ -58,16 +59,25 @@ const WorkspacePlacedView: React.FC<PlacedViewEmbedFrameProps & { workspacePath:
   );
   // `TrackerIdentity.email` is nullable; the provider's "me" needs one to stamp `by` on an edit.
   const trackerIdentity = identity?.email ? identity : null;
-  // A listed mark opens the page it is on, in Pages mode.
-  const openPage = useCallback((uri: string) => {
-    void openAgentEditedPage(uri, workspacePath).catch((error) => console.warn('[PlacedViewEmbedFrame] could not open page', uri, error));
-  }, [workspacePath]);
   // The page this embed is on decides whether a `local` view reaches these items.
   const anchorRef = useRef<HTMLDivElement>(null);
   const [pagePath, setPagePath] = useState<string | null | undefined>(undefined);
+  // On a page in Pages a click navigates there like any page link (the
+  // current tab, or a new one on Cmd/Ctrl); elsewhere an item opens in Tracker mode.
+  const [inPages, setInPages] = useState(false);
   useLayoutEffect(() => {
     setPagePath(anchorRef.current?.closest('[data-file-path]')?.getAttribute('data-file-path') ?? null);
+    setInPages(Boolean(anchorRef.current?.closest('.collab-mode')));
   }, []);
+  // A listed mark opens the page it is on, in Pages mode.
+  const openPage = useCallback((uri: string, options?: CollabOpenOptions) => {
+    void openAgentEditedPage(uri, workspacePath, { source: 'embedded_document', options: inPages ? options ?? { newTab: false } : undefined })
+      .catch((error) => console.warn('[PlacedViewEmbedFrame] could not open page', uri, error));
+  }, [workspacePath, inPages]);
+  const openItem = useCallback((itemId: string, options?: CollabOpenOptions) => {
+    if (inPages) openPage(`tracker://${itemId}`, options);
+    else navigateToTrackerItem(itemId);
+  }, [inPages, openPage]);
   // Re-read the reach when the window's team changes.
   const collabScope = useAtomValue(activeCollabScopeAtom);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -81,7 +91,7 @@ const WorkspacePlacedView: React.FC<PlacedViewEmbedFrameProps & { workspacePath:
             label={label}
             attrs={attrs}
             reach={reach}
-            onOpenItem={navigateToTrackerItem}
+            onOpenItem={openItem}
             onOpenPage={openPage}
             onOpenLink={openLink}
           />

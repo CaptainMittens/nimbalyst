@@ -270,7 +270,7 @@ describe('MarksListEmbed', () => {
     expect(listMarks).toHaveBeenCalledWith({ kind: 'decided', typeId: 'module' });
     expect(screen.getByTestId('marks-list-meta').textContent).toBe('Greg, 2026-10-02, over Automerge');
     fireEvent.click(screen.getByText('Sync engine'));
-    expect(onOpenPage).toHaveBeenCalledWith('tracker://cmp_1');
+    expect(onOpenPage).toHaveBeenCalledWith('tracker://cmp_1', { newTab: false });
   });
 
   it('says so when the host cannot read marks', () => {

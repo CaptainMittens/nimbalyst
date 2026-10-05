@@ -10,6 +10,7 @@
  * where the links come from (`linksSource`).
  */
 import React from 'react';
+import type { CollabOpenOptions } from '../../core/index';
 import type { FieldDefinition } from '../../../../tracker-schema/src/browser';
 import type { TrackerRecord } from '../../../../runtime/src/core/TrackerRecord';
 import { TrackerFieldPills } from '../../../../runtime/src/plugins/TrackerPlugin/components/TrackerFieldPills';
@@ -43,7 +44,7 @@ export interface TrackerPageViewProps {
     /** Bumped by the host after a save that may have re-indexed links. */
     linksRevision?: number;
     /** Open another typed page (a Links entry or a relationship chip). */
-    onOpenItem?: (itemId: string) => void;
+    onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
     /** Open the body's page history; absent while the body has none to show. */
     onShowHistory?: () => void;
     /**

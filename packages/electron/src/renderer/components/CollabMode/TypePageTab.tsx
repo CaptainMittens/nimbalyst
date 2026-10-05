@@ -10,7 +10,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { atom, useAtomValue, useSetAtom, useStore, type Atom } from 'jotai';
-import type { CollabScope } from '@nimbalyst/collab-client/core';
+import type { CollabOpenOptions, CollabScope } from '@nimbalyst/collab-client/core';
 import type { SharedDocument } from '@nimbalyst/collab-client/docs';
 import { DESKTOP_TRACKER_UI_CAPABILITIES, TrackersUIProvider } from '@nimbalyst/collab-client/trackers-ui';
 import { PageHistoryButton, TypePageTable, crumbItemLookup, trackerPageCrumbFolders, typePageTypeIds } from '@nimbalyst/collab-client/trackers-ui/page';
@@ -80,7 +80,7 @@ export interface TypePageTabProps {
   typeId: string;
   workspacePath: string;
   /** Opens a row's item as a page tab in this mode. */
-  onOpenItem: (itemId: string) => void;
+  onOpenItem: (itemId: string, options?: CollabOpenOptions) => void;
 }
 
 export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath, onOpenItem }) => {

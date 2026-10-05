@@ -3,6 +3,7 @@ import { type ReadReceipt, type UnreadEntitySnapshot } from '../../../runtime/sr
 import { type CollabDocsCapability, type CollabHost, type CollabScope } from '../core/index';
 import { type ChangedSharedDoc } from './collabDiscovery';
 import type { CollabDocsDataSource } from './dataSource';
+import type { PageSearchRequest, PageSearchResponse } from '@nimbalyst/collab-protocol';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 /** Where a page moves: its parent's kind and its order there (absent = no order). */
 export interface CollabPageMoveOptions {
@@ -261,6 +262,12 @@ export interface CollabDocsSession {
     clearPendingFolder(): void;
     getDocuments(): SharedDocument[];
     getFolders(): SharedFolder[];
+    /**
+     * Pages whose body or title matches (`pageSearch.ts`). Typed-page hits have
+     * a null title for the caller to name from its tree (`nameTypedHits`). Null
+     * when the section cannot search now.
+     */
+    searchPages(request: PageSearchRequest): Promise<PageSearchResponse | null>;
 }
 export declare function createCollabDocsSession(scope: CollabScope, dataSource: CollabDocsDataSource, host: DocsHost): CollabDocsSession;
 export interface CollabDocsScopeLifecycleOptions {

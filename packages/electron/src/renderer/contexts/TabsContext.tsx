@@ -23,6 +23,7 @@ import {
   isFeedbackRequestTab,
 } from '../components/FeedbackRequest/feedbackRequestTab';
 import { store as jotaiStore, editorDirtyAtom, makeEditorKey } from '@nimbalyst/runtime/store';
+import { pushTabHistory, stepTabHistory, type TabHistory, type TabHistoryEntry } from './tabHistory';
 
 export interface TabData {
   id: string;
@@ -56,6 +57,8 @@ export interface TabData {
   trackerTypeId?: string;
   /** For personal page tabs: the personal document id (also encoded in filePath). */
   personalDocumentId?: string;
+  /** What this tab showed before and after its current page (Pages navigates in place). In memory only. */
+  history?: TabHistory;
 }
 
 /**
@@ -113,6 +116,34 @@ function resolveTabDisplayName(filePath: string, displayName?: string): string {
     : UNRESOLVED_COLLAB_TAB_NAME;
 }
 
+/** The fields a tab derives from what it shows; a tab that navigates re-derives all of them. */
+function tabFieldsForPath(filePath: string, displayName?: string): Pick<
+  TabData,
+  'filePath' | 'fileName' | 'isVirtual' | 'kind' | 'trackerItemId' | 'trackerTypeId' | 'personalDocumentId'
+> {
+  const isTracker = isTrackerTabPath(filePath);
+  const isType = isTypeTabPath(filePath);
+  const isPersonalPage = isPersonalPageTabPath(filePath);
+  // Tracker tabs use the item id as their label fallback; the live title is
+  // resolved by the tab bar from the canonical tracker atom.
+  const fileName = isTracker
+    ? displayName?.trim() || filePath.slice(TRACKER_TAB_PREFIX.length)
+    : isType
+      ? displayName?.trim() || filePath.slice(TYPE_TAB_PREFIX.length)
+      : isPersonalPage
+        ? displayName?.trim() || 'Untitled'
+        : resolveTabDisplayName(filePath, displayName);
+  return {
+    filePath,
+    fileName,
+    isVirtual: filePath.startsWith('virtual://'),
+    kind: isTracker ? 'tracker' : isType ? 'type' : isPersonalPage ? 'personal-page' : 'file',
+    trackerItemId: isTracker ? filePath.slice(TRACKER_TAB_PREFIX.length) : undefined,
+    trackerTypeId: isType ? filePath.slice(TYPE_TAB_PREFIX.length) : undefined,
+    personalDocumentId: isPersonalPage ? filePath.slice(PERSONAL_PAGE_TAB_PREFIX.length) : undefined,
+  };
+}
+
 interface TabsStore {
   tabs: Map<string, TabData>;
   tabOrder: string[];
@@ -135,6 +166,13 @@ interface TabsContextValue {
   ) => string | null;
   removeTab: (tabId: string) => void;
   switchTab: (tabId: string) => void;
+  /** Show `filePath` in an existing tab, recording where it was for Back. */
+  navigateTab: (tabId: string, filePath: string, displayName?: string) => void;
+  /**
+   * One step Back (-1) or Forward (1) in a tab's history, passing over (and
+   * dropping) entries `isAvailable` refuses; false when nothing that way is left.
+   */
+  stepTab: (tabId: string, direction: -1 | 1, isAvailable?: (entry: TabHistoryEntry) => boolean) => boolean;
   updateTab: (tabId: string, updates: Partial<TabData>) => void;
   togglePin: (tabId: string) => void;
   reorderTabs: (fromIndex: number, toIndex: number) => void;
@@ -379,31 +417,12 @@ export function TabsProvider({
     }
 
     const tabId = generateTabId();
-    const isTracker = isTrackerTabPath(filePath);
-    const isType = isTypeTabPath(filePath);
-    const isPersonalPage = isPersonalPageTabPath(filePath);
-    // Tracker tabs use the item id as their label fallback; the live title is
-    // resolved by the tab bar from the canonical tracker atom.
-    const fileName = isTracker
-      ? displayName?.trim() || filePath.slice(TRACKER_TAB_PREFIX.length)
-      : isType
-        ? displayName?.trim() || filePath.slice(TYPE_TAB_PREFIX.length)
-        : isPersonalPage
-          ? displayName?.trim() || 'Untitled'
-          : resolveTabDisplayName(filePath, displayName);
-
     const newTab: TabData = {
       id: tabId,
-      filePath,
-      fileName,
+      ...tabFieldsForPath(filePath, displayName),
       content,
       isDirty: false,
       isPinned: initialState?.isPinned ?? false,
-      isVirtual: filePath.startsWith('virtual://'),
-      kind: isTracker ? 'tracker' : isType ? 'type' : isPersonalPage ? 'personal-page' : 'file',
-      trackerItemId: isTracker ? filePath.slice(TRACKER_TAB_PREFIX.length) : undefined,
-      trackerTypeId: isType ? filePath.slice(TYPE_TAB_PREFIX.length) : undefined,
-      personalDocumentId: isPersonalPage ? filePath.slice(PERSONAL_PAGE_TAB_PREFIX.length) : undefined,
       contentHash: simpleHash(content),
       contentLoadedAt: new Date()
     };
@@ -435,6 +454,52 @@ export function TabsProvider({
     store.activeTabId = tabId;
     notify();
   }, [notify]);
+
+  // Show another page in an existing tab. TabContent sees the path change and
+  // remounts the tab's editor for it.
+  const showInTab = useCallback((tab: TabData, filePath: string, displayName: string | undefined, history: TabHistory): void => {
+    const store = slotRef.current.store;
+    if (window.electronAPI && !isNonFilesystemTab(tab.filePath)) {
+      window.electronAPI.invoke('stop-watching-file', tab.filePath).catch(() => {});
+    }
+    if (window.electronAPI && !isNonFilesystemTab(filePath)) {
+      window.electronAPI.invoke('start-watching-file', filePath).catch(() => {});
+    }
+    store.tabs.set(tab.id, {
+      ...tab,
+      ...tabFieldsForPath(filePath, displayName),
+      content: '',
+      isDirty: false,
+      contentHash: undefined,
+      contentLoadedAt: undefined,
+      history,
+    });
+    store.activeTabId = tab.id;
+    notify();
+  }, [notify]);
+
+  const navigateTab = useCallback((tabId: string, filePath: string, displayName?: string): void => {
+    const tab = slotRef.current.store.tabs.get(tabId);
+    if (!tab || tab.filePath === filePath) return;
+    showInTab(tab, filePath, displayName, pushTabHistory(tab.history, { filePath: tab.filePath, fileName: tab.fileName }));
+  }, [showInTab]);
+
+  // The tab steps in place even when another tab shows the same page.
+  const stepTab = useCallback((tabId: string, direction: -1 | 1, isAvailable?: (entry: TabHistoryEntry) => boolean): boolean => {
+    const store = slotRef.current.store;
+    const tab = store.tabs.get(tabId);
+    if (!tab) return false;
+    const step = stepTabHistory(tab.history, { filePath: tab.filePath, fileName: tab.fileName }, direction, isAvailable);
+    if (!step) return false;
+    if (!step.target) {
+      // Only gone pages were that way: drop them so the button disables.
+      store.tabs.set(tab.id, { ...tab, history: step.history });
+      notify();
+      return false;
+    }
+    showInTab(tab, step.target.filePath, step.target.fileName, step.history);
+    return true;
+  }, [notify, showInTab]);
 
   // Update a tab
   // Only notifies subscribers if structural changes occurred (filePath, fileName changed)
@@ -753,6 +818,8 @@ export function TabsProvider({
     addTab,
     removeTab,
     switchTab,
+    navigateTab,
+    stepTab,
     updateTab,
     togglePin,
     reorderTabs,
@@ -801,6 +868,8 @@ export function useTabs() {
     addTab: context.addTab,
     removeTab: context.removeTab,
     switchTab: context.switchTab,
+    navigateTab: context.navigateTab,
+    stepTab: context.stepTab,
     updateTab: context.updateTab,
     togglePin: context.togglePin,
     reorderTabs: context.reorderTabs,
@@ -824,6 +893,8 @@ export function useTabsActions() {
     addTab: context.addTab,
     removeTab: context.removeTab,
     switchTab: context.switchTab,
+    navigateTab: context.navigateTab,
+    stepTab: context.stepTab,
     updateTab: context.updateTab,
     togglePin: context.togglePin,
     reorderTabs: context.reorderTabs,

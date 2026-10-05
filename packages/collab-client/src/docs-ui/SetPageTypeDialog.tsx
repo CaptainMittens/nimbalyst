@@ -15,9 +15,11 @@ export interface SetPageTypeDialogProps {
   running: boolean;
   onPick: (typeId: string) => void;
   onClose: () => void;
+  /** Open "New type..." in this section; absent where the host cannot write a type. */
+  onNewType?: () => void;
 }
 
-export function SetPageTypeDialog({ pageTitle, resolver, running, onPick, onClose }: SetPageTypeDialogProps) {
+export function SetPageTypeDialog({ pageTitle, resolver, running, onPick, onClose, onNewType }: SetPageTypeDialogProps) {
   const types = (resolver.listedTypes?.() ?? [])
     .filter((type) => type.creatable !== false)
     .map((type) => ({ ...type, label: resolver.typeLabel?.(type.typeId) ?? type.name }));
@@ -48,8 +50,11 @@ export function SetPageTypeDialog({ pageTitle, resolver, running, onPick, onClos
         </div>
         <div className="flex-1 overflow-y-auto py-1">
           {types.length === 0 ? (
-            <div className="px-4 py-3 text-xs text-nim-faint">No types are available in this section.</div>
-          ) : types.map((type) => (
+            <div className="px-4 py-3 text-xs text-nim-faint">
+              {onNewType ? 'This section has no types yet. Create one to give this page a type.' : 'No types are available in this section.'}
+            </div>
+          ) : null}
+          {types.map((type) => (
             <button
               key={type.typeId}
               type="button"
@@ -62,6 +67,18 @@ export function SetPageTypeDialog({ pageTitle, resolver, running, onPick, onClos
               <span className="truncate">{type.label}</span>
             </button>
           ))}
+          {onNewType ? (
+            <button
+              type="button"
+              disabled={running}
+              className="set-page-type-new w-full flex items-center gap-2 px-4 py-1.5 text-left text-sm text-nim-muted hover:text-nim hover:bg-nim-hover disabled:opacity-50"
+              onClick={onNewType}
+              data-testid="set-page-type-new-type"
+            >
+              <MaterialSymbol icon="add" size={16} />
+              <span className="truncate">New type...</span>
+            </button>
+          ) : null}
         </div>
         <div className="px-4 py-2 border-t border-nim flex items-center justify-between">
           <span className="text-xs text-nim-faint">{running ? 'Setting type...' : ''}</span>

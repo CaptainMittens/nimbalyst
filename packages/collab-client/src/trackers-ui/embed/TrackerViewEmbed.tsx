@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useMemo, type JSX, type ReactNode } from 'react';
+import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { computeReadiness } from '@nimbalyst/runtime/plugins/TrackerPlugin/models/trackerReadiness';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { getRecordStatus, getRecordTitle } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
@@ -43,7 +44,7 @@ export interface TrackerViewEmbedProps {
   /** A view the host already holds, saved or synthetic (e.g. a type page's built-in "All"). */
   view: SavedView;
   onOpenAsTable?: (view: SavedView) => void;
-  onOpenItem?: (itemId: string) => void;
+  onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
   /**
    * `card` is the bordered block a document embeds at a fixed height; `page`
    * drops the card chrome and fills its container, for a tab that is the view.
@@ -118,7 +119,7 @@ function LoadedViewEmbed({
   identity: TrackerIdentity | null;
   renderableViewModes: ReadonlySet<SavedViewDefinition['viewMode']>;
   onOpenAsTable?: (view: SavedView) => void;
-  onOpenItem?: (itemId: string) => void;
+  onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
   height: number;
   variant: 'card' | 'page';
   derivedColumns?: readonly TrackerGridDerivedColumn[];
@@ -146,7 +147,7 @@ function LoadedViewEmbed({
   const { mode } = resolveViewMode(definition.viewMode, { renderableViewModes });
   const titles = useMemo(() => new Map(records.map((record) => [record.id, getRecordTitle(record).trim()])), [records]);
   const resolveRelationshipLabel = useCallback((itemId: string) => titles.get(itemId) || undefined, [titles]);
-  const openItem = useCallback((itemId: string) => onOpenItem?.(itemId), [onOpenItem]);
+  const openItem = useCallback((itemId: string, options?: CollabOpenOptions) => onOpenItem?.(itemId, options), [onOpenItem]);
   const byId = useMemo(() => new Map(records.map((record) => [record.id, record])), [records]);
   const isRowEditable = useCallback((itemId: string) => {
     const record = byId.get(itemId);

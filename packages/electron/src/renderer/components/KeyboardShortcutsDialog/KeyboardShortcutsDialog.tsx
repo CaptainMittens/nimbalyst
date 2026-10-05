@@ -227,6 +227,15 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
       ],
     },
     {
+      // Pages navigates like a wiki: a click shows the page in the current tab.
+      title: 'Pages',
+      shortcuts: [
+        { label: 'Back in the current tab', shortcut: KeyboardShortcuts.view.navigateBack }, // App.tsx -> pagesTabNavigation.ts - Cmd+[
+        { label: 'Forward in the current tab', shortcut: KeyboardShortcuts.view.navigateForward }, // App.tsx -> pagesTabNavigation.ts - Cmd+]
+        { label: 'Open a page in a new tab', shortcut: IS_MAC ? '⌘+Click' : 'Ctrl+Click' }, // usePagesTabNavigation.tsx
+      ],
+    },
+    {
       title: 'Tracker Grid',
       shortcuts: [
         { label: 'Move between cells', shortcut: 'Arrow keys / Tab' },

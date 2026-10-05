@@ -226,6 +226,7 @@ export const SITUATIONAL_TOOLS: readonly string[] = [
   'renameSharedItem',
   'deleteSharedItem',
   'listPages',
+  'searchPages',
   'setPageType',
   // read-only organization/resource discovery for cross-user collaboration
   'findOrgMembers',

@@ -241,6 +241,32 @@ describe('collabOpenDocsPersistence', () => {
     })).toEqual(tabs[0]);
   });
 
+  it('restores section Search and Types tabs, and a leftover Shared Home tab as Team Search', async () => {
+    const harness = installMockElectronAPI();
+    const tab = (filePath: string, fileName: string) => ({ id: filePath, filePath, fileName, content: '', isDirty: false, isPinned: false });
+    const entries = [
+      tab('virtual://shared-home', 'Shared documents'),
+      tab('virtual://pages-types/personal', 'Types'),
+      tab('virtual://pages-search/bogus', 'Search'),
+    ].map(toPersistedPageEntry);
+    expect(entries).toEqual([
+      { kind: 'search', artifactId: 'team', isPinned: false },
+      { kind: 'types', artifactId: 'personal', isPinned: false },
+      null,
+    ]);
+    await persistOpenCollabDocs(TEST_SCOPE, entries.filter((entry) => entry !== null));
+    expect(harness.getState().openCollabDocumentIds).toEqual([]);
+
+    const opened: Array<{ path: string; title?: string }> = [];
+    for (const entry of await loadOpenCollabTabs(TEST_SCOPE)) {
+      if (isPersistedCollabPageEntry(entry)) openPageTab((path, _content, _switch, title) => { opened.push({ path, title }); return path; }, entry);
+    }
+    expect(opened).toEqual([
+      { path: 'virtual://pages-search/team', title: 'Search' },
+      { path: 'virtual://pages-types/personal', title: 'Types' },
+    ]);
+  });
+
   it('loads an old doc-only payload as doc tabs', async () => {
     installMockElectronAPI({
       openCollabDocumentEntries: [{ documentId: 'doc-1', documentType: 'excalidraw', isPinned: true }],

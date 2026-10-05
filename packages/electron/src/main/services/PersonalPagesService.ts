@@ -30,11 +30,13 @@ import type {
   SharedParentKind,
   SharedTypePlacement,
 } from '@nimbalyst/collab-client/docs';
+import type { PageSearchRequest } from '@nimbalyst/collab-protocol';
 import { getDatabase } from '../database/initialize';
 import { historyManager, type HistoryManager } from '../HistoryManager';
 import { safeHandle } from '../utils/ipcRegistry';
 import { logger } from '../utils/logger';
 import * as store from './personalPages/personalPagesStore';
+import { searchPersonalPages } from './personalPages/personalPagesSearch';
 import { seedPersonalHomeOnce, workspaceStateHomeSeedFlags, type PersonalHomeSeedFlags } from './personalPages/personalHomePage';
 
 export interface PersonalPagesSnapshot {
@@ -424,6 +426,11 @@ export function initPersonalPagesService(): void {
   });
   safeHandle('personal-pages:command', async (_event, workspacePath: string, command: CollabDocsCommand) => {
     return instance.command(workspacePath, command);
+  });
+  safeHandle('personal-pages:search', async (_event, workspacePath: string, request: PageSearchRequest) => {
+    const db = getDatabase();
+    if (!db) throw new Error('Database not initialized');
+    return searchPersonalPages(db, requireWorkspace(workspacePath), request ?? { query: '' });
   });
   safeHandle('personal-pages:get-body', async (_event, workspacePath: string, documentId: string) => {
     return instance.getBody(workspacePath, documentId);

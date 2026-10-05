@@ -271,7 +271,7 @@ test("a placed team type and its items sync, open as pages, and restore", async 
     // ---- Step 1: A places the type at the tree root via the context menu.
     await test.step("A places the type via Place type...", async () => {
       const pageA = harness.clientA.page;
-      const tree = sidebar(pageA).locator(".session-history-search + div");
+      const tree = sidebar(pageA).locator(".collab-sidebar-tree");
       await expect(tree).toBeVisible({ timeout: 10_000 });
       const box = await tree.boundingBox();
       if (!box) throw new Error("Pages tree has no box on A");

@@ -58,6 +58,7 @@ import {
   handleRenameSharedItem,
   handleDeleteSharedItem,
   handleListPages,
+  handleSearchPages,
   handleSetPageType,
   getCollabIndexToolSchemas,
 } from "./tools/collabIndexToolHandlers";
@@ -574,6 +575,9 @@ function createSharedMcpServer(
 
         case "listPages":
           return handleListPages(args, workspacePath);
+
+        case "searchPages":
+          return handleSearchPages(args, workspacePath);
 
         case "setPageType":
           return handleSetPageType(args, workspacePath);

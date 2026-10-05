@@ -160,6 +160,21 @@ export interface TrackerSchemaLocalChange {
   /** JSON-serialized TrackerDataModel, or null for a tombstone. */
   model: string | null;
   deleted: boolean;
+  /**
+   * A new type that must not replace a definition another client created.
+   * `required`: never sent to a room that cannot refuse an existing type; it
+   * settles as refused (`createOnlyUnsupported`) instead. `whenSupported`: an
+   * older room gets the plain upsert it always got.
+   */
+  createOnly?: 'required' | 'whenSupported';
+}
+
+/** How the room answered one schema mutation this client sent. */
+export interface TrackerSchemaMutationOutcome {
+  type: string;
+  model: string | null;
+  accepted: boolean;
+  error?: { code: string; message: string };
 }
 
 export interface AppliedTrackerSchema {
@@ -184,6 +199,13 @@ export interface TrackerSchemaSyncHooks {
    * no notion of a retired row simply keeps the old behaviour.
    */
   markRejected?: (type: string, code: string) => Promise<unknown>;
+  /**
+   * The room's answer to one mutation this client sent, matched by its own
+   * mutation id. A broadcast of someone else's definition of the same type is
+   * not an answer, which is why a pending creation must settle here and not in
+   * `applyRemote`.
+   */
+  onSettled?: (outcome: TrackerSchemaMutationOutcome) => void;
 }
 
 export interface TrackerIdentityRecoveryHooks {
@@ -431,7 +453,10 @@ export class TrackerSyncEngine {
     send: (message) => this.send(message),
     newMutationId: generateClientMutationId,
     pendingLaneIds: this.pendingLaneIds,
+    createOnlySupported: () => this.schemaCreateOnlySupported,
   });
+  /** Whether this connection's room advertised `schemaCreateOnly`; re-learned every bootstrap. */
+  private schemaCreateOnlySupported = false;
 
   private readonly rollbackSnapshots = new Map<string, {
     itemId: string;
@@ -933,6 +958,7 @@ export class TrackerSyncEngine {
     if (!hooks) return;
 
     let cursor: SyncId = 0 as SyncId;
+    this.schemaCreateOnlySupported = false;
     console.info('[TrackerSchemaSync] bootstrap start (full snapshot since sync_id=0)');
 
     try {
@@ -943,6 +969,7 @@ export class TrackerSyncEngine {
           `[TrackerSchemaSync] bootstrap batch: ${response.schemas.length} schema(s), cursor=${response.cursorSyncId}, hasMore=${response.hasMore}`,
         );
 
+        if (response.schemaCreateOnly === true) this.schemaCreateOnlySupported = true;
         await this.applySchemaBootstrapBatch(response);
         cursor = response.cursorSyncId;
         if (!response.hasMore) break;
@@ -1334,7 +1361,19 @@ export class TrackerSyncEngine {
         `${msg.schema ? ` type=${msg.schema.schemaType} sync_id=${msg.schema.syncId}` : ''}` +
         `${msg.error ? ` error=${msg.error.code}` : ''}`,
     );
-    this.schemaOutbox.settle(msg.clientMutationId);
+    const sent = this.schemaOutbox.settle(msg.clientMutationId);
+    if (sent) {
+      try {
+        this.config.schemaSync?.onSettled?.({
+          type: sent.type,
+          model: sent.model,
+          accepted: msg.accepted,
+          ...(msg.error ? { error: { code: msg.error.code, message: msg.error.message } } : {}),
+        });
+      } catch (err) {
+        this.config.onBootstrapError?.(err);
+      }
+    }
     if (msg.accepted && msg.schema) {
       this.pendingLaneIds.delete(msg.clientMutationId);
       await this.applySchemaEnvelope(msg.schema);

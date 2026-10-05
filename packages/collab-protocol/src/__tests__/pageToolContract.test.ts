@@ -25,7 +25,7 @@ describe('page tool contract', () => {
 
   it('lets only read tools name another project on desktop', () => {
     const withProject = PAGE_TOOL_CONTRACT.filter((tool) => tool.desktopProjectArg).map((tool) => tool.name);
-    expect(withProject.sort()).toEqual(['listPages', 'readCollabDoc']);
+    expect(withProject.sort()).toEqual(['listPages', 'readCollabDoc', 'searchPages']);
     expect(PAGE_TOOL_CONTRACT.filter((tool) => tool.desktopProjectArg).every((tool) => tool.readOnly)).toBe(true);
     // The remote `project` is the { orgId, projectId } pin, never the desktop's id-or-name.
     expect(remoteArgumentRefusal('listPages', { project: { orgId: 'o', projectId: 'p' } })).toBeNull();

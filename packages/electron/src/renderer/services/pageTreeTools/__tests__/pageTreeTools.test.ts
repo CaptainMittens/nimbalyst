@@ -13,10 +13,12 @@ import {
   listPagesTool,
   movePageTreeNodeTool,
   renamePageTool,
+  searchPagesTool,
   setPageTypeTool,
   type PageTreeSection,
   type PageTreeToolEnv,
 } from '@nimbalyst/collab-client/docs/pageTreeToolCore';
+import type { PageSearchHit } from '@nimbalyst/collab-protocol';
 import { registerPageTreeToolHandlers } from '../pageTreeToolHandlers';
 
 const page = (documentId: string, title: string, parent: string | null = null, extra: Partial<SharedDocument> = {}): SharedDocument => ({
@@ -221,6 +223,32 @@ describe('page tree agent tools', () => {
       const result = await run(env, { section: 'team', ...args });
       expect(result, JSON.stringify(args)).toMatchObject({ success: false, error: expect.stringContaining('Personal pages refused the write') });
     }
+  });
+
+  it('searches page text: names typed pages from the tree, adds typed-page title matches, drops typed pages the tree does not show', async () => {
+    const session = tree();
+    const hit = (documentId: string, kind: PageSearchHit['kind'], id: string, score: number, title: string | null = null): PageSearchHit => ({
+      kind, id, documentId, title, issueKey: null, snippet: `${id} sync notes`, highlights: [], updatedAt: 7, score,
+    });
+    Object.assign(session, {
+      searchPages: vi.fn(async () => ({
+        status: 'ready',
+        hits: [hit('overview', 'page', 'overview', 3, 'Overview'), hit('tracker-content/mod_2', 'typed', 'mod_2', 2), hit('tracker-content/gone', 'typed', 'gone', 9)],
+      })),
+    });
+    const result = await searchPagesTool(envFor({ team: session }), { query: 'sync', limit: 10 });
+    // Only the types the tree shows, so typed pages it would drop never use up the limit.
+    expect((session as unknown as { searchPages: ReturnType<typeof vi.fn> }).searchPages).toHaveBeenCalledWith({ query: 'sync', limit: 10, typeIds: ['module'] });
+    expect(result).toMatchObject({ success: true, section: 'team', query: 'sync', status: 'ready' });
+    expect((result as unknown as { results: Array<Record<string, unknown>> }).results.map((r) => [r.kind, r.id, r.title, r.matchedIn, r.uri])).toEqual([
+      // "Sync engine" matches by title only (no snippet); the archived/unknown typed page is dropped.
+      ['typedPage', 'mod_1', 'Sync engine', 'title', 'collab://tracker-content/mod_1'],
+      ['page', 'overview', 'Overview', 'body', 'collab://org:org1:doc:overview'],
+      ['typedPage', 'mod_2', 'Tracker engine', 'body', 'collab://tracker-content/mod_2'],
+    ]);
+    expect(await searchPagesTool(envFor({ team: session }), { query: '  ' })).toMatchObject({ success: false });
+    Object.assign(session, { searchPages: async () => null });
+    expect(await searchPagesTool(envFor({ team: session }), { query: 'sync' })).toMatchObject({ success: false, error: expect.stringMatching(/unavailable/) });
   });
 
   it('works in the Personal section with no team, through the registered handler', async () => {

@@ -26,6 +26,7 @@ const PAGES_HELP = `Team pages (Nimbalyst Teams sign-in; server = NIM_SERVER, de
   nim pages pin --org <id> --project <id>    (writes .nimbalyst/wiki.json; one of the projects this repo resolves to)
   nim pages list                             (the page tree, with links)
   nim pages read <uri|link>
+  nim pages search <query> [--limit n]       (page titles and text)
   nim pages edit <uri|link> --old TXT --new TXT [...]   (or --replacements-file F)
   nim pages create "<title>" [--parent ID] [--parent-kind page|item] [--path A/B]
                      [--body TXT | --body-file F] [--before NODE | --after NODE]

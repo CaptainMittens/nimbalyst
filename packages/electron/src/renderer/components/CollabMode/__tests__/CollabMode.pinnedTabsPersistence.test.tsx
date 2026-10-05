@@ -50,6 +50,8 @@ vi.mock('../../../utils/collabDocumentOpener', () => ({
 
 vi.mock('../../../store/atoms/collabDocuments', async () => {
   const { atom } = await import('jotai');
+  // One session per scope, like the real getter: a new atom per render never settles.
+  const teamSession = { atoms: { sharedDocuments: atom([]) } };
   return {
     initSharedDocuments: vi.fn(),
     getElectronCollabHostForScopeKey: () => ({
@@ -70,6 +72,7 @@ vi.mock('../../../store/atoms/collabDocuments', async () => {
       }),
     }),
     getPersonalCollabDocsSession: () => personalSession,
+    getElectronCollabDocsSession: () => teamSession,
     pendingCollabDocumentAtom: atom(null),
     sharedDocumentsAtom: atom([]),
     sharedFoldersAtom: atom([]),
@@ -114,6 +117,7 @@ vi.mock('@nimbalyst/collab-client/docs-ui', () => ({
   CollabSidebar: ({ sectionTitle }: { sectionTitle?: string }) => (
     <div data-testid={sectionTitle === 'Personal' ? 'collab-sidebar-personal' : 'collab-sidebar'} />
   ),
+  PagesSectionEntries: () => null,
 }));
 
 vi.mock('../ElectronCollabDocsUIProvider', () => ({

@@ -9,6 +9,7 @@
  */
 
 import React, { useMemo } from 'react';
+import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { resolveRoleFieldName } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
 import type { TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
@@ -29,7 +30,7 @@ export interface TypePageTableProps {
   pages: readonly WherePage[];
   /** A typed page's title, for one that is a parent; null when unknown. */
   itemTitle: (itemId: string) => string | null;
-  onOpenItem: (itemId: string) => void;
+  onOpenItem: (itemId: string, options?: CollabOpenOptions) => void;
 }
 
 /** The type and every type that extends it: the tree row counts them all, so the table lists them all. */

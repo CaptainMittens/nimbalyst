@@ -45,7 +45,9 @@ export const COLLAB_BUNDLE_EAGER_GZIP_BUDGET_BYTES = {
   // landed. Their popovers, chips and chart already load on demand; what is
   // left (node cores, transformers, link parsers) must register before a page
   // is read. Raised from 320,000 with ~2% headroom.
-  editor: 330_000,
+  // 2026-10-05: 332,074 after the link hover card (FloatingLinkEditorPlugin
+  // rewrite) and Pages navigation; raised from 330,000 with ~2% headroom.
+  editor: 339_000,
   // Measured at 70,625 gzip bytes on 2026-09-08, when the list took over
   // folder browsing from the tree for the browser console (folder rows, the
   // browse scope, the row "more" action). The row context menu itself is

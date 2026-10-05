@@ -2,6 +2,7 @@ export * from './collabDiscovery';
 export * from './collabTree';
 export * from './collabTypeResolver';
 export * from './dataSource';
+export * from './pageSearch';
 export * from './session';
 export * from './sharedHomeTab';
 export type { SharedDocument, SharedFolder, SharedParentKind } from './types';

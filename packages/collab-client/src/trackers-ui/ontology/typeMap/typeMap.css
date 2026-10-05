@@ -88,6 +88,7 @@
 
 /* Canvas */
 .type-map-work { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 12px; min-height: 0; }
+.type-map-work-full { grid-template-columns: minmax(0, 1fr); }
 @container ontology-type-map (max-width: 860px) {
   .type-map-work { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(420px, 1fr) auto; }
   .type-map-inspector { max-height: 420px; }

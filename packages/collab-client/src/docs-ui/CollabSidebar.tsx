@@ -1,6 +1,6 @@
 import { SharedDocumentLink } from './SharedDocumentLink';
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { isPersonalCollabScope, type CollabDocumentTypeDescriptor } from '@nimbalyst/collab-client/core';
+import { collabOpenOptions, isPersonalCollabScope, type CollabDocumentTypeDescriptor } from '@nimbalyst/collab-client/core';
 import { atom, useAtomValue } from 'jotai';
 import { store } from '@nimbalyst/runtime/store';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
@@ -21,7 +21,6 @@ import {
   collectPageSubtree,
   planPageRemoval,
   getSharedDocumentDisplayPath,
-  filterCollabTree,
   pruneEmptyFolders,
   getCollabDocumentPath,
   getCollabNodeName,
@@ -72,7 +71,6 @@ const CollabItemMenu = React.lazy(() => loadPageMenu().then((m) => ({ default: m
 const CollabPageHistoryEntry = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageHistoryEntry })));
 const CollabMenuButton = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabMenuButton })));
 const CollabPageMoveDialog = React.lazy(() => import('./CollabPageMoveDialog'));
-import { CollabSearchInput } from './primitives/CollabSearchInput';
 import { DocUnreadDot } from './DocUnreadDot';
 import { bucketItemCount, trackDocumentAction } from './analytics';
 import { useCollabDocsUI, type CollabTreeFilter } from './CollabDocsUIProvider';
@@ -130,10 +128,8 @@ export interface CollabSidebarProps {
   /** The open typed page (item id) or type page (type id), highlighted like the open page. */
   activeItemId?: string | null;
   activeTypeId?: string | null;
-  /** Open the discovery hub (center pane). Shown as a Home action. */
-  onShowHome?: () => void;
-  /** Highlight the Home action when the hub is the active surface. */
-  homeActive?: boolean;
+  /** Fixed rows above the tree (the section's Home, Search and Types: `PagesSectionEntries`). */
+  sectionEntries?: React.ReactNode;
   /** Host-owned scope label and path chrome; sidebar actions remain shared. */
   scopeName?: React.ReactNode;
   scopePath?: React.ReactNode;
@@ -197,8 +193,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   activeDocumentId,
   activeItemId = null,
   activeTypeId = null,
-  onShowHome,
-  homeActive,
+  sectionEntries,
   scopeName,
   scopePath,
   headerActions,
@@ -319,7 +314,6 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   // Legacy (path-in-title) folder rename target: these folders have no
   // first-class folderId, so the rename rewrites descendant document titles.
   const [legacyFolderToRename, setLegacyFolderToRename] = useState<{ path: string; name: string } | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
   const [createDocumentDescriptor, setCreateDocumentDescriptor] = useState<CollabDocumentTypeDescriptor | null>(null);
   const [isCreateFolderOpen, setIsCreateFolderOpen] = useState(false);
   const [createTargetFolderId, setCreateTargetFolderId] = useState<string | null>(null);
@@ -416,12 +410,6 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       return pageTree ? tree : buildCollabTreeAdaptive(visibleDocuments, sharedFolders, typeTreeInput);
     },
     [visibleDocuments, sharedFolders, effectiveTreeFilter, typeTreeInput, pageTree, pageTreeBuilder, tree]
-  );
-  const trimmedSearchQuery = searchQuery.trim();
-  const hasActiveSearch = trimmedSearchQuery.length > 0;
-  const filteredTree = useMemo(
-    () => filterCollabTree(displayTree, trimmedSearchQuery),
-    [displayTree, trimmedSearchQuery]
   );
 
   const existingPaths = useMemo(() => {
@@ -578,7 +566,6 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     setLegacyFolderToRename(null);
     setSelectedFolderPath(null);
     setSelectedFolderId(null);
-    setSearchQuery('');
     setExpandedFolders(new Set());
     setUserTouchedExpansion(false);
 
@@ -1343,10 +1330,10 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     onDragStart: setDraggedItem,
     onDragEnd: clearRowDrag,
     rowDrop,
-    isExpanded: (node: CollabTreeItemNode) => hasActiveSearch || expandedFolders.has(node.id),
-    onToggle: (node: CollabTreeItemNode) => { if (!hasActiveSearch) toggleFolder(node.id); },
+    isExpanded: (node: CollabTreeItemNode) => expandedFolders.has(node.id),
+    onToggle: (node: CollabTreeItemNode) => toggleFolder(node.id),
     renderChildren: (nodes: CollabTreeNode[], childIndent: number) => renderTreeRef.current(nodes, (childIndent - 8) / 16),
-  } : undefined), [clearRowDrag, expandedFolders, handleContextMenu, hasActiveSearch, pageTree, rowDrop, toggleFolder]);
+  } : undefined), [clearRowDrag, expandedFolders, handleContextMenu, pageTree, rowDrop, toggleFolder]);
 
   const renderTree = useCallback((nodes: CollabTreeNode[], depth = 0): React.ReactNode => {
     return nodes.map((node) => {
@@ -1360,7 +1347,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             node={node}
             position={0}
             indent={indent}
-            onOpen={() => host.openArtifact({ kind: 'tracker', scope, trackerId: node.itemId }, 'sidebar')}
+            onOpen={(options) => host.openArtifact({ kind: 'tracker', scope, trackerId: node.itemId }, 'sidebar', options)}
             actions={itemRowActions}
           />
         ) : null;
@@ -1372,10 +1359,10 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             key={node.id}
             node={node}
             indent={indent}
-            expanded={hasActiveSearch || expandedFolders.has(node.id)}
-            onToggle={() => { if (!hasActiveSearch) toggleFolder(node.id); }}
-            onOpenType={(typeId) => host.openArtifact({ kind: 'type', scope, typeId }, 'sidebar')}
-            onOpenItem={(trackerId) => host.openArtifact({ kind: 'tracker', scope, trackerId }, 'sidebar')}
+            expanded={expandedFolders.has(node.id)}
+            onToggle={() => toggleFolder(node.id)}
+            onOpenType={(typeId, options) => host.openArtifact({ kind: 'type', scope, typeId }, 'sidebar', options)}
+            onOpenItem={(trackerId, options) => host.openArtifact({ kind: 'tracker', scope, trackerId }, 'sidebar', options)}
             onContextMenu={(event) => handleContextMenu(event, node)}
             onDragStart={setDraggedType}
             onDragEnd={clearRowDrag}
@@ -1386,7 +1373,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       }
 
       if (node.type === 'folder') {
-        const isExpanded = hasActiveSearch || expandedFolders.has(node.path);
+        const isExpanded = expandedFolders.has(node.path);
         const isSelected = selectedFolderPath === node.path;
         const isDropTarget = dropTargetPath === node.path;
 
@@ -1408,9 +1395,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 setDropTargetPath(null);
               }}
               onClick={() => {
-                if (!hasActiveSearch) {
-                  toggleFolder(node.path);
-                }
+                toggleFolder(node.path);
                 setSelectedFolderPath(node.path);
                 setSelectedFolderId(node.folderId ?? null);
                 onSelectFolder?.(node.folderId ?? null);
@@ -1510,7 +1495,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       const typePresentation = resolveSharedDocumentTypePresentation(node.document, documentTypeDescriptors);
       // Page tree: a page with children expands like a folder and takes drops.
       const hasChildren = (node.children?.length ?? 0) > 0;
-      const isPageExpanded = hasChildren && (hasActiveSearch || expandedFolders.has(node.path));
+      const isPageExpanded = hasChildren && expandedFolders.has(node.path);
       const { className: dropClassName = '', ...pageDropProps } = pageTree ? rowDrop(node) : {};
 
       const row = (
@@ -1520,14 +1505,14 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           className={`group w-full flex items-center text-left file-tree-file${isActive ? ' active' : ''}${dropClassName}`}
           style={{ paddingLeft: indent }}
           {...pageDropProps}
-          onClick={() => {
+          onClick={(event) => {
             setSelectedFolderPath(getCollabParentPath(node.path));
             host.openArtifact({
               kind: 'document',
               scope,
               documentId: node.document.documentId,
               teamProjectId: node.document.teamProjectId,
-            }, 'sidebar');
+            }, 'sidebar', collabOpenOptions(event));
           }}
           onContextMenu={(event) => handleContextMenu(event, node)}
           draggable
@@ -1566,7 +1551,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                if (!hasActiveSearch) toggleFolder(node.path);
+                toggleFolder(node.path);
               }}
             >
               <MaterialSymbol icon={isPageExpanded ? 'keyboard_arrow_down' : 'keyboard_arrow_right'} size={16} />
@@ -1631,7 +1616,6 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     moveDraggedDocument,
     moveDraggedFolder,
     selectedFolderPath,
-    hasActiveSearch,
     toggleFolder,
     favoriteSet,
     personalStateAvailable,
@@ -1657,22 +1641,6 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   const headerActionButtons = (
     <>
       {headerActions}
-      {onShowHome && (
-        <button
-          type="button"
-          className={`workspace-action-button bg-transparent border-none p-1.5 cursor-pointer rounded flex items-center justify-center transition-all duration-200 relative hover:bg-[var(--nim-bg-hover)] hover:text-[var(--nim-text)] ${
-            homeActive ? 'text-[var(--nim-primary)]' : 'text-[var(--nim-text-faint)]'
-          }`}
-          title="Discovery home"
-          aria-label="Discovery home"
-          onClick={() => {
-            onShowHome();
-            setContextMenu(null);
-          }}
-        >
-          <MaterialSymbol icon="grid_view" size={16} />
-        </button>
-      )}
       {/* New document / New folder moved to the host's title-bar create
           control, which sits directly over this tree. The folder context
           menu still covers "create here". */}
@@ -1807,15 +1775,6 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       </div>
       )}
 
-      <div className="session-history-search px-3 py-2 border-b border-[var(--nim-border)] shrink-0">
-        <CollabSearchInput
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder={personal ? 'Search personal pages...' : 'Search shared documents...'}
-          label={personal ? 'Search personal pages' : 'Search shared documents'}
-        />
-      </div>
-
       {/* Document tree */}
       <div
         className={`collab-sidebar-tree flex-1 overflow-y-auto px-1.5 py-2 transition-colors ${dropTargetPath === '__root__' ? 'bg-nim-hover' : ''}`}
@@ -1876,6 +1835,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           void moveDraggedDocument(null, null);
         }}
       >
+        {sectionEntries}
         {(() => {
           // Loading: still resolving workspace state, or team sync is mid-
           // handshake. Render a skeleton instead of an empty/folders-only
@@ -1898,23 +1858,18 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           }
           const emptyReason = tree.length === 0
             ? 'empty'
-            : filteredTree.length > 0
-              ? null
-              : hasActiveSearch
-                ? 'search'
-                : effectiveTreeFilter === 'all' ? null : effectiveTreeFilter;
+            : displayTree.length > 0 || effectiveTreeFilter === 'all' ? null : effectiveTreeFilter;
           if (emptyReason) {
             return (
               <CollabTreeEmptyState
                 reason={emptyReason}
                 personal={personal}
                 scopeAvailable={scopeAvailable}
-                searchQuery={trimmedSearchQuery}
                 onNewPage={markdownDescriptor ? () => startNewPage(null) : undefined}
               />
             );
           }
-          return <CollabTreeActiveContext.Provider value={activeRow}><div>{renderTree(filteredTree)}</div></CollabTreeActiveContext.Provider>;
+          return <CollabTreeActiveContext.Provider value={activeRow}><div>{renderTree(displayTree)}</div></CollabTreeActiveContext.Provider>;
         })()}
       </div>
       {scopeAvailable && <CollabSidebarTrashEntry sectionLabel={sectionTitle ?? (personal ? 'Personal' : 'Team')} />}

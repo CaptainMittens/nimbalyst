@@ -9,6 +9,7 @@ import type {
   ItemPlacementNode,
   PageLinkEntry,
   PageMarkEntry,
+  PageSearchHit,
   TeamClientMessage,
   TeamServerMessage,
   TeamState,
@@ -97,7 +98,23 @@ const pageSourcedLink = {
   target: { kind: 'item', ref: 'item-42' }, rel: null, sentence: 'Covers item-42.', count: 1,
 } satisfies PageLinkEntry;
 
+// A page found by its body, and a typed page (no title: the client's tree names it).
+const pageHit = {
+  kind: 'page', id: 'page-1', documentId: 'page-1', title: 'Specs', issueKey: null,
+  snippet: '…the team chose Yjs over Automerge…', highlights: [{ start: 20, end: 23 }], updatedAt: 1790000000000, score: 4.2,
+} satisfies Exhaustive<PageSearchHit>;
+const typedHit = {
+  kind: 'typed', id: 'item-42', documentId: 'tracker-content/item-42', title: null, issueKey: 'NIM-42',
+  snippet: 'Yjs sync for pages.', highlights: [{ start: 0, end: 3 }], updatedAt: null, score: 1.5,
+} satisfies PageSearchHit;
+
 const fixtures: Record<string, unknown> = {
+  'pageSearchQuery.json': {
+    type: 'pageSearchQuery', requestId: 'search-1', projectId: 'project-1', query: 'yjs autom', limit: 20, typeIds: ['module', 'decision'],
+  } satisfies Client<'pageSearchQuery'>,
+  'pageSearchResponse.json': {
+    type: 'pageSearchResponse', requestId: 'search-1', hits: [pageHit, typedHit], status: 'partial',
+  } satisfies Server<'pageSearchResponse'>,
   'pageLinksQuery.json': {
     type: 'pageLinksQuery', requestId: 'links-1', projectId: 'project-1',
     from: { kind: 'item', itemId: 'item-42' }, to: [{ kind: 'item', ref: 'item-42' }, { kind: 'item', ref: 'NIM-42' }],

@@ -9,6 +9,7 @@
  */
 
 import { useMemo, type JSX } from 'react';
+import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { createPlacedViewUrl, type PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
 import { QuadrantChart } from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/QuadrantChart';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
@@ -31,10 +32,10 @@ export interface PlacedViewEmbedProps {
    * is never drawn from (or edited through) this host's items.
    */
   reach?: PlacedViewReach;
-  onOpenItem?: (itemId: string) => void;
+  onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
   onOpenAsTable?: (view: SavedView) => void;
   /** Opens the page a listed mark is on, by its tab uri. */
-  onOpenPage?: (uri: string) => void;
+  onOpenPage?: (uri: string, options?: CollabOpenOptions) => void;
   /** Opens the view's own console link, for a view this host cannot draw. */
   onOpenLink?: (href: string) => void;
 }
@@ -80,7 +81,7 @@ function TypeViewEmbed({ typeId, label, attrs, onOpenItem, onOpenAsTable }: {
   typeId: string;
   label: string;
   attrs: Readonly<Record<string, string>>;
-  onOpenItem?: (itemId: string) => void;
+  onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
   onOpenAsTable?: (view: SavedView) => void;
 }): JSX.Element {
   const loaded = useTrackerDataSelector((state) => state.loaded);
@@ -107,7 +108,7 @@ function TypeViewEmbed({ typeId, label, attrs, onOpenItem, onOpenAsTable }: {
 function QuadrantViewEmbed({ view, quadrant, onOpenItem }: {
   view: SavedView;
   quadrant: PlacedQuadrant;
-  onOpenItem?: (itemId: string) => void;
+  onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
 }): JSX.Element {
   const { identity } = useTrackersUI();
   const records = useTrackerDataSelector((state) => state.records);

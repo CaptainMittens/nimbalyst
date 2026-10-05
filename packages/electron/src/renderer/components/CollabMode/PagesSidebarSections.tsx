@@ -5,17 +5,23 @@
  */
 
 import React, { useState } from 'react';
-import type { CollabScope } from '@nimbalyst/collab-client/core';
+import { atom, useAtomValue } from 'jotai';
+import type { CollabHost, CollabOpenOptions, CollabScope } from '@nimbalyst/collab-client/core';
+import type { CollabDocsSession } from '@nimbalyst/collab-client/docs';
 import type { PageTypeLane } from '@nimbalyst/collab-client/docs/pageTypes';
-import { CollabSidebar, type CollabSidebarCreateMenu } from '@nimbalyst/collab-client/docs-ui';
-import { SetPageTypeDialog } from '@nimbalyst/collab-client/docs-ui/setPageType';
+import { CollabSidebar, PagesSectionEntries, type CollabSidebarCreateMenu } from '@nimbalyst/collab-client/docs-ui';
+import { NewTypeDialog, SetPageTypeDialog } from '@nimbalyst/collab-client/docs-ui/setPageType';
 import {
   getElectronCollabDocsSession,
+  getElectronCollabHost,
   getPersonalCollabDocsSession,
+  getPersonalCollabHost,
   type SharedDocument,
 } from '../../store/atoms/collabDocuments';
+import { activeSectionEntry, isHomePageId, type PagesSectionLane, type PagesSectionView } from './pagesSectionTabs';
 import { ElectronCollabDocsUIRoot } from './ElectronCollabDocsUIProvider';
 import { useCollabTypeResolver } from './useCollabTypeResolver';
+import { useDefineTrackerType } from './useDefineTrackerType';
 import { useSetPageType } from './useSetPageType';
 import { usePagesSidebarCollapse } from './usePagesSidebarCollapse';
 import { archiveTrackerItem } from '../../services/archiveTrackerItem';
@@ -28,10 +34,25 @@ interface PagesSidebarSectionsProps {
   activePersonalDocumentId: string | null;
   /** The open typed page or type; either section marks it if its tree holds it. */
   activeRow: { itemId: string | null; typeId: string | null };
-  onShowHome: () => void;
-  homeActive: boolean;
+  /** The active tab, so a section's Home, Search or Types row reads as open. */
+  activeTabPath: string | null;
+  /** `newTab`: Cmd/Ctrl was held on the click. */
+  onOpenSectionView: (view: PagesSectionView, lane: PagesSectionLane, options?: CollabOpenOptions) => void;
   registerTeamCreateMenu: (menu: CollabSidebarCreateMenu | null) => void;
   registerPersonalCreateMenu: (menu: CollabSidebarCreateMenu | null) => void;
+}
+
+const NO_DOCUMENTS = atom<SharedDocument[]>([]);
+
+/** A section's Home page id, if it still has one (Home can be deleted). */
+export function useSectionHomeId(scope: CollabScope | null, session: CollabDocsSession | null): string | null {
+  const documents = useAtomValue<readonly SharedDocument[]>(session?.atoms.sharedDocuments ?? NO_DOCUMENTS);
+  const teamHomeId = scope?.indexConfig.teamProjectId ? `home:${scope.indexConfig.teamProjectId}` : null;
+  return documents.find((document) => (teamHomeId ? document.documentId === teamHomeId : isHomePageId(document.documentId)))?.documentId ?? null;
+}
+
+function openHomePage(host: CollabHost, scope: CollabScope, documentId: string, options: CollabOpenOptions): void {
+  host.openArtifact({ kind: 'document', scope, documentId, teamProjectId: scope.indexConfig.teamProjectId ?? null }, 'sidebar', options);
 }
 
 export function PagesSidebarSections({
@@ -41,8 +62,8 @@ export function PagesSidebarSections({
   activeTeamDocumentId,
   activePersonalDocumentId,
   activeRow,
-  onShowHome,
-  homeActive,
+  activeTabPath,
+  onOpenSectionView,
   registerTeamCreateMenu,
   registerPersonalCreateMenu,
 }: PagesSidebarSectionsProps) {
@@ -50,9 +71,21 @@ export function PagesSidebarSections({
   const personalTypeResolver = useCollabTypeResolver('personal');
   const setPageType = useSetPageType(workspacePath, teamScope);
   const [typingPage, setTypingPage] = useState<{ lane: PageTypeLane; page: SharedDocument } | null>(null);
+  const [creatingType, setCreatingType] = useState(false);
+  const defineType = useDefineTrackerType(workspacePath);
   const { collapsed, toggle } = usePagesSidebarCollapse(workspacePath, teamScope !== null);
   // Open sections share the height; a collapsed one keeps only its header row.
   const sectionClass = (isCollapsed: boolean) => (isCollapsed ? 'shrink-0' : 'flex-1 min-h-0');
+  const teamHomeId = useSectionHomeId(teamScope, teamScope ? getElectronCollabDocsSession(teamScope) : null);
+  const personalHomeId = useSectionHomeId(null, getPersonalCollabDocsSession(workspacePath));
+  const entries = (lane: PagesSectionLane, scope: CollabScope, host: CollabHost, homeId: string | null, activeDocumentId: string | null) => (
+    <PagesSectionEntries
+      active={activeSectionEntry(lane, activeTabPath, activeDocumentId)}
+      onOpenHome={homeId ? (options) => openHomePage(host, scope, homeId, options) : undefined}
+      onOpenSearch={(options) => onOpenSectionView('search', lane, options)}
+      onOpenTypes={(options) => onOpenSectionView('types', lane, options)}
+    />
+  );
 
   const pickType = (typeId: string) => {
     if (!typingPage) return;
@@ -79,8 +112,7 @@ export function PagesSidebarSections({
               activeDocumentId={activeTeamDocumentId}
               activeItemId={activeRow.itemId}
               activeTypeId={activeRow.typeId}
-              onShowHome={onShowHome}
-              homeActive={homeActive}
+              sectionEntries={entries('team', teamScope, getElectronCollabHost(teamScope), teamHomeId, activeTeamDocumentId)}
               registerCreateMenu={registerTeamCreateMenu}
               typeResolver={teamTypeResolver}
               onArchiveItem={archiveTrackerItem}
@@ -103,6 +135,7 @@ export function PagesSidebarSections({
           <CollabSidebar
             sectionTitle="Personal"
             activeDocumentId={activePersonalDocumentId}
+            sectionEntries={entries('personal', personalScope, getPersonalCollabHost(workspacePath), personalHomeId, activePersonalDocumentId)}
             activeItemId={activeRow.itemId}
             activeTypeId={activeRow.typeId}
             registerCreateMenu={registerPersonalCreateMenu}
@@ -114,13 +147,24 @@ export function PagesSidebarSections({
           />
         </ElectronCollabDocsUIRoot>
       </div>
-      {typingPage && (
+      {typingPage && !creatingType && (
         <SetPageTypeDialog
           pageTitle={typingPage.page.title}
           resolver={typingPage.lane === 'team' ? teamTypeResolver : personalTypeResolver}
           running={setPageType.running}
           onPick={pickType}
+          onNewType={() => setCreatingType(true)}
           onClose={() => setTypingPage(null)}
+        />
+      )}
+      {/* New type from Set type lands at the section root; closing it returns to the picker, which lists the new type once it registers. */}
+      {typingPage && creatingType && (
+        <NewTypeDialog
+          lane={typingPage.lane}
+          resolver={typingPage.lane === 'team' ? teamTypeResolver : personalTypeResolver}
+          session={typingPage.lane === 'personal' ? getPersonalCollabDocsSession(workspacePath) : getElectronCollabDocsSession(teamScope!)}
+          defineType={defineType}
+          onClose={() => setCreatingType(false)}
         />
       )}
     </div>

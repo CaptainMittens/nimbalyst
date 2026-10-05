@@ -18,10 +18,18 @@
  */
 import {
   buildConsoleLink,
+  pageSearchMatches,
+  pageSearchQueryTerms,
   type ConsoleLinkScope,
   type ListPagesResult,
   type PageTreeNodeSummary,
+  type SearchPagesResult,
+  type SearchPagesResultEntry,
 } from '@nimbalyst/collab-protocol';
+import { mergePageSearchHits, nameTypedHits, pageSearchTitleHits } from './pageSearch';
+
+// For a worker session's `searchPages`; `pageSearch.ts` has no package entry of its own.
+export { searchSectionPages } from './pageSearch';
 import {
   isTypePageDocumentId,
   pageDisplayName,
@@ -470,4 +478,69 @@ export async function setPageTypeTool(env: PageTreeToolEnv, args: Record<string,
   const outcome = await env.setPageType(context.section, context.session, page, typeId);
   if (outcome.status === 'done') return { success: true, ...(outcome.itemId ? { itemId: outcome.itemId } : {}) };
   return fail(`${outcome.status === 'refused' ? 'Set type refused' : 'Set type did not finish'}: ${outcome.message ?? 'no reason given'}`);
+}
+
+/**
+ * `searchPages`: body hits from the section session's `searchPages` (the Team
+ * server index, or the local Personal store), page and type-page titles
+ * included; typed pages named and title-matched from the listed tree, which
+ * also drops a typed hit the tree does not show (archived). Each result has
+ * the uri to read with readCollabDoc and the link to write, as listPages
+ * gives them.
+ */
+export async function searchPagesTool(env: PageTreeToolEnv, args: Record<string, unknown>): Promise<PageTreeToolResult> {
+  const query = typeof args.query === 'string' ? args.query.trim() : '';
+  if (!query) return { success: false, error: 'searchPages needs the words to find in `query`.' };
+  if (pageSearchQueryTerms(query).terms.length === 0) {
+    return { success: false, error: 'searchPages matches words of two or more letters or digits; `query` has none.' };
+  }
+  const section: PageTreeSection = args.section === 'personal' ? 'personal' : 'team';
+  const limit = typeof args.limit === 'number' ? args.limit : undefined;
+
+  const listed = await listPagesTool(env, { section });
+  if (!listed.success) return listed;
+  const { nodes } = listed as unknown as ListPagesResult & { success: true };
+  const session = await env.session(section);
+  if (!session.searchPages) return { success: false, error: 'This Pages section cannot search page text.' };
+  // Only the types the tree shows: a typed page it would drop must not use up the limit.
+  const typeIds = [...new Set(nodes.flatMap((node) => (node.kind === 'typedPage' ? [node.typeId] : [])))];
+  const found = await session.searchPages({ query, limit, typeIds });
+  if (!found) return { success: false, error: 'Search is unavailable right now (the section is offline or still connecting). Try again shortly.' };
+
+  const byKind = (kind: PageTreeNodeSummary['kind']) => new Map(nodes.filter((node) => node.kind === kind).map((node) => [node.id, node]));
+  const pages = byKind('page');
+  const types = byKind('type');
+  const typed = byKind('typedPage') as Map<string, Extract<PageTreeNodeSummary, { kind: 'typedPage' }>>;
+
+  const named = nameTypedHits(found.hits, (itemId) => {
+    const node = typed.get(itemId);
+    return node ? { title: node.title, issueKey: node.issueKey ?? null } : null;
+  });
+  const typedTitles = pageSearchTitleHits(query, [...typed.values()].map((node) => ({
+    documentId: `tracker-content/${node.id}`, title: node.title, issueKey: node.issueKey ?? null,
+  })));
+  const hits = mergePageSearchHits(named, typedTitles, limit);
+
+  const parsed = pageSearchQueryTerms(query);
+  const results: SearchPagesResultEntry[] = hits.map((hit) => {
+    const node = hit.kind === 'page' ? pages.get(hit.id) : hit.kind === 'typePage' ? types.get(hit.id) : typed.get(hit.id);
+    const title = hit.title ?? node?.title ?? hit.id;
+    const inTitle = pageSearchMatches(title, parsed);
+    const uri = hit.kind === 'page' && node?.kind === 'page'
+      ? node.uri
+      : section === 'team' && hit.kind === 'typed' ? `collab://${hit.documentId}` : env.pageUri(section, hit.documentId);
+    return {
+      kind: hit.kind === 'typed' ? 'typedPage' : hit.kind === 'typePage' ? 'type' : 'page',
+      id: hit.id,
+      title,
+      ...(hit.issueKey ? { issueKey: hit.issueKey } : {}),
+      uri,
+      ...(node?.link ? { link: node.link } : {}),
+      snippet: hit.snippet,
+      matchedIn: !hit.snippet ? 'title' : inTitle ? 'both' : 'body',
+      updatedAt: hit.updatedAt,
+    };
+  });
+  const result: SearchPagesResult = { section, query, status: found.status, results };
+  return { success: true, ...result };
 }

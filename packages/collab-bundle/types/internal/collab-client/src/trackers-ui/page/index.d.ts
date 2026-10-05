@@ -14,4 +14,7 @@ export { fieldRelationLinks } from './fieldRelationLinks';
 export { browserTypeResolver, useBrowserTypeResolver } from '../browserTypeResolver';
 export { groupTrackerPageLinks, type LinkedPage, type PageLinksSource, type TrackerLinkGroup, type TrackerPageLink } from './pageLinks';
 export { crumbItemLookup, legacyDescriptionToRecover, sameTrackerPageCrumb, trackerPageCrumb, trackerPageCrumbFolders, type CrumbDocument, type CrumbFolder, type CrumbItemLookup, type CrumbItemPlacement, type CrumbPlacement, type TrackerPageCrumb, } from './trackerPageCrumb';
+export { PagesSearchView, type PagesOpenOptions, type PagesSearchViewProps, type PagesSearchLane } from './PagesSearchView';
+export { PagesTypesView, type PagesTypesViewMode, type PagesTypesViewProps } from './PagesTypesView';
+export { EMPTY_PAGES_SEARCH, pagesSearchQuery, parsePagesSearch, type PagesSearchPageInput, type PagesSearchState } from './pagesSearch';
 export { TITLE_MAX_HEIGHT_PX, resizeTitleField, sanitizeTitleInput, useAutoSizedTitle } from './trackerTitleAutoSize';

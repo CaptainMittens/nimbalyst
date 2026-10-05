@@ -29,6 +29,8 @@ import {
 } from './collabTree';
 import { pagesTrashedWith, restoredParentGone } from './collabTrash';
 import type { CollabDocsCommand, CollabDocsDataChange, CollabDocsDataSource } from './dataSource';
+import type { PageSearchRequest, PageSearchResponse } from '@nimbalyst/collab-protocol';
+import { searchSectionPages } from './pageSearch';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from './types';
 
 /** Where a page moves: its parent's kind and its order there (absent = no order). */
@@ -778,6 +780,12 @@ export interface CollabDocsSession {
   clearPendingFolder(): void;
   getDocuments(): SharedDocument[];
   getFolders(): SharedFolder[];
+  /**
+   * Pages whose body or title matches (`pageSearch.ts`). Typed-page hits have
+   * a null title for the caller to name from its tree (`nameTypedHits`). Null
+   * when the section cannot search now.
+   */
+  searchPages(request: PageSearchRequest): Promise<PageSearchResponse | null>;
 }
 
 class CollabDocsSessionImpl implements CollabDocsSession {
@@ -1401,6 +1409,10 @@ class CollabDocsSessionImpl implements CollabDocsSession {
 
   getDocuments(): SharedDocument[] {
     return this.getAllDocuments().filter((document) => document.trashedAt == null);
+  }
+
+  searchPages(request: PageSearchRequest): Promise<PageSearchResponse | null> {
+    return searchSectionPages(this.dataSource, this.getDocuments(), request);
   }
 
   getFolders(): SharedFolder[] {

@@ -39,17 +39,20 @@ export interface PersistedCollabEntry {
  */
 export interface PersistedCollabPageEntry {
   kind: PersistedCollabPageKind;
-  /** Tracker item id for `tracker`, type id for `type`, document id for `personal`. */
+  /**
+   * Tracker item id for `tracker`, type id for `type`, document id for
+   * `personal`, and the section (`team` / `personal`) for `search` and `types`.
+   */
   artifactId: string;
   /** Last-known tab title, shown until the live title resolves. */
   title?: string;
   isPinned?: boolean;
 }
 
-export type PersistedCollabPageKind = 'tracker' | 'type' | 'personal';
+export type PersistedCollabPageKind = 'tracker' | 'type' | 'personal' | 'search' | 'types';
 
 function isPageKind(kind: unknown): kind is PersistedCollabPageKind {
-  return kind === 'tracker' || kind === 'type' || kind === 'personal';
+  return kind === 'tracker' || kind === 'type' || kind === 'personal' || kind === 'search' || kind === 'types';
 }
 
 export type PersistedCollabTabEntry = PersistedCollabEntry | PersistedCollabPageEntry;

@@ -13,6 +13,7 @@ import {
   listPagesTool,
   movePageTreeNodeTool,
   renamePageTool,
+  searchPagesTool,
   setPageTypeTool,
   type PageTreeToolEnv,
   type PageTreeToolResult,
@@ -40,6 +41,7 @@ function trackPageAction(channel: string, payload: ToolPayload): void {
 
 const TOOLS: Record<string, (env: PageTreeToolEnv, args: Record<string, unknown>) => Promise<PageTreeToolResult>> = {
   'mcp:listPages': listPagesTool,
+  'mcp:searchPages': searchPagesTool,
   'mcp:createSharedDoc': createPageTool,
   'mcp:createSharedFolder': createPageTool,
   'mcp:moveSharedItem': movePageTreeNodeTool,

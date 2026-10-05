@@ -68,7 +68,8 @@ export interface CollabReferenceSource {
   /** Enumerate the shareable documents (already excludes the current doc). */
   listOptions(): CollabReferenceOption[];
   /** Open a shared document from its reference target (deep link / collab URI). */
-  openReference(target: string): void;
+  /** `newTab` when the click asked for one (Cmd/Ctrl, or the middle button). */
+  openReference(target: string, options?: { newTab: boolean }): void;
 }
 
 /**
@@ -482,7 +483,7 @@ export function DocumentLinkPlugin({
       // resolve them and could spawn a blank window.
       if (isCollabReferenceHref(documentPath)) {
         if (collabReferenceSource) {
-          collabReferenceSource.openReference(documentPath!);
+          collabReferenceSource.openReference(documentPath!, { newTab: event.button === 1 || event.metaKey || event.ctrlKey });
         } else {
           console.warn('[DocumentLinkPlugin] Collab reference clicked with no collab source available', documentPath);
         }

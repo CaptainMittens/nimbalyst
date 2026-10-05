@@ -6,6 +6,7 @@
  * Type-only and import-free of `session.ts` on purpose: that module brings
  * Jotai and the runtime store, which a worker cannot load or typecheck.
  */
+import type { PageSearchRequest, PageSearchResponse } from '@nimbalyst/collab-protocol';
 import type { SharedDocument, SharedItemPlacement, SharedParentKind } from './types';
 /** Same shape as `CollabPlacementWriteResult` in `session.ts`. */
 export type PageTreeWriteResult = {
@@ -42,4 +43,6 @@ export interface PageTreeSession {
     trashDocument(documentId: string): Promise<PageTreeWriteResult>;
     removePage(documentId: string): Promise<PageTreeWriteResult>;
     pageRemovalCount?(documentId: string): number;
+    /** Body and title search (`pageSearch.ts`); null when the section cannot search now. */
+    searchPages?(request: PageSearchRequest): Promise<PageSearchResponse | null>;
 }

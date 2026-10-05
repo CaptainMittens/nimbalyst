@@ -819,6 +819,13 @@ export interface UnsyncedTrackerSchemaDef {
   /** JSON model, or null when this is a pending deletion (tombstone). */
   model: string | null;
   deleted: boolean;
+  /**
+   * Set for a type the room has never held (`sync_id` NULL after this
+   * connection's bootstrap): sent create-only, so it is refused rather than
+   * written over a definition another client created meanwhile. An older room
+   * gets the plain upsert it always got.
+   */
+  createOnly?: 'whenSupported';
 }
 
 /**
@@ -868,17 +875,19 @@ export async function listUnsyncedTrackerSchemaDefs(
     const db = dbOverride ?? getDatabase();
     if (!db) return [];
     const result = (await db.query(
-      `SELECT type, model, deleted_at FROM tracker_type_defs
+      `SELECT type, model, deleted_at, sync_id FROM tracker_type_defs
         WHERE workspace = $1 AND sync_status IN ('local', 'pending')`,
       [workspace],
-    )) as { rows?: Array<{ type: string; model: string; deleted_at: string | null }> } | undefined;
+    )) as { rows?: Array<{ type: string; model: string; deleted_at: string | null; sync_id: number | null }> } | undefined;
     const out: UnsyncedTrackerSchemaDef[] = [];
     for (const r of result?.rows ?? []) {
       if (schemaSharingIsPersonal(r.model)) continue;
+      const deleted = r.deleted_at != null;
       out.push({
         type: r.type,
-        model: r.deleted_at ? null : r.model,
-        deleted: r.deleted_at != null,
+        model: deleted ? null : r.model,
+        deleted,
+        ...(!deleted && r.sync_id == null ? { createOnly: 'whenSupported' as const } : {}),
       });
     }
     return out;

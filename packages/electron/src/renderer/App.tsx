@@ -165,6 +165,9 @@ import { initWakeupListeners } from './store/listeners/wakeupListener';
 import { TrackerMode } from './components/TrackerMode';
 import { PullRequestMode, type PullRequestModeRef } from './components/PullRequestMode';
 import { CollabMode, type CollabModeRef } from './components/CollabMode';
+import { navigatePagesHistory } from './components/CollabMode/pagesTabNavigation';
+import { openAgentEditedPage } from './utils/agentEditedPage';
+import { openConsoleLinkInWindow } from './utils/openConsoleLink';
 import {
   OrgModeHost,
   PROJECT_ORG_MODE_SURFACE_ID,
@@ -865,8 +868,11 @@ export default function App() {
   }, []);
 
   // Unified navigation history (cross-mode back/forward)
-  const goBack = useSetAtom(goBackAtom);
-  const goForward = useSetAtom(goForwardAtom);
+  // While Pages is shown, Back and Forward step its active tab instead.
+  const goBackInWindow = useSetAtom(goBackAtom);
+  const goForwardInWindow = useSetAtom(goForwardAtom);
+  const goBack = useCallback(() => { if (!navigatePagesHistory(-1)) goBackInWindow(); }, [goBackInWindow]);
+  const goForward = useCallback(() => { if (!navigatePagesHistory(1)) goForwardInWindow(); }, [goForwardInWindow]);
 
   // Onboarding dialogs (UnifiedOnboarding, WindowsClaudeCodeWarning) - managed via DialogProvider
   useOnboarding({
@@ -2132,8 +2138,16 @@ export default function App() {
   // Listen for tracker item navigation events (from TrackerToolWidget in transcript)
   useEffect(() => {
     const handleNavigateTrackerItem = (e: Event) => {
-      const itemId = (e as CustomEvent).detail?.itemId;
+      const detail = (e as CustomEvent).detail;
+      const itemId = detail?.itemId;
       if (typeof itemId !== 'string') return;
+
+      // A reference in a page shown in Pages opens the typed page there, like
+      // any page link: the current tab, or a new one on Cmd/Ctrl.
+      if (activeModeStateRef.current === 'collab' && detail.fromPage && workspacePath) {
+        void openAgentEditedPage(`tracker://${itemId}`, workspacePath, { source: 'embedded_document', options: { newTab: Boolean(detail.newTab) } });
+        return;
+      }
 
       // Contextual navigation: in Agent Mode with a workstream selected, open
       // the tracker as a workstream resource tab (statefully attached to the
@@ -2733,6 +2747,10 @@ export default function App() {
           if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
             event.preventDefault();
             event.stopPropagation();
+
+            // A console link in a page shown in Pages navigates like any page
+            // link there (the current tab, or a new one on Cmd/Ctrl).
+            if (anchor.closest('.collab-mode .tab-content') && openConsoleLinkInWindow(href, { newTab: event.metaKey || event.ctrlKey })) return;
 
             // Open in default browser
             window.electronAPI.openExternal(href).catch((error) => {

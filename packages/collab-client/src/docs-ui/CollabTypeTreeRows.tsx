@@ -7,6 +7,7 @@
  */
 import React, { useMemo } from 'react';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
+import { collabOpenOptions, type CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import type {
   CollabTreeItemNode,
   CollabTreeNode,
@@ -66,7 +67,7 @@ export const CollabTypeNodeRow: React.FC<{
   indent: number;
   expanded: boolean;
   onToggle: () => void;
-  onOpen: () => void;
+  onOpen: (options: CollabOpenOptions) => void;
   onContextMenu: (event: React.MouseEvent) => void;
   onDragStart: (event: React.DragEvent) => void;
   onDragEnd: () => void;
@@ -82,7 +83,7 @@ export const CollabTypeNodeRow: React.FC<{
     {...dropHandlers(drop)}
     onDragStart={onDragStart}
     onDragEnd={onDragEnd}
-    onClick={onOpen}
+    onClick={(event) => onOpen(collabOpenOptions(event))}
     onContextMenu={onContextMenu}
     title={node.path}
   >
@@ -125,7 +126,7 @@ export const CollabTypeItemRow: React.FC<{
   node: CollabTreeItemNode;
   position: number;
   indent: number;
-  onOpen: () => void;
+  onOpen: (options: CollabOpenOptions) => void;
   actions?: CollabItemRowActions;
 }> = ({ node, position, indent, onOpen, actions }) => {
   const drop = actions?.rowDrop?.(node);
@@ -140,7 +141,7 @@ export const CollabTypeItemRow: React.FC<{
     data-testid="collab-tree-item-row"
     data-item-id={node.itemId}
     {...dropHandlers(drop)}
-    onClick={onOpen}
+    onClick={(event) => onOpen(collabOpenOptions(event))}
     onContextMenu={actions ? (event) => actions.onContextMenu(event, node) : undefined}
     draggable={!!actions}
     onDragStart={actions ? (event) => {
@@ -186,8 +187,8 @@ export const CollabTypeTreeBranch: React.FC<{
   indent: number;
   expanded: boolean;
   onToggle: () => void;
-  onOpenType: (typeId: string) => void;
-  onOpenItem: (itemId: string) => void;
+  onOpenType: (typeId: string, options: CollabOpenOptions) => void;
+  onOpenItem: (itemId: string, options: CollabOpenOptions) => void;
   onContextMenu: (event: React.MouseEvent) => void;
   onDragStart: (typeId: string) => void;
   onDragEnd: () => void;
@@ -203,9 +204,9 @@ export const CollabTypeTreeBranch: React.FC<{
         indent={indent}
         expanded={expanded}
         onToggle={onToggle}
-        onOpen={() => {
+        onOpen={(options) => {
           if (!expanded) onToggle();
-          onOpenType(node.typeId);
+          onOpenType(node.typeId, options);
         }}
         onContextMenu={onContextMenu}
         onDragStart={(event) => {
@@ -226,7 +227,7 @@ export const CollabTypeTreeBranch: React.FC<{
               node={item}
               position={index + 1}
               indent={indent + 16}
-              onOpen={() => onOpenItem(item.itemId)}
+              onOpen={(options) => onOpenItem(item.itemId, options)}
               actions={itemActions}
             />
           ))}

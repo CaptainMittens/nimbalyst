@@ -29,6 +29,7 @@ Edit this page to fit your team. It overrides the base guide Nimbalyst ships.
 
 - Short and specific. A page is usually a few paragraphs. Name the thing, the date and the person.
 - Write a decision as one sentence in the page it affects, and mark it decided with who decided it, when, and what was not chosen ("Mark decided" on the selection, or in markdown `[We store flags in Cloudflare Flagship.]{decided by="Dana Lee" email=dana@example.com on=2026-09-30 over="our own Durable Object store"}`). The email lets anyone find every decision a person made.
+- Also add a decision record (a tracker item) when no single page owns the decision, work or code hangs off it, it is not settled yet, or the reasons don't fit in the mark. A record never replaces the mark: keep the mark and put the record's key right after it as a link.
 - Mark an open question the same way, with who owns it: `[Do we need a mobile SDK for launch?]{open by="Dana Lee" email=dana@example.com}`. A page or a spike can own one too (`{open by="Spike 6"}`). When it is answered, mark it decided.
 - When a statement came from a person, cite them: the citation keeps their words and links to the session or comment they came from.
 - Cite web pages and documents as you write; they are listed under Sources at the bottom of the page.
@@ -44,4 +45,4 @@ Edit this page to fit your team. It overrides the base guide Nimbalyst ships.
 - Your edits land directly, without review. Keep each edit small, never delete or rewrite what a person wrote without asking, and tell the person which pages you changed.
 - When you are unsure whether something belongs here, leave it out and ask.
 
-Based on the Nimbalyst base guide, version 4.
+Based on the Nimbalyst base guide, version 5.

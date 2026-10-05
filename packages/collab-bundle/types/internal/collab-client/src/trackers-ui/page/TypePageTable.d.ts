@@ -8,6 +8,7 @@
  * host's tracker data and edits go through the host's writes.
  */
 import React from 'react';
+import type { CollabOpenOptions } from '../../core/index';
 import { type WherePage, type WherePlacement } from '../embed/typePageWhere';
 export interface TypePageTableProps {
     typeId: string;
@@ -21,7 +22,7 @@ export interface TypePageTableProps {
     pages: readonly WherePage[];
     /** A typed page's title, for one that is a parent; null when unknown. */
     itemTitle: (itemId: string) => string | null;
-    onOpenItem: (itemId: string) => void;
+    onOpenItem: (itemId: string, options?: CollabOpenOptions) => void;
 }
 /** The type and every type that extends it: the tree row counts them all, so the table lists them all. */
 export declare function typePageTypeIds(typeId: string): string[];

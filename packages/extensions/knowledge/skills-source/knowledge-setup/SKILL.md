@@ -35,7 +35,7 @@ Read only; change nothing in this step.
 
 ## 2. Guide page
 
-- **Base version:** 4. The base text is `references/wiki-guide.md`, unchanged; its last line names the version.
+- **Base version:** 5. The base text is `references/wiki-guide.md`, unchanged; its last line names the version.
 <!-- desktop-only -->
 - **Find it.** `listPages` for the section, then look for a page titled "How we write this wiki" and read it with `readCollabDoc` at its `uri`.
 <!-- /desktop-only -->
@@ -47,8 +47,8 @@ Read only; change nothing in this step.
 
 If the guide page exists, **never overwrite it**. Compare it with the base, ignoring whitespace:
 
-- Same text: "already present, matches base version 4".
-- Different text, version line 4: the team edited it. Report "already present, edited by the team".
+- Same text: "already present, matches base version 5".
+- Different text, version line 5: the team edited it. Report "already present, edited by the team".
 - Different text, older or missing version line: the base changed since it was installed, and the team may also have edited it. Report both.
 
 When it differs, offer a diff and a merge that keeps every team edit and proposes only the base changes that do not conflict. Write it with `applyCollabDocEdit` only after the person approves the merged text. A team that rewrote the guide on purpose may decline; that is final until they ask again.

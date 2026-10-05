@@ -50,11 +50,10 @@ export const CollabSectionMenu: React.FC<{
   );
 };
 
-export type CollabTreeEmptyReason = 'empty' | 'search' | 'favorites' | 'updated';
+export type CollabTreeEmptyReason = 'empty' | 'favorites' | 'updated';
 
 const EMPTY_ICON: Record<CollabTreeEmptyReason, string> = {
   empty: 'cloud_sync',
-  search: 'search_off',
   favorites: 'star',
   updated: 'mark_email_read',
 };
@@ -63,21 +62,18 @@ export const CollabTreeEmptyState: React.FC<{
   reason: CollabTreeEmptyReason;
   personal: boolean;
   scopeAvailable: boolean;
-  searchQuery: string;
   /** Absent when no page type can be created here. */
   onNewPage?: () => void;
-}> = ({ reason, personal, scopeAvailable, searchQuery, onNewPage }) => {
-  const [title, hint] = reason === 'search'
-    ? [`No shared documents match "${searchQuery}".`, 'Try a different file name or folder path.']
-    : reason === 'favorites'
-      ? ['No favorites yet.', 'Star a document to pin it here.']
-      : reason === 'updated'
-        ? ["You're all caught up.", 'No documents changed since you last viewed them.']
-        : personal
-          ? ['No personal pages yet.', null]
-          : scopeAvailable
-            ? ['No shared documents yet.', 'Create one here or share a local file to collaborate.']
-            : ['No team connected to this workspace.', null];
+}> = ({ reason, personal, scopeAvailable, onNewPage }) => {
+  const [title, hint] = reason === 'favorites'
+    ? ['No favorites yet.', 'Star a document to pin it here.']
+    : reason === 'updated'
+      ? ["You're all caught up.", 'No documents changed since you last viewed them.']
+      : personal
+        ? ['No personal pages yet.', null]
+        : scopeAvailable
+          ? ['No shared documents yet.', 'Create one here or share a local file to collaborate.']
+          : ['No team connected to this workspace.', null];
   return (
     <div className="collab-tree-empty px-2 py-4 text-center">
       <MaterialSymbol icon={EMPTY_ICON[reason]} size={32} className="text-nim-faint mb-2" />

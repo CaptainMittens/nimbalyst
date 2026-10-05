@@ -12,7 +12,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { atom, useAtomValue, useSetAtom, type Atom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import { NimbalystEditor } from '@nimbalyst/runtime/editor';
-import type { CollabScope } from '@nimbalyst/collab-client/core';
+import type { CollabOpenOptions, CollabScope } from '@nimbalyst/collab-client/core';
 import {
   TrackerPageView as SharedTrackerPageView,
   crumbItemLookup,
@@ -111,7 +111,7 @@ export interface TrackerPageViewProps {
   /** Pages mode's team scope; the crumb reads team type placements from it. */
   collabScope?: CollabScope;
   /** Open another page (a link or a relationship chip). */
-  onOpenItem?: (itemId: string) => void;
+  onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
 }
 
 export const TrackerPageView: React.FC<TrackerPageViewProps> = ({

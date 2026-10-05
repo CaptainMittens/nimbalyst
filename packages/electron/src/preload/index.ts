@@ -1122,6 +1122,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
       }>,
     setArchived: (payload: { workspacePath: string; type: string; archived: boolean }) =>
       ipcRenderer.invoke('tracker-lifecycle:set-archived', payload) as Promise<{ success: boolean; error?: string }>,
+    defineType: (payload: { workspacePath: string; schema: Record<string, unknown> }) =>
+      ipcRenderer.invoke('tracker-lifecycle:define-type', payload) as Promise<{
+        success: boolean;
+        type?: string;
+        scope?: 'team' | 'personal';
+        status?: 'created' | 'syncing';
+        error?: string;
+      }>,
   },
 
   // Plaintext recovery copies for collaborative content

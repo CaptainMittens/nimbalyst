@@ -6,6 +6,7 @@
  * web console's docs-ui bundle.
  */
 import React from 'react';
+import { type CollabOpenOptions } from '../core/index';
 import type { CollabTreeItemNode, CollabTreeNode, CollabTreeTypeNode, CollabTypeTreeResolver } from '../docs/index';
 /** The open typed page or type page, whose row reads as the open page's does. */
 export declare const CollabTreeActiveContext: React.Context<{
@@ -32,7 +33,7 @@ export declare const CollabTypeNodeRow: React.FC<{
     indent: number;
     expanded: boolean;
     onToggle: () => void;
-    onOpen: () => void;
+    onOpen: (options: CollabOpenOptions) => void;
     onContextMenu: (event: React.MouseEvent) => void;
     onDragStart: (event: React.DragEvent) => void;
     onDragEnd: () => void;
@@ -62,7 +63,7 @@ export declare const CollabTypeItemRow: React.FC<{
     node: CollabTreeItemNode;
     position: number;
     indent: number;
-    onOpen: () => void;
+    onOpen: (options: CollabOpenOptions) => void;
     actions?: CollabItemRowActions;
 }>;
 /** A type row plus, when expanded, its placed subtypes and numbered items. */
@@ -71,8 +72,8 @@ export declare const CollabTypeTreeBranch: React.FC<{
     indent: number;
     expanded: boolean;
     onToggle: () => void;
-    onOpenType: (typeId: string) => void;
-    onOpenItem: (itemId: string) => void;
+    onOpenType: (typeId: string, options: CollabOpenOptions) => void;
+    onOpenItem: (itemId: string, options: CollabOpenOptions) => void;
     onContextMenu: (event: React.MouseEvent) => void;
     onDragStart: (typeId: string) => void;
     onDragEnd: () => void;

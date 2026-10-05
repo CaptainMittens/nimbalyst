@@ -6,10 +6,8 @@ export interface CollabSidebarProps {
     /** The open typed page (item id) or type page (type id), highlighted like the open page. */
     activeItemId?: string | null;
     activeTypeId?: string | null;
-    /** Open the discovery hub (center pane). Shown as a Home action. */
-    onShowHome?: () => void;
-    /** Highlight the Home action when the hub is the active surface. */
-    homeActive?: boolean;
+    /** Fixed rows above the tree (the section's Home, Search and Types: `PagesSectionEntries`). */
+    sectionEntries?: React.ReactNode;
     /** Host-owned scope label and path chrome; sidebar actions remain shared. */
     scopeName?: React.ReactNode;
     scopePath?: React.ReactNode;

@@ -19,6 +19,8 @@ Before writing, read the page titled "How we write this wiki" and the project's 
 
 `pages_status` returns their links (`guideLink`, `homeLink`); `listPages` returns every page with its `uri`, which you read with `readCollabDoc`. If the project has no guide page, follow `../knowledge-setup/references/wiki-guide.md` and tell the person `knowledge-setup` can install it as an editable page.
 
+Before creating a page, search for an existing one with `searchPages` (`query`, optional `section`); extend or link to what it finds instead of adding a second page about the same thing.
+
 ## The model
 
 - **Page.** Markdown in the team's page tree, shared and collaborative. Any page can hold child pages; a page with an empty body works as a folder.
@@ -28,7 +30,7 @@ Before writing, read the page titled "How we write this wiki" and the project's 
 
 The project decides its types and relations. Suggest common ones (module, technology, competitor, person) when they fit; never assume a fixed list.
 
-Do not build any of these, even if older content or habits suggest them: claim, fact, finding or investigation items; qualifiers on links; generic relations such as "related to" or "depends on"; decisions as separate records or subject-verb-object triples; lists or relationship chips in a page header; automatic rollup tables of every relation; approval steps for your own edits; large decision boxes.
+Do not build any of these, even if older content or habits suggest them: claim, fact, finding or investigation items; qualifiers on links; generic relations such as "related to" or "depends on"; a decision record in place of the marked sentence, or decisions as subject-verb-object triples; lists or relationship chips in a page header; automatic rollup tables of every relation; approval steps for your own edits; large decision boxes.
 
 ## What to write
 
@@ -37,6 +39,7 @@ Pages mainly hold what people said and decided. You can look everything else up,
 1. **Decisions are marked sentences in the page they affect.** Wrap the sentence that states the decision in brackets and follow it with its attributes: who decided (name and email), the date, and what was not chosen.
    `[We store and evaluate flags in Flagship.]{decided by="Dana Lee" email=dana@example.com on=2026-09-30 over="our own Durable Object store"}`
    The email is how marks are found by person, so take it from a citation snapshot or the team member list (`findOrgMembers`); never guess one. The page shows a small chip before the sentence and a faint who/when/not-chosen line after it. Mark only the sentence itself, never a paragraph, and never put a decision in its own box or section.
+   Mark by default. Also add a decision record (a tracker item) when no single page owns the decision, work or commits hang off it, it is not settled, or its reasons don't fit in the mark; the guide page has the details. A record never replaces the mark: keep the mark and put the record's key right after it as a link. Not every choice needs either.
 2. **Open questions, the same way.** `[Do we need a mobile SDK for launch?]{open by="Dana Lee" email=dana@example.com}`, where `by` is who owns it. When a page or a spike owns it, leave out the email: `{open by="Spike 6"}`. When it is answered, change the mark to `decided` with the date and what was not chosen.
 3. **Cite the person.** When a statement came from a person, follow it with a citation, copied from one of two tools. Each entry carries ready `citation` markdown (a console link whose title holds who, email, when and the quote). Paste it unchanged; never write or edit one by hand, and attach a person's words only when they support the sentence.
    - `list_session_inputs` lists what the person at this terminal typed in this Claude Code session: their prompts and their answers to your questions (`kinds: ["prompt", "answer"]`, optional `query`). It runs on this machine, reads only this session's transcript, and lists nothing when it cannot confirm which transcript is this session's. The person's name and email come from `pages_status` (`user`).

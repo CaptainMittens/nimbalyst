@@ -48,6 +48,7 @@ describe('nim pages', () => {
       expect(call('delete', 'd1', '--kind', 'folder')).toEqual({ tool: 'deleteSharedItem', args: { section: 'team', itemId: 'd1', kind: 'folder' } });
       expect(call('set-type', 'd1', 'technology')).toEqual({ tool: 'setPageType', args: { section: 'team', pageId: 'd1', typeId: 'technology' } });
       expect(call('members', 'dana')).toEqual({ tool: 'findOrgMembers', args: { query: 'dana' } });
+      expect(call('search', 'durable object', '--limit', '5')).toEqual({ tool: 'searchPages', args: { section: 'team', query: 'durable object', limit: 5 } });
       expect(call('types', '--search', 'tech')).toEqual({ tool: 'tracker_list_types', args: { search: 'tech' } });
       expect(call('items', '--type', 'technology', '--where', 'maturity=beta', '--where', 'owner~dana', '--where', 'status=in:a,b', '--include-closed', '--limit', '5')).toEqual({
         tool: 'tracker_list',

@@ -13,7 +13,7 @@ import type {
   SharedItemPlacement,
   SharedTypePlacement,
 } from '@nimbalyst/collab-client/docs';
-import type { ItemPlacementNode, TypePlacementNode } from '@nimbalyst/collab-protocol';
+import type { ItemPlacementNode, PageSearchRequest, PageSearchResponse, TypePlacementNode } from '@nimbalyst/collab-protocol';
 import {
   TeamSyncProvider,
   type TeamDocIndexEntry,
@@ -308,6 +308,11 @@ export class ElectronCollabDocumentsDataSource implements CollabDocsDataSource {
   }
 
   /** Compatibility seam for editor/comment providers until step 4 moves UI. */
+  /** Body search over the server's index for this scope's project. */
+  searchPages(request: PageSearchRequest): Promise<PageSearchResponse | null> {
+    return this.provider.searchPages(request);
+  }
+
   getProvider(): TeamSyncProvider {
     return this.provider;
   }

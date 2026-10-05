@@ -11,5 +11,7 @@ export interface SetPageTypeDialogProps {
     running: boolean;
     onPick: (typeId: string) => void;
     onClose: () => void;
+    /** Open "New type..." in this section; absent where the host cannot write a type. */
+    onNewType?: () => void;
 }
-export declare function SetPageTypeDialog({ pageTitle, resolver, running, onPick, onClose }: SetPageTypeDialogProps): React.ReactPortal;
+export declare function SetPageTypeDialog({ pageTitle, resolver, running, onPick, onClose, onNewType }: SetPageTypeDialogProps): React.ReactPortal;

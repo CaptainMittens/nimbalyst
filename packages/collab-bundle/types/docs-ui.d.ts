@@ -20,7 +20,8 @@ export type { CollabHistoryController, CollabHistoryDialogProps, CollabHistoryDi
  * graph does not carry it.
  */
 export declare const loadSetPageType: () => Promise<{
-    SetPageTypeDialog({ pageTitle, resolver, running, onPick, onClose }: import("./internal/collab-client/src/docs-ui/setPageType/index").SetPageTypeDialogProps): import("react").ReactPortal;
+    SetPageTypeDialog({ pageTitle, resolver, running, onPick, onClose, onNewType }: import("./internal/collab-client/src/docs-ui/setPageType/index").SetPageTypeDialogProps): import("react").ReactPortal;
+    NewTypeDialog({ lane, resolver, session, parent, defineType, onCreated, onClose }: import("./internal/collab-client/src/docs-ui/setPageType/index").NewTypeDialogProps): import("react").ReactPortal;
     setPageType(request: import("./internal/collab-client/src/docs/pageTypes/index").SetPageTypeRequest, dependencies: import("./internal/collab-client/src/docs/pageTypes/index").SetPageTypeDependencies): Promise<import("./internal/collab-client/src/docs/pageTypes/index").SetPageTypeOutcome>;
     READ_BACK_RETRY_DELAYS_MS: number[];
     listPageChildren(session: import("./internal/collab-client/src/docs/pageTypes/index").ChildMoveSession, typePlacements: import("./internal/collab-client/src/docs/index").SharedTypePlacement[], pageId: string): import("./internal/collab-client/src/docs/pageTypes/index").PageChild[];

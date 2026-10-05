@@ -281,7 +281,7 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
     });
 
     await test.step('place the personal type and drag it under the root page; the team type is not offered', async () => {
-      const tree = personalSidebar(page).locator('.session-history-search + div');
+      const tree = personalSidebar(page).locator('.collab-sidebar-tree');
       await expect(tree).toBeVisible();
       const box = await tree.boundingBox();
       if (!box) throw new Error('Personal tree has no box');

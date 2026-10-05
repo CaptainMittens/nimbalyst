@@ -7,13 +7,14 @@
  * surfaces, and a surface that shows no view must not pay for them.
  */
 import { type JSX } from 'react';
+import type { CollabOpenOptions } from '../../core/index';
 import { type SavedView } from '../../trackers/index';
 import { type TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
 export interface TrackerViewEmbedProps {
     /** A view the host already holds, saved or synthetic (e.g. a type page's built-in "All"). */
     view: SavedView;
     onOpenAsTable?: (view: SavedView) => void;
-    onOpenItem?: (itemId: string) => void;
+    onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
     /**
      * `card` is the bordered block a document embeds at a fixed height; `page`
      * drops the card chrome and fills its container, for a tab that is the view.

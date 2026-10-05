@@ -226,7 +226,7 @@ Two-tier architecture — `ai_agent_messages` (raw append-only log, sole source 
 | [FILE_WATCHING_AND_CHANGE_TRACKING.md](./docs/FILE_WATCHING_AND_CHANGE_TRACKING.md) | Working on file watchers, AI change detection, diff display, or the FilesEditedSidebar. |
 | [WEEKLY_DASHBOARD.md](./docs/WEEKLY_DASHBOARD.md) | Adding/modifying insights on the Weeklys PostHog dashboard. |
 | [VOICE_MODE.md](./docs/VOICE_MODE.md) | Working on voice mode, voice-agent prompts, audio pipeline, or session lifecycle. |
-| [TRACKER_WORKFLOWS.md](./docs/TRACKER_WORKFLOWS.md) | Creating decision or bug tracker items as part of a fix or design decision. |
+| [TRACKER_WORKFLOWS.md](./docs/TRACKER_WORKFLOWS.md) | Recording a decision, or creating a bug tracker item as part of a fix. |
 | [ARCHITECTURE_DIAGRAMS.md](./docs/ARCHITECTURE_DIAGRAMS.md) | Considering whether a change is complex enough to warrant an Excalidraw diagram. |
 | [DEBUGGING_LOGS.md](./docs/DEBUGGING_LOGS.md) | Investigating bugs — use the log access tools, don't ask the user to paste logs. |
 | [IDENTITY_AUTH_AND_ROOMS.md](./docs/IDENTITY_AUTH_AND_ROOMS.md) | Anything touching encryption, key custody, room taxonomy, or the two JWTs. The `Encrypted*` names in the team lanes are vestigial — check the lane table before concluding anything from a name. |
@@ -245,7 +245,7 @@ Two-tier architecture — `ai_agent_messages` (raw append-only log, sole source 
 
 Tracker sharing model: **a tracker is personal or it is the team's; if it is the team's, the server owns it — schema and items together — and `.nimbalyst/trackers/*.yaml` is the local copy.** Read [TRACKER_SCHEMA_SHARING.md](./docs/TRACKER_SCHEMA_SHARING.md) before changing a tracker schema or sharing and numbering behavior.
 
-When choosing between alternatives (libraries, patterns, deciding NOT to do something), log a **decision** tracker item. When fixing a bug, ensure a **bug** tracker item exists before writing fix code. See [TRACKER_WORKFLOWS.md](./docs/TRACKER_WORKFLOWS.md) for the exact `tracker_create` calls and lifecycle.
+Record a decision where it is read. In a project with Pages, follow its "How we write this wiki" page: mark the decision as a sentence in the page it affects, and add a **decision** tracker item as well only when no single page owns it, work or commits hang off it, it is not settled, or its reasons don't fit in the mark. Without Pages, put it in the plan doc or a decision item. Not every choice needs a record. When fixing a bug, ensure a **bug** tracker item exists before writing fix code. See [TRACKER_WORKFLOWS.md](./docs/TRACKER_WORKFLOWS.md) for the exact `tracker_create` calls and lifecycle.
 
 ### `NIM-###` Keys Are Tracker-Scoped — Cite GitHub Issues in Source
 

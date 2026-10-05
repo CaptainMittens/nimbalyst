@@ -49,6 +49,7 @@ import { TeamTypePlacementCache, typePlacementQueueKey } from './teamTypePlaceme
 import { TeamItemPlacementCache, itemPlacementQueueKey } from './teamItemPlacements';
 import { TeamPageMarksRequests, type TeamPageMarksFilters, type TeamPageMarksResult } from './teamPageMarks';
 import { TeamPageLinksRequests, type TeamPageLinksFilters, type TeamPageLinksResult } from './teamPageLinks';
+import { PageSearchRequests, type PageSearchRequest, type PageSearchResponse } from '@nimbalyst/collab-protocol';
 
 // ============================================================================
 // TeamSyncProvider
@@ -102,6 +103,7 @@ export class TeamSyncProvider {
   private readonly pageMarkRequests = new TeamPageMarksRequests();
   /** Open `pageLinksQuery` requests. */
   private readonly pageLinkRequests = new TeamPageLinksRequests();
+  private readonly pageSearchRequests = new PageSearchRequests();
 
   /** Set by a snapshot from a TeamRoom whose folders were converted into documents. */
   private pageTree = false;
@@ -211,6 +213,7 @@ export class TeamSyncProvider {
     this.itemPlacementEntries.destroy();
     this.pageMarkRequests.cancelAll();
     this.pageLinkRequests.cancelAll();
+    this.pageSearchRequests.cancelAll();
     const registerWaiters = [...this.registerAckWaiters.values()].flat();
     this.registerAckWaiters.clear();
     // Unconfirmed, not confirmed-failed: a destroyed provider says nothing
@@ -583,6 +586,21 @@ export class TeamSyncProvider {
     }, filters, timeoutMs);
   }
 
+  /**
+   * This connection's project's pages whose bodies match `request`, from the
+   * server's search index (pages this member can read, never trashed ones).
+   * Null while offline, before the project is known, or when unanswered.
+   */
+  searchPages(request: PageSearchRequest, timeoutMs = 8000): Promise<PageSearchResponse | null> {
+    const projectId = this.config.teamProjectId ?? this.teamState?.metadata?.teamProjectId ?? null;
+    if (!projectId) return Promise.resolve(null);
+    return this.pageSearchRequests.request((message) => {
+      if (this.ws?.readyState !== WebSocket.OPEN) return false;
+      this.send(message);
+      return true;
+    }, projectId, request, timeoutMs);
+  }
+
   // --------------------------------------------------------------------------
   // Message Handling
   // --------------------------------------------------------------------------
@@ -672,6 +690,9 @@ export class TeamSyncProvider {
           break;
         case 'pageLinksChanged':
           this.pageLinkRequests.changed();
+          break;
+        case 'pageSearchResponse':
+          this.pageSearchRequests.receive(message);
           break;
         case 'documentCommentNotifyAck':
           // Fire-and-forget: nothing in the client waits on this. Surfacing a

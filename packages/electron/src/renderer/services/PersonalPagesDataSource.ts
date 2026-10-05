@@ -19,6 +19,7 @@ import type {
   CollabDocsDataSource,
   CollabDocsSnapshot,
 } from '@nimbalyst/collab-client/docs';
+import type { PageSearchRequest, PageSearchResponse } from '@nimbalyst/collab-protocol';
 import { store } from '@nimbalyst/runtime/store';
 import {
   initPersonalPagesListeners,
@@ -99,6 +100,11 @@ export class PersonalPagesDataSource implements CollabDocsDataSource {
       ok: true,
       ...(cmd.type === 'register-document' ? { registrationAcked: true } : {}),
     };
+  }
+
+  /** Body search over the local Personal pages store. */
+  searchPages(request: PageSearchRequest): Promise<PageSearchResponse | null> {
+    return invoke<PageSearchResponse>('personal-pages:search', this.workspacePath, request);
   }
 
   status(): 'connected' {

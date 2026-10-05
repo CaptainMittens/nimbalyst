@@ -246,6 +246,7 @@ interface TabBarProps {
   onToggleAIChat?: () => void; // Toggle AI Chat panel
   isAIChatCollapsed?: boolean; // Whether AI Chat is collapsed
   onTabDoubleClick?: (tabId: string) => void; // Double-click a tab (e.g. maximize editor)
+  leading?: React.ReactNode; // Controls before the tabs
 }
 
 export const TabBar: React.FC<TabBarProps> = ({
@@ -263,7 +264,8 @@ export const TabBar: React.FC<TabBarProps> = ({
   isActive = true,
   onToggleAIChat,
   isAIChatCollapsed = false,
-  onTabDoubleClick
+  onTabDoubleClick,
+  leading
 }) => {
   const openHistoryDialog = useSetAtom(historyDialogFileAtom);
   const [contextMenuTab, setContextMenuTab] = useState<string | null>(null);
@@ -691,6 +693,7 @@ export const TabBar: React.FC<TabBarProps> = ({
   return (
     <>
       <div className="tab-bar-container flex items-center h-9 select-none bg-[var(--nim-bg-secondary)]">
+        {leading}
         <div className="tab-bar-scrollable nim-scrollbar-thin flex-1 flex items-center h-full px-2 overflow-x-auto overflow-y-hidden" ref={tabBarRef}>
           {tabs.map((tab, index) => (
             <TabItem

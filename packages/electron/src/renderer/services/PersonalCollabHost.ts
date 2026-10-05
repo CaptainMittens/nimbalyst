@@ -15,6 +15,7 @@ import {
   type CollabDocsViewPreferences,
   type CollabDocumentTypeDescriptor,
   type CollabHost,
+  type CollabOpenOptions,
   type CollabOpenSource,
   type CollabScope,
   type TeamMemberSummary,
@@ -48,7 +49,7 @@ export type PersonalOpenTarget =
   | { kind: 'personal-page'; documentId: string; path: string; title: string }
   | Extract<CollabArtifactRef, { kind: 'tracker' } | { kind: 'type' }>;
 
-export type PersonalOpenAdapter = (target: PersonalOpenTarget, source: CollabOpenSource) => void;
+export type PersonalOpenAdapter = (target: PersonalOpenTarget, source: CollabOpenSource, options?: CollabOpenOptions) => void;
 
 /** Tab path of a personal page. */
 export function personalPageTabPath(documentId: string): string {
@@ -164,19 +165,19 @@ export class PersonalCollabHost implements CollabHost<PersonalDocsCapability> {
     return [];
   }
 
-  openArtifact(ref: CollabArtifactRef, source: CollabOpenSource): void {
+  openArtifact(ref: CollabArtifactRef, source: CollabOpenSource, options?: CollabOpenOptions): void {
     if (!this.openAdapter) {
       throw new Error('Personal pages were opened without a navigation adapter');
     }
     if (ref.kind === 'tracker' || ref.kind === 'type') {
-      this.openAdapter(ref, source);
+      this.openAdapter(ref, source, options);
     } else if (ref.kind === 'document') {
       this.openAdapter({
         kind: 'personal-page',
         documentId: ref.documentId,
         path: personalPageTabPath(ref.documentId),
         title: this.documentTitle(ref.documentId),
-      }, source);
+      }, source, options);
     } else {
       return;
     }

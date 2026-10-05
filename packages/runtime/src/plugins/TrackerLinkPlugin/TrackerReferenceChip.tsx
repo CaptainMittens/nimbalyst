@@ -11,7 +11,7 @@
  * key — it never throws and never blocks rendering.
  */
 
-import type { JSX } from 'react';
+import type { JSX, MouseEvent as ReactMouseEvent } from 'react';
 import * as React from 'react';
 import {
   useFloating,
@@ -525,9 +525,9 @@ export function TrackerReferenceChip({
               relationMenu={relationMenu}
               onGoTo={
                 resolved || onNavigate
-                  ? () => {
+                  ? (event: ReactMouseEvent) => {
                       if (onNavigate) onNavigate(resolved);
-                      else if (resolved) navigateToTrackerReference(resolved);
+                      else if (resolved) navigateToTrackerReference(resolved, { fromPage: true, newTab: event.metaKey || event.ctrlKey });
                       handleOpenChange(false);
                     }
                   : undefined
@@ -545,7 +545,7 @@ interface TrackerReferencePreviewProps {
   resolved: ResolvedTrackerReference | null;
   displayLabel: string;
   relationMenu?: JSX.Element | null;
-  onGoTo?: () => void;
+  onGoTo?: (event: ReactMouseEvent) => void;
 }
 
 function TrackerReferencePreview({
@@ -720,7 +720,7 @@ function TrackerReferencePreview({
   );
 }
 
-function GoToItemButton({ onClick }: { onClick: () => void }): JSX.Element {
+function GoToItemButton({ onClick }: { onClick: (event: ReactMouseEvent) => void }): JSX.Element {
   return (
     <button
       type="button"

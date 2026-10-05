@@ -13,12 +13,11 @@ export declare const CollabSectionMenu: React.FC<{
     onPlaceType?: () => void;
     onClose: () => void;
 }>;
-export type CollabTreeEmptyReason = 'empty' | 'search' | 'favorites' | 'updated';
+export type CollabTreeEmptyReason = 'empty' | 'favorites' | 'updated';
 export declare const CollabTreeEmptyState: React.FC<{
     reason: CollabTreeEmptyReason;
     personal: boolean;
     scopeAvailable: boolean;
-    searchQuery: string;
     /** Absent when no page type can be created here. */
     onNewPage?: () => void;
 }>;

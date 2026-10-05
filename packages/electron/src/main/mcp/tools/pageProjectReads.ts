@@ -28,7 +28,7 @@ type McpToolResult = {
   isError: boolean;
 };
 
-export type PageReadTool = "listPages" | "readCollabDoc";
+export type PageReadTool = "listPages" | "readCollabDoc" | "searchPages";
 
 /** Runs the tool on the local session; `extra` is merged into a listPages result. */
 export type LocalPageRead<T> = (args: Record<string, unknown>, extra?: Record<string, unknown>) => Promise<T>;

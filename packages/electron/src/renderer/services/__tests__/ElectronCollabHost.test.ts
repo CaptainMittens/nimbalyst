@@ -231,7 +231,7 @@ describe('ElectronCollabHost personal state', () => {
 
     host.openArtifact(ref, 'history');
 
-    expect(openArtifact).toHaveBeenCalledWith(ref, 'history');
+    expect(openArtifact).toHaveBeenCalledWith(ref, 'history', undefined);
     expect(store.get(historyDialogFileAtom)).toBe('collab://org:org-1:doc:doc-1');
 
     // A typed page's body and a type page's prose are rooms of their own.

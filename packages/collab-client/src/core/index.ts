@@ -168,6 +168,21 @@ export type CollabOpenSource =
   | 'embedded_document'
   | 'feedback_request';
 
+/**
+ * How a user click asked to open an artifact. A host that navigates in place
+ * (desktop Pages) shows it in the current tab, or a new tab when `newTab`
+ * (Cmd, or Ctrl off macOS, was held). Without options a host keeps its
+ * default: the desktop focuses or adds a tab.
+ */
+export interface CollabOpenOptions {
+  newTab: boolean;
+}
+
+/** The open options a click carries. */
+export function collabOpenOptions(event: { metaKey: boolean; ctrlKey: boolean }): CollabOpenOptions {
+  return { newTab: event.metaKey || event.ctrlKey };
+}
+
 /** Browser-safe projection of a host's document/editor catalog. */
 export interface CollabDocumentTypeDescriptor {
   documentType: string;
@@ -309,7 +324,7 @@ export interface CollabHost<
    * scope may omit it, and callers fall back to fetching once (#3716).
    */
   onMembersChanged?(cb: () => void): Unsubscribe;
-  openArtifact(ref: CollabArtifactRef, source: CollabOpenSource): void;
+  openArtifact(ref: CollabArtifactRef, source: CollabOpenSource, options?: CollabOpenOptions): void;
   /** Host-native durable URL/deep link for copy-link affordances. */
   artifactUrl?(ref: CollabArtifactRef): string | null;
   personalState: CollabCapabilityAvailability<CollabPersonalStateCapability>;

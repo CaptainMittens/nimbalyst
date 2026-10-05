@@ -386,6 +386,8 @@ export interface PendingCollabDocument {
   fileExtension?: string;
   editorId?: string;
   analyticsSource?: CollabDocumentOpenSource;
+  /** A click inside Pages: open in the current tab, or a new one on Cmd/Ctrl. */
+  openOptions?: { newTab: boolean };
 }
 
 export const pendingCollabDocumentAtom = atom<PendingCollabDocument | null>(null);

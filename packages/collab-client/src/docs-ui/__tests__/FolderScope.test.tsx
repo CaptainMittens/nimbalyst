@@ -238,14 +238,16 @@ describe('placed tracker types', () => {
     expect(host.openArtifact).toHaveBeenLastCalledWith(
       expect.objectContaining({ kind: 'type', typeId: 'module' }),
       'sidebar',
+      { newTab: false },
     );
 
     const items = container.querySelectorAll<HTMLElement>('.collab-tree-item-row');
     expect([...items].map((row) => row.textContent)).toEqual(['1Tracking', '2Identity']);
-    fireEvent.click(items[1]);
+    fireEvent.click(items[1], { metaKey: true });
     expect(host.openArtifact).toHaveBeenLastCalledWith(
       expect.objectContaining({ kind: 'tracker', trackerId: 'mod-2' }),
       'sidebar',
+      { newTab: true },
     );
   });
 

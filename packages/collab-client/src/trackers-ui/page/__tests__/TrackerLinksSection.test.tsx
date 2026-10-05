@@ -87,7 +87,7 @@ describe('TrackerLinksSection', () => {
 
     // Opening a page does not toggle the line.
     fireEvent.click(within(line('Built on')).getByText('DO'));
-    expect(onOpenItem).toHaveBeenCalledWith('do');
+    expect(onOpenItem).toHaveBeenCalledWith('do', { newTab: false });
     expect(screen.queryByText('Runs on Durable Objects.')).toBeNull();
   });
 

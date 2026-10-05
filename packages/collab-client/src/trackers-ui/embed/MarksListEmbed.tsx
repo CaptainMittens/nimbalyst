@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState, type JSX } from 'react';
+import { collabOpenOptions, type CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { decodeViewAttrValue, type PlacedViewMarksKind } from '@nimbalyst/runtime/core/placedViewUrl';
 import {
   getPageMarksSource,
@@ -24,7 +25,8 @@ export interface MarksListEmbedProps {
   label: string;
   attrs: Readonly<Record<string, string>>;
   /** Opens the page a mark is on, by its tab uri (`tracker://...`, `personal://...`). */
-  onOpenPage?: (uri: string) => void;
+  /** `options` carries Cmd/Ctrl from the click, so a host can open a new tab. */
+  onOpenPage?: (uri: string, options?: CollabOpenOptions) => void;
 }
 
 export function marksQuery(kind: PlacedViewMarksKind, attrs: Readonly<Record<string, string>>): PageMarksQuery {
@@ -136,7 +138,7 @@ export function MarksListEmbed({ kind, label, attrs, onOpenPage }: MarksListEmbe
               <button
                 type="button"
                 className="marks-list-page shrink-0 cursor-pointer border-none bg-transparent p-0 text-xs text-nim-link hover:underline"
-                onClick={() => onOpenPage(mark.page.uri)}
+                onClick={(event) => onOpenPage(mark.page.uri, collabOpenOptions(event))}
               >
                 {mark.page.title}
               </button>

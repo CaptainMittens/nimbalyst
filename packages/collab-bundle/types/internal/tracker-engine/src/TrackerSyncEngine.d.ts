@@ -92,6 +92,23 @@ export interface TrackerSchemaLocalChange {
     /** JSON-serialized TrackerDataModel, or null for a tombstone. */
     model: string | null;
     deleted: boolean;
+    /**
+     * A new type that must not replace a definition another client created.
+     * `required`: never sent to a room that cannot refuse an existing type; it
+     * settles as refused (`createOnlyUnsupported`) instead. `whenSupported`: an
+     * older room gets the plain upsert it always got.
+     */
+    createOnly?: 'required' | 'whenSupported';
+}
+/** How the room answered one schema mutation this client sent. */
+export interface TrackerSchemaMutationOutcome {
+    type: string;
+    model: string | null;
+    accepted: boolean;
+    error?: {
+        code: string;
+        message: string;
+    };
 }
 export interface AppliedTrackerSchema {
     type: string;
@@ -116,6 +133,13 @@ export interface TrackerSchemaSyncHooks {
      * no notion of a retired row simply keeps the old behaviour.
      */
     markRejected?: (type: string, code: string) => Promise<unknown>;
+    /**
+     * The room's answer to one mutation this client sent, matched by its own
+     * mutation id. A broadcast of someone else's definition of the same type is
+     * not an answer, which is why a pending creation must settle here and not in
+     * `applyRemote`.
+     */
+    onSettled?: (outcome: TrackerSchemaMutationOutcome) => void;
 }
 export interface TrackerIdentityRecoveryHooks {
     /** Everything the plan needs except the bootstrap cursor, which the engine holds. */
@@ -299,6 +323,8 @@ export declare class TrackerSyncEngine {
     private readonly pendingLaneIds;
     private schemaApplyChain;
     private readonly schemaOutbox;
+    /** Whether this connection's room advertised `schemaCreateOnly`; re-learned every bootstrap. */
+    private schemaCreateOnlySupported;
     private readonly rollbackSnapshots;
     /** Set once `consolidatePendingUpdates` has run for this engine. */
     private outboxConsolidated;
