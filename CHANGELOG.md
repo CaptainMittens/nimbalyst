@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pages with citations no longer fail to load with an editor update loop.
 - Updated the desktop runtime with security fixes while preserving PDF export margins.
 - Fixed security issues in YAML metadata, extension archives, MCP connections and development tooling.
+- Fixed formatting loss on other clients when undoing collaborative text deletion.
 
 ### Removed
 <!-- Removed features go here -->

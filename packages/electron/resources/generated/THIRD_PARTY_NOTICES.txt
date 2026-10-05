@@ -44074,7 +44074,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ================================================================================
-yjs@13.6.29
+yjs@13.6.32
 Selected license: MIT
 Declared license: MIT
 Install paths: node_modules/yjs

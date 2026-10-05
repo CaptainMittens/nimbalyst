@@ -411,7 +411,7 @@
     "y-protocols": "^1.0.6",
     "y-websocket": "^1.5.4",
     "yaml": "^2.8.2",
-    "yjs": ">=13.5.42"
+    "yjs": "13.6.32"
   },
   "peerDependencies": {
     "@lexical/clipboard": "^0.44.0",

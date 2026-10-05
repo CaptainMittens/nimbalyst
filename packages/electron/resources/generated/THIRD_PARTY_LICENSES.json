@@ -23528,9 +23528,9 @@
       "noticeFiles": []
     },
     {
-      "id": "yjs@13.6.29",
+      "id": "yjs@13.6.32",
       "name": "yjs",
-      "version": "13.6.29",
+      "version": "13.6.32",
       "rawLicense": "MIT",
       "selectedLicense": "MIT",
       "reviewRequired": false,
@@ -23542,7 +23542,7 @@
       "installPaths": [
         "node_modules/yjs"
       ],
-      "resolved": "https://registry.npmjs.org/yjs/-/yjs-13.6.29.tgz",
+      "resolved": "https://registry.npmjs.org/yjs/-/yjs-13.6.32.tgz",
       "licenseFiles": [
         {
           "fileName": "LICENSE",
