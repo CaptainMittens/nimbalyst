@@ -35,6 +35,6 @@
   },
   "dependencies": {
     "@nimbalyst/tracker-core": "0.1.0",
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.3.2"
   }
 }
