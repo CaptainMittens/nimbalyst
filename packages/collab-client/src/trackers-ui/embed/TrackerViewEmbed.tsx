@@ -230,7 +230,7 @@ function LoadedViewEmbed({
       );
       break;
     case 'timeline':
-      body = <TrackerTimelineView items={rows} groupBy={definition.groupBy} ordering={definition.ordering} onItemSelect={openItem} resolveRelationshipLabel={resolveRelationshipLabel} />;
+      body = <TrackerTimelineView fields={definition.timelineFields} items={rows} groupBy={definition.groupBy} ordering={definition.ordering} onItemSelect={openItem} resolveRelationshipLabel={resolveRelationshipLabel} />;
       break;
     default:
       body = (

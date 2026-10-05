@@ -9,7 +9,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { atom, useAtomValue, useSetAtom, useStore, type Atom } from 'jotai';
+import { atom, useAtom, useAtomValue, useSetAtom, useStore, type Atom } from 'jotai';
 import type { CollabOpenOptions, CollabScope } from '@nimbalyst/collab-client/core';
 import type { SharedDocument } from '@nimbalyst/collab-client/docs';
 import { DESKTOP_TRACKER_UI_CAPABILITIES, TrackersUIProvider } from '@nimbalyst/collab-client/trackers-ui';
@@ -34,6 +34,7 @@ import { typePageTitle } from './collabPageTabs';
 import { TypePageProse } from './TypePageProse';
 import { personalPageHistoryKey } from '../../../shared/personalPageUri';
 import { historyDialogFileAtom } from '../../store/atoms/historyDialog';
+import { temporaryTypeViewAtom, temporaryTypeViewKey } from './temporaryTypeViews';
 import './TypePageTab.css';
 
 type Lane = 'team' | 'personal';
@@ -99,6 +100,7 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
   const lane: Lane = model && isTeamTrackerSharing(model.sharing ?? 'personal') ? 'team' : 'personal';
   const typeName = typePageTitle(typeId);
   const scope = useTypePageScope(workspacePath, lane);
+  const [temporaryView, setTemporaryView] = useAtom(temporaryTypeViewAtom(temporaryTypeViewKey(workspacePath, scope?.scopeKey ?? '', typeId)));
   const session = useMemo(() => (scope ? getElectronCollabDocsSession(scope) : null), [scope]);
   const typePlacements = useAtomValue<readonly TypePlacementRow[]>(session?.atoms.typePlacements ?? NO_TYPE_PLACEMENTS);
   const itemPlacements = useAtomValue<readonly ItemPlacementRow[]>(session?.atoms.itemPlacements ?? NO_ITEM_PLACEMENTS);
@@ -181,6 +183,8 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
           <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
             <TypePageTable
               typeId={typeId}
+              temporaryView={scope ? temporaryView : null}
+              onClearTemporaryView={() => setTemporaryView(null)}
               typeLabel={typeName}
               rootLabel={lane === 'personal' ? 'Personal' : 'Team'}
               itemPlacements={itemPlacements}

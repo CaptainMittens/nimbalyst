@@ -18,3 +18,4 @@ export { PagesSearchView, type PagesOpenOptions, type PagesSearchViewProps, type
 export { PagesTypesView, type PagesTypesViewMode, type PagesTypesViewProps } from './PagesTypesView';
 export { EMPTY_PAGES_SEARCH, pagesSearchQuery, parsePagesSearch, type PagesSearchPageInput, type PagesSearchState } from './pagesSearch';
 export { TITLE_MAX_HEIGHT_PX, resizeTitleField, sanitizeTitleInput, useAutoSizedTitle } from './trackerTitleAutoSize';
+export { parsePlacedViewHandoff, type PlacedViewHandoff } from './placedViewHandoff';

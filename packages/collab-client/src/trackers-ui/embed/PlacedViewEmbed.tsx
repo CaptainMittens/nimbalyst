@@ -24,6 +24,7 @@ import { PlacedViewNote } from './PlacedViewNote';
 import { MarksListEmbed } from './MarksListEmbed';
 import { getDefaultColumnConfig, resolveColumnsForType } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerColumns';
 import { PlacedViewSettings } from './PlacedViewSettings';
+import type { PlacedViewHandoff } from '../page/placedViewHandoff';
 import { createTrackerFilterFields } from '../createTrackerFilterFields';
 
 const subscribeSchema = (listener: () => void) => globalRegistry.onChange(listener);
@@ -40,6 +41,8 @@ export interface PlacedViewEmbedProps {
   reach?: PlacedViewReach;
   onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
   onOpenAsTable?: (view: SavedView) => void;
+  onOpenFullView?: (typeId: string, view: PlacedViewHandoff) => void;
+  variant?: 'card' | 'page';
   /** Opens the page a listed mark is on, by its tab uri. */
   onOpenPage?: (uri: string, options?: CollabOpenOptions) => void;
   /** Opens the view's own console link, for a view this host cannot draw. */
@@ -51,14 +54,14 @@ function parseHeight(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? Math.max(parsed, 120) : undefined;
 }
 
-export function PlacedViewEmbed({ target, label, attrs, onAttrsChange, reach, onOpenItem, onOpenAsTable, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element {
+export function PlacedViewEmbed({ target, label, attrs, onAttrsChange, reach, onOpenItem, onOpenAsTable, onOpenFullView, variant, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element {
   if (!placedViewInReach(target.scope, reach)) {
     return <OutOfScopeViewNote target={target} label={label} onOpenLink={onOpenLink} />;
   }
   if (target.kind === 'marks') {
     return <MarksListEmbed kind={target.marks} label={label} attrs={attrs} onOpenPage={onOpenPage} />;
   }
-  return <TypeViewEmbed typeId={target.typeId} label={label} attrs={attrs} onAttrsChange={onAttrsChange} onOpenItem={onOpenItem} onOpenAsTable={onOpenAsTable} />;
+  return <TypeViewEmbed typeId={target.typeId} label={label} attrs={attrs} onAttrsChange={onAttrsChange} onOpenItem={onOpenItem} onOpenAsTable={onOpenAsTable} onOpenFullView={onOpenFullView} variant={variant} />;
 }
 
 /** A view of another project (or of someone's own items, on a shared page): its link, never these items. */
@@ -83,13 +86,15 @@ function OutOfScopeViewNote({ target, label, onOpenLink }: {
   );
 }
 
-function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpenItem, onOpenAsTable }: {
+function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpenItem, onOpenAsTable, onOpenFullView, variant }: {
   typeId: string;
   label: string;
   attrs: Readonly<Record<string, string>>;
   onAttrsChange?: (patch: Readonly<Record<string, string | null>>) => void;
   onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
   onOpenAsTable?: (view: SavedView) => void;
+  onOpenFullView?: (typeId: string, view: PlacedViewHandoff) => void;
+  variant?: 'card' | 'page';
 }): JSX.Element {
   const [day, setDay] = useState(() => new Date().toDateString());
   useEffect(() => {
@@ -127,8 +132,9 @@ function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpen
   }
   if (!model) return <PlacedViewNote>Loading {label || typeId}…</PlacedViewNote>;
   const fields = createTrackerFilterFields(resolveColumnsForType(typeId), typeId, [model]);
-  const wrap = (view: JSX.Element) => <div className="placed-view-configurable">
+  const wrap = (view: JSX.Element) => <div className={variant === 'page' ? "placed-view-configurable flex min-h-0 flex-1 flex-col" : "placed-view-configurable"}>
     <PlacedViewSettings defaultColumns={getDefaultColumnConfig(typeId).visibleColumns} attrs={attrs} fields={fields} temporary={!onAttrsChange} onChange={change} />
+    {onOpenFullView && parsed.placed ? <button type="button" className="my-1 text-xs text-nim-link" onClick={() => onOpenFullView(typeId, { label, attrs: { ...attrs } })}>Open full view</button> : null}
     {writeError ? <div role="alert" className="text-xs text-nim-error">{writeError}</div> : null}{view}
   </div>;
   if (parsed.error || !parsed.placed) return wrap(<PlacedViewNote><span role="alert">{label || typeId}: {parsed.error}</span></PlacedViewNote>);
@@ -139,6 +145,7 @@ function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpen
   return wrap(
     <TrackerViewEmbed
       view={placed.view}
+      variant={variant}
       height={parseHeight(attrs.height)}
       hiddenColumns={attrs.hide?.split(',')}
       onSortChange={(field, direction) => change({ sort: `${field}:${direction}` })}

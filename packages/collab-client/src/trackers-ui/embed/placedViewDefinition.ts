@@ -144,6 +144,13 @@ export function placedViewDefinition(
   const builtInGroup = ['none', 'status', 'priority', 'assignee', 'type', 'tag', 'milestone', 'goal'].includes(group);
   const groupField = fields?.find(field => field.id === group);
   if (!builtInGroup && (!groupField || groupField.multiValue || !['select', 'boolean', 'user', 'relationship'].includes(groupField.type ?? ''))) throw new Error(`Unsupported grouping: ${group}`);
+  if (mode === 'timeline' && fields) {
+    for (const key of ['start', 'end']) {
+      const id = attrs[key];
+      const field = fields.find(candidate => candidate.id === id);
+      if (id && (!field || field.multiValue || !['date', 'datetime'].includes(field.type ?? ''))) throw new Error(`Invalid timeline ${key} field: ${id}`);
+    }
+  }
   const view: SavedView = {
     id: `placed:${typeId}`,
     name: name || typeId,
@@ -153,6 +160,7 @@ export function placedViewDefinition(
       viewMode: mode === 'board' ? 'kanban' : mode === 'list' || mode === 'timeline' ? mode : 'table',
       groupBy: builtInGroup ? group as SavedView['definition']['groupBy'] : { kind: 'field', fieldId: group },
       sortColumns: sorts,
+      ...(attrs.start || attrs.end ? { timelineFields: { ...(attrs.start ? { start: attrs.start } : {}), ...(attrs.end ? { end: attrs.end } : {}) } } : {}),
       ordering: sortBy || 'manual',
       // A placed view shows what its filters say; it does not hide closed items on its own.
       statusScope: attrs.scope === 'open' ? 'open' : 'all',

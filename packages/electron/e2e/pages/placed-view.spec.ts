@@ -171,4 +171,17 @@ test('view settings persist in markdown and new items are created from the embed
   await view.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(view).toContainText('New competitor from view');
   await expect(view).toContainText('3 items');
+  // The full view retains the current definition and explores without editing the source.
+  const source = await fs.readFile(path.join(workspaceDir, 'landscape.md'), 'utf8');
+  await page.getByRole('button', { name: 'Open full view', exact: true }).first().click();
+  const fullView = page.getByTestId('type-page-table');
+  await expect(fullView).toContainText('Unsaved view');
+  await expect(fullView.getByTestId('tracker-saved-view-embed')).toHaveAttribute('data-view-mode', 'list');
+  await fullView.getByRole('button', { name: /View settings/ }).click();
+  await page.getByRole('dialog', { name: 'View settings' }).getByLabel('Layout', { exact: true }).selectOption('table');
+  await page.keyboard.press('Escape');
+  await expect(fullView.getByTestId('tracker-saved-view-embed')).toHaveAttribute('data-view-mode', 'table');
+  expect(await fs.readFile(path.join(workspaceDir, 'landscape.md'), 'utf8')).toBe(source);
+  await fullView.getByRole('button', { name: 'All', exact: true }).click();
+  await expect(fullView).not.toContainText('Unsaved view');
 });

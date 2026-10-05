@@ -352,6 +352,8 @@ export type PlacedViewTarget =
   | { kind: 'type'; typeId: string; scope?: { orgId: string; projectId: string } | 'local' }
   | { kind: 'marks'; marks: 'all' | 'decided' | 'open'; scope?: { orgId: string; projectId: string } | 'local' };
 export interface PlacedViewEmbedProps {
+  onOpenFullView?: (typeId: string, view: { label: string; attrs: Readonly<Record<string, string>> }) => void;
+  variant?: 'card' | 'page';
   target: PlacedViewTarget;
   label: string;
   attrs: Readonly<Record<string, string>>;

@@ -69,6 +69,14 @@ export function PlacedViewSettings({ attrs, fields, temporary, onChange, default
           {selected.includes(field.id) ? <><button type="button" aria-label={`Move ${field.label} up`} disabled={selected.indexOf(field.id) === 0} onClick={() => moveField(field.id, selected.indexOf(field.id) - 1)}>↑</button><button type="button" aria-label={`Move ${field.label} down`} disabled={selected.indexOf(field.id) === selected.length - 1} onClick={() => moveField(field.id, selected.indexOf(field.id) + 1)}>↓</button></> : null}
         </div>)}
       </fieldset>
+      {attrs.mode === 'timeline' ? <fieldset className="flex gap-2"><legend>Timeline dates</legend>
+        {['start', 'end'].map(key => <label key={key} className="flex flex-col gap-1">{key === 'start' ? 'Start' : 'End'}
+          <select aria-label={`Timeline ${key}`} className={selectClass} value={attrs[key] || ''} onChange={event => onChange({ [key]: event.target.value || null })}>
+            <option value="">{attrs.start || attrs.end ? 'Not selected' : 'Automatic'}</option>
+            {fields.filter(field => !field.multiValue && ['date', 'datetime'].includes(field.type ?? '')).map(field => <option key={field.id} value={field.id}>{field.label}</option>)}
+          </select>
+        </label>)}
+      </fieldset> : null}
       {attrs.mode === '2x2' ? ['x', 'y'].map(axis => <label key={axis} className="flex flex-col gap-1">{axis.toUpperCase()} axis
         <select aria-label={`${axis.toUpperCase()} axis`} className={selectClass} value={attrs[axis] || ''} onChange={e => onChange({ [axis]: e.target.value })}>
           <option value="">Choose field</option>{fields.filter(field => field.type === 'number').map(field => <option key={field.id} value={field.id}>{field.label}</option>)}

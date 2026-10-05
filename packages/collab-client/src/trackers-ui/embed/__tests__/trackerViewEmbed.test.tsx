@@ -84,6 +84,15 @@ afterAll(() => {
 });
 
 describe('TrackerViewEmbed', () => {
+  it('opens the explored definition full size without changing the source page', async () => {
+    const open = vi.fn();
+    render(<TrackersUIProvider dataSource={fakeSource()} identity={null}><PlacedViewEmbed target={{ kind: 'type', typeId: 'ev-target' }} label="Targets" attrs={{ custom: 'preserved' }} onOpenFullView={open} /></TrackersUIProvider>);
+    fireEvent.click(screen.getByRole('button', { name: /View settings/ }));
+    fireEvent.change(screen.getByLabelText('Layout'), { target: { value: 'list' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Close view settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open full view' }));
+    expect(open).toHaveBeenCalledWith('ev-target', { label: 'Targets', attrs: { custom: 'preserved', mode: 'list' } });
+  });
   it('routes native header sorting and resize through the shared view write-back', async () => {
     const change = vi.fn();
     render(<TrackersUIProvider dataSource={fakeSource()} identity={null}><PlacedViewEmbed target={{ kind: 'type', typeId: 'ev-target' }} label="Targets" attrs={{ cols: 'title,realtime', sort: 'realtime:desc', w: 'title:320' }} onAttrsChange={change} /></TrackersUIProvider>);

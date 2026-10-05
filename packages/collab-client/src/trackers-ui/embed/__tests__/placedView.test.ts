@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
 import { quadrantData } from '../quadrantData';
 import { placedViewDefinition } from '../placedViewDefinition';
+import { parsePlacedViewHandoff } from '../../page/placedViewHandoff';
 
 function competitor(id: string, fields: Record<string, unknown>): TrackerRecord {
   return {
@@ -38,6 +39,17 @@ describe('quadrantData', () => {
 });
 
 describe('placedViewDefinition', () => {
+  it('round trips handoff expressions and refuses malformed query payloads', () => {
+    const view = { label: 'Due soon', attrs: { mode: 'timeline', filter: 'due:<+7d', start: 'launchDate', custom: 'future' } };
+    const query = new URLSearchParams({ view: JSON.stringify(view) });
+    expect(parsePlacedViewHandoff(new URLSearchParams(query.toString()).get('view')!)).toEqual(view);
+    for (const value of ['null', '{}', '[]', '{', JSON.stringify({ label: 'Bad', attrs: { mode: 1 } })]) expect(() => parsePlacedViewHandoff(value)).toThrow();
+  });
+  it('preserves explicit timeline fields and rejects unavailable or non-date fields', () => {
+    const fields = [{ id: 'launch', label: 'Launch', type: 'date' as const }, { id: 'finish', label: 'Finish', type: 'datetime' as const }, { id: 'title', label: 'Title', type: 'string' as const }];
+    expect(placedViewDefinition('task', '', { mode: 'timeline', start: 'launch', end: 'finish' }, fields).view.definition.timelineFields).toEqual({ start: 'launch', end: 'finish' });
+    for (const start of ['missing', 'title']) expect(() => placedViewDefinition('task', '', { mode: 'timeline', start }, fields)).toThrow('timeline');
+  });
   it('validates multiple sorts, widths and typed filter operators including relative dates', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-05T12:00:00Z'));
