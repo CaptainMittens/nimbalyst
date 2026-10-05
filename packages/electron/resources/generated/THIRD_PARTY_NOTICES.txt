@@ -40850,7 +40850,7 @@ Issues: No license file found in package directory
 No license file found.
 
 ================================================================================
-virtua@0.48.5
+virtua@0.51.3
 Selected license: MIT
 Declared license: MIT
 Install paths: node_modules/virtua

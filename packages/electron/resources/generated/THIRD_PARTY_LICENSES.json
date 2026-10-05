@@ -22628,9 +22628,9 @@
       "noticeFiles": []
     },
     {
-      "id": "virtua@0.48.5",
+      "id": "virtua@0.51.3",
       "name": "virtua",
-      "version": "0.48.5",
+      "version": "0.51.3",
       "rawLicense": "MIT",
       "selectedLicense": "MIT",
       "reviewRequired": false,
@@ -22642,7 +22642,7 @@
       "installPaths": [
         "node_modules/virtua"
       ],
-      "resolved": "https://registry.npmjs.org/virtua/-/virtua-0.48.5.tgz",
+      "resolved": "https://registry.npmjs.org/virtua/-/virtua-0.51.3.tgz",
       "licenseFiles": [
         {
           "fileName": "LICENSE",
