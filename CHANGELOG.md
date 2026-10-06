@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Effort and Actions menus now support typeahead like the model picker.
 - Pages with citations no longer fail to load with an editor update loop.
 - Updated the desktop runtime with security fixes while preserving PDF export margins.
-- Fixed security issues in YAML metadata, extension archives, file-pattern matching, MCP connections and development tooling.
+- Fixed security issues in YAML metadata, extension archives, file-pattern matching, Git operations, MCP connections and development tooling.
 - Fixed formatting loss on other clients when undoing collaborative text deletion.
 - Fixed a crash when stopping an active local database worker.
 - Kept transcript reading position stable when content above the viewport grows.
