@@ -33,7 +33,7 @@ import { resolveTeamForRemoteHash } from './teamProjectResolver';
 import { getCollabSyncHttpUrl } from '../utils/collabSyncUrl';
 import { assertJwtMatchesOrg, getJwtExp, getSubFromJwt, AuthContextMismatchError } from './jwtOrg';
 import { createSingleFlight } from '../utils/asyncCache';
-import { getWorkspaceState, updateWorkspaceState } from '../utils/store';
+import { getWorkspaceStateField, updateWorkspaceState } from '../utils/store';
 import { setHasOrganizationsForMenu } from '../menu/organizationMenuState';
 import {
   getAccounts,
@@ -1368,7 +1368,7 @@ export async function getTeamByOrgId(orgId: string): Promise<TeamDetails | null>
  */
 function getLocalOrgBinding(workspacePath: string): { orgId: string; teamProjectId?: string } | null {
   try {
-    return getWorkspaceState(workspacePath).localOrgBinding ?? null;
+    return getWorkspaceStateField(workspacePath, 'localOrgBinding') ?? null;
   } catch (err) {
     logger.main.warn('[TeamService] Could not read the local org binding:', err);
     return null;
@@ -2329,6 +2329,11 @@ async function attemptAutoMatchTeam(workspacePath: string, attempt: number): Pro
   }
 }
 
+/** The project-access list is admin-only; asking as a member only produces a 403. */
+export function canListProjectAccess(team: Pick<TeamDetails, 'teamProjectId' | 'role'>): boolean {
+  return !!team.teamProjectId && (team.role === 'owner' || team.role === 'admin');
+}
+
 export async function syncOrgProjectionFromServer(knownTeams?: TeamDetails[]): Promise<{
   success: boolean;
   counts?: { orgs: number; projects: number; members: number; grants: number };
@@ -2386,7 +2391,7 @@ export async function syncOrgProjectionFromServer(knownTeams?: TeamDetails[]): P
     // document_read_only. Admin-only endpoint, so a non-admin member simply
     // keeps the role-derived projection.
     for (const team of teams) {
-      if (!team.teamProjectId) continue;
+      if (!canListProjectAccess(team) || !team.teamProjectId) continue;
       try {
         const grants = await listProjectAccess(team.orgId, team.teamProjectId);
         await reconcileProjectAccessFromServer(db, team.teamProjectId, grants);

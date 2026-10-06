@@ -8,9 +8,12 @@ import { createPGLiteSessionStore } from '../../PGLiteSessionStore';
 import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AISessionsRepository';
 import { withHierarchyWrite, publishSubtreeArchive } from '../../sessionHierarchy';
 import { applyMobileSessionParent } from '../mobileSessionHierarchy';
+import { registerMobileHierarchyAuthority } from '../mobileHierarchySync';
+import { logger } from '../../../utils/logger';
 import { createHierarchyPublisher, registerSessionHierarchyPublication } from '../../sync/sessionHierarchyPublication';
 vi.mock('../../../database/PGLiteDatabaseWorker', () => ({ database: { query: vi.fn() } }));
 vi.mock('../../../utils/logger', () => ({ logger: { main: { warn: vi.fn() } } }));
+vi.mock('../sessionHostAttribution', () => ({getLocalHostDeviceId: () => 'desktop'}));
 
 it('retains a newer queued publication after the earlier send succeeds and the newer send fails', async () => {
   let parentSessionId = 'A';
@@ -125,4 +128,19 @@ it('retries an unsuccessful confirmation barrier without discarding durable inte
     expect(push).toHaveBeenCalledTimes(2);
     expect(publisher.pendingCount()).toBe(0);
   } finally { publisher.pause(); vi.useRealTimers(); }
+});
+
+it('ignores index entries for sessions this desktop does not have instead of warning on every broadcast', async () => {
+  let listener!: (entries: any[], isCurrent: () => boolean) => Promise<void>;
+  const provider = {onHierarchySnapshot: (fn: typeof listener) => { listener = fn; return () => {}; }};
+  const applyRemoteHierarchySnapshot = vi.fn(async () => [{sessionId: 'foreign', parentSessionId: 'p', createdBySessionId: null, accepted: false, error: 'Session not hosted on this desktop'}]);
+  const getStore = vi.spyOn(AISessionsRepository, 'getStore').mockReturnValue({applyRemoteHierarchySnapshot} as any);
+  const get = vi.spyOn(AISessionsRepository, 'get').mockResolvedValue(null);
+  const stop = registerMobileHierarchyAuthority(provider as any);
+  try {
+    vi.mocked(logger.main.warn).mockClear();
+    await listener([{sessionId: 'foreign', parentSessionId: 'p'}], () => true);
+    expect(logger.main.warn).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+  } finally { stop(); getStore.mockRestore(); get.mockRestore(); }
 });

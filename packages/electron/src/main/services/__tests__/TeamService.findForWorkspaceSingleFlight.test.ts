@@ -61,6 +61,7 @@ vi.mock('fs/promises', () => ({
 
 vi.mock('../../utils/store', () => ({
   getWorkspaceState: (workspacePath: string) => workspaceStates.get(workspacePath) ?? {},
+  getWorkspaceStateField: (workspacePath: string, field: string) => (workspaceStates.get(workspacePath) as any)?.[field],
   updateWorkspaceState: (workspacePath: string, updater: (state: any) => void) => {
     const state = workspaceStates.get(workspacePath) ?? {};
     updater(state);

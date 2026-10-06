@@ -2,6 +2,7 @@ import { SessionTree } from './SessionTree.tsx';
 import { sessionRegistryAtom } from '../../store/atoms/sessions';
 import React, { useState, useCallback, useEffect, useRef, memo, useMemo } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
+import { compactRowsAtom } from '../../store/atoms/agentMode';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import { copyToClipboard } from '@nimbalyst/runtime/utils/clipboard';
 import {
@@ -183,6 +184,7 @@ export const WorkstreamGroup: React.FC<WorkstreamGroupProps> = ({
   onWorktreeCleanGitignored,
 }) => {
   const registry = useAtomValue(sessionRegistryAtom);
+  const compact = useAtomValue(compactRowsAtom);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPosition, setContextMenuPosition] = useState({ x: 0, y: 0 });
   const [adjustedContextMenuPosition, setAdjustedContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -573,7 +575,7 @@ export const WorkstreamGroup: React.FC<WorkstreamGroupProps> = ({
     >
       {/* Header */}
       <div
-        className={`workstream-group-header flex items-center gap-0 text-[0.8125rem] text-[var(--nim-text)] transition-colors duration-150 rounded-md mx-2 w-[calc(100%-1rem)] ${
+        className={`workstream-group-header flex items-center gap-0 text-[0.8125rem] text-[var(--nim-text)] transition-colors duration-150 rounded-md mr-2 w-[calc(100%-0.5rem)] ${
           isSelected ? 'bg-[var(--nim-bg-selected)]' : isActive ? 'bg-[var(--nim-bg-selected)]' : 'hover:bg-[var(--nim-bg-hover)]'
         } ${isValidDropTarget ? 'bg-[rgba(83,89,93,0.4)] border-2 border-dashed border-[var(--nim-primary)]' : ''}`}
         onContextMenu={handleContextMenu}
@@ -583,7 +585,7 @@ export const WorkstreamGroup: React.FC<WorkstreamGroupProps> = ({
       >
         {/* Chevron - separate click target for expand/collapse */}
         <button
-          className="workstream-group-chevron-button flex items-center justify-center w-6 h-full min-h-[2.5rem] p-0 bg-transparent border-none cursor-pointer text-[var(--nim-text-faint)] shrink-0 rounded-l-md hover:bg-[var(--nim-bg-secondary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-[var(--nim-border-focus)] focus-visible:outline-offset-[-2px]"
+          className={`workstream-group-chevron-button flex items-center justify-center w-6 h-full ${compact ? 'min-h-[1.5rem]' : 'min-h-[2.5rem]'} p-0 bg-transparent border-none cursor-pointer text-[var(--nim-text-faint)] shrink-0 rounded-l-md hover:bg-[var(--nim-bg-secondary)] focus:outline-none focus-visible:outline-2 focus-visible:outline-[var(--nim-border-focus)] focus-visible:outline-offset-[-2px]`}
           onClick={handleChevronClick}
           aria-expanded={isExpanded}
           aria-label={`${isExpanded ? 'Collapse' : 'Expand'} ${type}`}
@@ -597,7 +599,7 @@ export const WorkstreamGroup: React.FC<WorkstreamGroupProps> = ({
 
         {/* Main clickable area - icon and content */}
         <div
-          className="workstream-group-main flex items-start gap-2 flex-1 min-w-0 py-1 pr-2 pl-1 cursor-pointer focus:outline-none focus-visible:outline-2 focus-visible:outline-[var(--nim-border-focus)] focus-visible:outline-offset-[-2px] focus-visible:rounded"
+          className={`workstream-group-main flex ${compact ? 'items-center' : 'items-start'} gap-2 flex-1 min-w-0 ${compact ? 'py-0.5' : 'py-1'} pr-2 pl-1 cursor-pointer focus:outline-none focus-visible:outline-2 focus-visible:outline-[var(--nim-border-focus)] focus-visible:outline-offset-[-2px] focus-visible:rounded`}
           onClick={handleHeaderClick}
           role="button"
           tabIndex={0}
@@ -627,8 +629,8 @@ export const WorkstreamGroup: React.FC<WorkstreamGroupProps> = ({
           </div>
 
           {/* Content */}
-          <div className="workstream-group-content flex-1 min-w-0 flex flex-col gap-0.5">
-            <div className="workstream-group-row-primary flex items-center gap-1">
+          <div className={`workstream-group-content flex-1 min-w-0 flex ${compact ? 'items-center gap-1.5' : 'flex-col gap-0.5'}`}>
+            <div className={`workstream-group-row-primary flex items-center gap-1 ${compact ? 'flex-1 min-w-0' : ''}`}>
               {isRenamingWorktree && type === 'worktree' ? (
                 <input
                   ref={worktreeRenameInputRef}
@@ -670,7 +672,7 @@ export const WorkstreamGroup: React.FC<WorkstreamGroupProps> = ({
                 <WorkstreamGroupStatusIndicator sessionIds={sessions.map(s => s.id)} />
               )}
             </div>
-            <div className="workstream-group-row-secondary flex items-center gap-1.5 flex-wrap">
+            <div className={`workstream-group-row-secondary flex items-center gap-1.5 ${compact ? 'shrink-0 flex-nowrap' : 'flex-wrap'}`}>
               {/* Git status badges for worktrees */}
               {type === 'worktree' && gitStatus && (
                 <>

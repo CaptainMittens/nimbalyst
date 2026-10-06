@@ -152,7 +152,10 @@ interface SessionListItemProps {
   id: string;
   treeContext?: boolean;
   treeLeading?: React.ReactNode;
+  /** Inline summary shown on the metadata line (or the title line when compact). */
   treeDetails?: React.ReactNode;
+  /** Single-line row: title, inline summary and time. */
+  compact?: boolean;
   title: string;
   createdAt: number;
   updatedAt?: number;
@@ -196,6 +199,7 @@ export const SessionListItem = memo<SessionListItemProps>(function SessionListIt
   treeContext,
   treeLeading,
   treeDetails,
+  compact,
   title,
   createdAt,
   updatedAt,
@@ -330,7 +334,7 @@ export const SessionListItem = memo<SessionListItemProps>(function SessionListIt
         id={"session-list-item-" + id}
       data-testid={isWorktreeSession ? 'worktree-session-item' : isWorkstream ? 'workstream-session-item' : 'session-list-item'}
       data-session-type={isWorktreeSession ? 'worktree' : isWorkstream ? 'workstream' : 'session'}
-      className={`session-list-item relative flex items-start gap-2.5 py-1 px-3 pl-8 cursor-pointer rounded mx-2 transition-[background-color,opacity] duration-150 select-none
+      className={`session-list-item relative flex ${compact ? 'compact items-center py-0.5' : 'items-start py-1'} gap-2.5 pr-3 pl-7 cursor-pointer rounded mr-2 transition-[background-color,opacity] duration-150 select-none
         hover:bg-[var(--nim-bg-hover)]
         focus:outline-2 focus:outline-[var(--nim-border-focus)] focus:-outline-offset-2
         ${isActive ? 'active bg-[var(--nim-bg-selected)]' : ''}
@@ -366,7 +370,7 @@ export const SessionListItem = memo<SessionListItemProps>(function SessionListIt
       aria-current={isActive ? 'page' : undefined}
     >
       {treeLeading}
-      <div className={`session-list-item-icon shrink-0 mt-0.5 text-[var(--nim-text-muted)] flex items-center relative ${isActive ? '[&]:text-[var(--nim-primary)] [&_svg]:text-[var(--nim-primary)]' : '[&_svg]:text-[var(--nim-text-muted)]'} ${isWorkstream ? 'workstream-icon' : ''} ${isWorktreeSession ? 'worktree-icon' : ''}`}>
+      <div className={`session-list-item-icon shrink-0 ${compact ? "" : "mt-0.5"} text-[var(--nim-text-muted)] flex items-center relative ${isActive ? '[&]:text-[var(--nim-primary)] [&_svg]:text-[var(--nim-primary)]' : '[&_svg]:text-[var(--nim-text-muted)]'} ${isWorkstream ? 'workstream-icon' : ''} ${isWorktreeSession ? 'worktree-icon' : ''}`}>
         {sessionType === 'voice' ? (
           // Voice session: OpenAI icon with mic badge
           <div className="relative">
@@ -413,6 +417,18 @@ export const SessionListItem = memo<SessionListItemProps>(function SessionListIt
             onBlur={handleRenameSubmit}
             onClick={(e) => e.stopPropagation()}
           />
+        ) : compact ? (
+          <div className="session-list-item-compact-line flex items-center gap-1.5 min-w-0">
+            <FullTitleTooltip
+              label={displayTitle}
+              className={`session-list-item-title block flex-1 min-w-0 text-[0.8125rem] text-[var(--nim-text)] font-medium overflow-hidden text-ellipsis whitespace-nowrap transition-colors duration-150 ${isActive ? 'font-semibold' : ''} ${isArchived ? 'text-[var(--nim-text-faint)]' : ''}`}
+            >
+              {displayTitle}
+            </FullTitleTooltip>
+            {treeDetails}
+            <span className="session-list-item-datetime shrink-0 text-[0.6875rem] text-[var(--nim-text-faint)] whitespace-nowrap" title={fullDateTime}>{relativeTime}</span>
+            {hint && <span className="session-tree-drop-hint text-xs text-[var(--nim-primary)]" role="status">{hint.label}</span>}
+          </div>
         ) : (
           <>
             <FullTitleTooltip
@@ -426,9 +442,9 @@ export const SessionListItem = memo<SessionListItemProps>(function SessionListIt
               {displayModel && <span className="session-list-item-model overflow-hidden text-ellipsis whitespace-nowrap">{displayModel}</span>}
               {phase && <SessionPhaseBadge phase={phase} />}
               <SessionExternalMarker sessionId={id} />
+              {treeDetails}
             </div>
             <SessionSpawnerLink sessionId={id} />
-            {treeDetails}
             {hint && <div className="session-tree-drop-hint text-xs text-[var(--nim-primary)]" role="status">{hint.label}</div>}
           </>
         )}
@@ -476,6 +492,7 @@ export const SessionListItem = memo<SessionListItemProps>(function SessionListIt
     prev.treeContext === next.treeContext &&
     prev.treeLeading === next.treeLeading &&
     prev.treeDetails === next.treeDetails &&
+    prev.compact === next.compact &&
     prev.id === next.id &&
     prev.title === next.title &&
     prev.createdAt === next.createdAt &&

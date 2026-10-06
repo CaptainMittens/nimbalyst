@@ -4,6 +4,9 @@ import { parseJsonObjectColumn } from '../utils/jsonColumn';
 import { assertHierarchyPlacement, readHierarchy, withHierarchyWrite, publishHierarchyMove, managerReassignmentMetadata, type HierarchyDatabase, type HierarchyRow, type HierarchyStatement } from './sessionHierarchy';
 import { sessionMetadataMergeSql } from './sessionMetadataMerge';
 
+/** Result error for index entries whose session does not exist on this desktop. */
+export const SESSION_NOT_HOSTED = 'Session not hosted on this desktop';
+
 export function newHierarchyIntent(parentSessionId: string | null, createdBySessionId: string | null) {
   return { revision: randomUUID(), parentSessionId, createdBySessionId };
 }
@@ -79,7 +82,7 @@ export function createHierarchySyncMethods(db: HierarchyDatabase, ensureReady: (
         }
       } catch (error) { failure = String(error); }
       if (!isCurrent()) failure = 'Superseded hierarchy snapshot';
-      if (failure) return entries.map(entry => current.has(entry.sessionId) ? canonical(current.get(entry.sessionId)!, false, failure) : { ...entry, createdBySessionId: null, accepted: false, error: 'Session not hosted on this desktop' });
+      if (failure) return entries.map(entry => current.has(entry.sessionId) ? canonical(current.get(entry.sessionId)!, false, failure) : { ...entry, createdBySessionId: null, accepted: false, error: SESSION_NOT_HOSTED });
       const statements: HierarchyStatement[] = [];
       const moves: Array<{ old: HierarchyRow; next: HierarchyRow }> = [];
       for (const [id, next] of proposed) {
@@ -92,14 +95,14 @@ export function createHierarchySyncMethods(db: HierarchyDatabase, ensureReady: (
           metadata=${sessionMetadataMergeSql(base, 4, patch)} WHERE id=$1 RETURNING id`, params: [id, next.parent_session_id, next.created_by_session_id, JSON.stringify(patch)], expectedRows: 1 });
         if (changed) moves.push({ old, next });
       }
-      if (!isCurrent()) return entries.map(entry => current.has(entry.sessionId) ? canonical(current.get(entry.sessionId)!, false, 'Superseded hierarchy snapshot') : { ...entry, createdBySessionId: null, accepted: false, error: 'Session not hosted on this desktop' });
+      if (!isCurrent()) return entries.map(entry => current.has(entry.sessionId) ? canonical(current.get(entry.sessionId)!, false, 'Superseded hierarchy snapshot') : { ...entry, createdBySessionId: null, accepted: false, error: SESSION_NOT_HOSTED });
       if (statements.length) await db.runTransaction(statements);
       for (const { old, next } of moves) await publishHierarchyMove({ sessionId: old.id, workspaceId: old.workspace_id, title: old.title || 'Untitled Session',
         previousParentId: old.parent_session_id, previousManagerId: old.created_by_session_id, parentId: next.parent_session_id, managerId: next.created_by_session_id, source: 'remote' });
       return entries.map(entry => {
         const row = proposed.get(entry.sessionId) ?? current.get(entry.sessionId);
         return row ? canonical(row, !protectedIds.has(row.id), protectedIds.has(row.id) ? 'Local hierarchy intent pending' : undefined)
-          : { ...entry, createdBySessionId: null, accepted: false, error: 'Session not hosted on this desktop' };
+          : { ...entry, createdBySessionId: null, accepted: false, error: SESSION_NOT_HOSTED };
       });
     }),
   };

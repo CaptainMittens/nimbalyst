@@ -10,6 +10,7 @@ import {
 } from '../../store/atoms/sessions';
 import { workspaceSessionTurnActivityAtom } from '../../store/atoms/sessionActivity';
 import { workstreamStateAtom } from '../../store/atoms/workstreamState';
+import { compactRowsAtom } from '../../store/atoms/agentMode';
 import { SessionListItem } from './SessionListItem';
 import { buildSessionTree, mergedTreeHeader, treeIndent, type SessionTreeNode } from './sessionTree';
 
@@ -135,6 +136,7 @@ export function SessionTreeRow(props: SessionTreeRowHandlers & VisibleSessionTre
   const row = node.session;
   const pinSession = props.pinSession ?? row;
   const [, setState] = useAtom(workstreamStateAtom(row.id));
+  const compact = useAtomValue(compactRowsAtom);
   const status = useAtomValue(
     useMemo(
       () =>
@@ -156,20 +158,17 @@ export function SessionTreeRow(props: SessionTreeRowHandlers & VisibleSessionTre
   );
   const expanded = status.expanded;
   const indent = treeIndent(node.depth - baseDepth);
-  const details = (
-    <>
-      {node.children.length > 0 && (
-        <div className="session-tree-rollup flex flex-wrap gap-2 text-[10px] text-[var(--nim-text-muted)]">
-          {status.running > 0 && <span className="text-[var(--nim-primary)]">{status.running} running</span>}
-          {status.unread > 0 && <span>{status.unread} unread</span>}
-          {status.review > 0 && <span>{status.review} need review</span>}
-          {node.uncommittedCount > 0 && (
-            <span className="text-[var(--nim-warning)]">{node.uncommittedCount} uncommitted</span>
-          )}
-          {!expanded && <span>{node.ids.length - 1} sessions</span>}
-        </div>
+  // Inline on the metadata line; a separate row per parent cost a line of height each.
+  const details = node.children.length > 0 && (
+    <span className="session-tree-rollup inline-flex shrink-0 gap-1.5 whitespace-nowrap text-[10px] text-[var(--nim-text-muted)]">
+      {status.running > 0 && <span className="text-[var(--nim-primary)]">{status.running} running</span>}
+      {status.unread > 0 && <span>{status.unread} unread</span>}
+      {status.review > 0 && <span>{status.review} need review</span>}
+      {node.uncommittedCount > 0 && (
+        <span className="text-[var(--nim-warning)]">{node.uncommittedCount} uncommitted</span>
       )}
-    </>
+      {!expanded && <span>{node.ids.length - 1} sessions</span>}
+    </span>
   );
   return (
     <div
@@ -195,7 +194,7 @@ export function SessionTreeRow(props: SessionTreeRowHandlers & VisibleSessionTre
             <button
               aria-label={`${expanded ? 'Collapse' : 'Expand'} ${row.title}`}
               aria-expanded={expanded}
-              className="session-tree-chevron shrink-0 mt-1"
+              className={`session-tree-chevron shrink-0 flex items-center p-0 leading-none ${compact ? "" : "mt-1"}`}
               onClick={(e) => {
                 e.stopPropagation();
                 setState({ treeExpanded: !expanded });
@@ -208,6 +207,7 @@ export function SessionTreeRow(props: SessionTreeRowHandlers & VisibleSessionTre
           )
         }
         treeDetails={details}
+        compact={compact}
         uncommittedCount={node.children.length ? undefined : row.uncommittedCount}
         onClick={(e) => props.onSessionSelect(row.id, e)}
         onDelete={props.onSessionDelete && (() => props.onSessionDelete!(row.id))}

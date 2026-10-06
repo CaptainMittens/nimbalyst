@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 <!-- New features go here -->
-- Sessions now form nested trees on desktop and mobile, with drag-to-reassign, Undo, and subtree activity summaries.
+- Sessions now form nested trees on desktop and mobile, with drag-to-reassign, Undo, subtree activity summaries, and an optional compact one-line view.
 
 ### Changed
 <!-- Changes to existing functionality go here -->
@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved MCP connection reliability while tools await a response.
 - Improved reliability of repeated Anthropic chat requests by releasing completed-request listeners.
 - Fixed a tracker crash when a person has no display name.
+- Reduced startup time spent re-reading settings while scanning extensions and resolving teams.
 
 ### Removed
 <!-- Removed features go here -->

@@ -2,6 +2,7 @@ import type { SyncProvider } from '@nimbalyst/runtime/sync';
 import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AISessionsRepository';
 import { publishCanonicalHierarchy } from '../sync/sessionHierarchyPublication';
 import { getLocalHostDeviceId } from './sessionHostAttribution';
+import { SESSION_NOT_HOSTED } from '../sessionHierarchySyncStore';
 import { logger } from '../../utils/logger';
 
 /** Registration also receives verified bootstrap rows from the runtime dispatcher. */
@@ -22,7 +23,8 @@ export function registerMobileHierarchyAuthority(provider: SyncProvider): () => 
     for (const result of results) {
       if (!isCurrent()) return;
       const incoming = proposed.get(result.sessionId);
-      if (!incoming) continue;
+      // The index carries every device's sessions; one we do not have is not a rejected move.
+      if (!incoming || result.error === SESSION_NOT_HOSTED) continue;
       if (!result.accepted || result.parentSessionId !== incoming.parentSessionId
         || result.createdBySessionId !== incoming.createdBySessionId) {
         await publishCanonicalHierarchy(result.sessionId, isCurrent);

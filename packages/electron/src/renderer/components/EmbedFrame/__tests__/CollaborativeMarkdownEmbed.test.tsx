@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { EditorHost } from '@nimbalyst/runtime';
 
-const fakeLexicalEditor = { id: 'lexical-editor' };
+const fakeLexicalEditor = { id: 'lexical-editor', setEditable: vi.fn() };
 
 vi.mock('@nimbalyst/runtime', () => ({
   DocumentPathProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -60,11 +60,13 @@ describe('CollaborativeMarkdownEmbed', () => {
     renderEmbed(false);
     const header = await screen.findByTestId('diff-header');
     expect(header.getAttribute('data-file-path')).toBe('collab://org:org-1:doc:type-page:decision');
+    expect(fakeLexicalEditor.setEditable).toHaveBeenLastCalledWith(true);
   });
 
   it('shows no review bar on a read-only embed', async () => {
     renderEmbed(true);
     await screen.findByTestId('markdown-editor');
     expect(screen.queryByTestId('diff-header')).toBeNull();
+    expect(fakeLexicalEditor.setEditable).toHaveBeenLastCalledWith(false);
   });
 });

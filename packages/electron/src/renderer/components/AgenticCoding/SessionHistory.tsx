@@ -46,7 +46,7 @@ import { activeWorkspacePathAtom } from '../../store/atoms/openProjects';
 import { useGitRepoProbe } from '../../hooks/useGitRepoProbe';
 import { workstreamStateAtom } from '../../store/atoms/workstreamState';
 import { sessionProcessingAtom, sessionUnreadAtom, sessionHasPendingInteractivePromptAtom, activeSessionIdAtom as globalActiveSessionIdAtom, sessionPinnedUpdateAtom } from '../../store/atoms/sessions';
-import { collapsedGroupsAtom, sortOrderAtom, setCollapsedGroupsAtom, setSortOrderAtom } from '../../store/atoms/agentMode';
+import { collapsedGroupsAtom, compactRowsAtom, setCompactRowsAtom, sortOrderAtom, setCollapsedGroupsAtom, setSortOrderAtom } from '../../store/atoms/agentMode';
 import {
   recentlyRenamedSessionAtom,
   selectSessionActionAtom,
@@ -225,6 +225,8 @@ const SessionHistoryComponent: React.FC = () => {
   const activeSessionId = useAtomValue(globalActiveSessionIdAtom);
   const collapsedGroups = useAtomValue(collapsedGroupsAtom);
   const controlledSortOrder = useAtomValue(sortOrderAtom);
+  const compactRows = useAtomValue(compactRowsAtom);
+  const setCompactRows = useSetAtom(setCompactRowsAtom);
   const setCollapsedGroupsAction = useSetAtom(setCollapsedGroupsAtom);
   const setSortOrderAction = useSetAtom(setSortOrderAtom);
   const onCollapsedGroupsChange = setCollapsedGroupsAction;
@@ -3250,6 +3252,20 @@ const SessionHistoryComponent: React.FC = () => {
                   </svg>
                 )}
               </button>
+              <div className="session-history-sort-divider border-t border-[var(--nim-border)]" />
+              <button
+                className={`session-history-compact-option flex items-center justify-between w-full px-3 py-2 text-[13px] border-none text-[var(--nim-text)] cursor-pointer transition-colors duration-150 text-left gap-2 hover:bg-[var(--nim-bg-hover)] [&>span]:flex-1 [&_svg]:shrink-0 [&_svg]:text-[var(--nim-primary)] ${compactRows ? 'bg-[var(--nim-bg-selected)] font-medium' : ''}`}
+                onClick={() => { setCompactRows(!compactRows); setSortDropdownOpen(false); }}
+                role="menuitemcheckbox"
+                aria-checked={compactRows}
+              >
+                <span>Compact rows</span>
+                {compactRows && (
+                  <svg width="12" height="12" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M13 4L6 11L3 8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                )}
+              </button>
             </div>
           )}
         </div>
@@ -3552,6 +3568,7 @@ const SessionHistoryComponent: React.FC = () => {
                     uncommittedCount={session.uncommittedCount}
                     branchedAt={session.branchedAt}
                     phase={session.phase}
+                    compact={compactRows}
                   />
                 );
               }}

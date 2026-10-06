@@ -471,6 +471,7 @@ export interface SessionHistoryLayout {
   collapsed: boolean;
   collapsedGroups: string[];
   sortOrder?: 'updated' | 'created';
+  compactRows?: boolean;
 }
 
 /**
@@ -1291,6 +1292,21 @@ export const setThemeSync = setTheme;
 
 export function getWorkspaceState(workspacePath: string): WorkspaceState {
   return cloneWorkspaceState(ensureWorkspaceState(workspacePath));
+}
+
+/**
+ * One top-level field, cloned on its own. getWorkspaceState merges and clones the
+ * whole entry, which holds hundreds of KB of workstream UI state, so team
+ * resolution paid for all of it on every lookup. Only for fields that
+ * normalizeWorkspaceState passes through unchanged; attachedFolders is sanitized.
+ */
+export function getWorkspaceStateField<K extends 'localOrgBinding'>(
+  workspacePath: string,
+  field: K,
+): WorkspaceState[K] {
+  const raw = readWorkspaceStore()[workspaceKey(workspacePath)];
+  const value = raw?.[field] !== undefined ? raw[field] : createDefaultWorkspaceState(workspacePath)[field];
+  return value === undefined ? value : structuredClone(value);
 }
 
 export function setWorkspaceState(workspacePath: string, state: WorkspaceState): WorkspaceState {
@@ -2202,8 +2218,24 @@ export function setExtensionProjectIntroShown(shown: boolean): void {
 }
 
 // Extension Settings Management
+//
+// Extension scans check every extension, and each `conf` get re-parses the whole
+// app-settings file (hundreds of KB, mostly provider model catalogs). Cache the
+// parsed value until conf emits 'change', which every in-process write does.
+let _extensionSettingsCache: Record<string, ExtensionSettings> | undefined;
+let _extensionSettingsCacheStore: Store<AppStoreSchema> | undefined;
+
 export function getExtensionSettings(): Record<string, ExtensionSettings> {
-  return getAppStore().get('extensionSettings', {});
+  const appStore = getAppStore();
+  if (!appStore.events) return appStore.get('extensionSettings', {});
+  if (_extensionSettingsCacheStore !== appStore) {
+    _extensionSettingsCacheStore = appStore;
+    _extensionSettingsCache = undefined;
+    appStore.events.on('change', () => { _extensionSettingsCache = undefined; });
+  }
+  _extensionSettingsCache ??= appStore.get('extensionSettings', {});
+  // Callers mutate the result before writing it back.
+  return structuredClone(_extensionSettingsCache);
 }
 
 export function setExtensionSettings(settings: Record<string, ExtensionSettings>): void {
