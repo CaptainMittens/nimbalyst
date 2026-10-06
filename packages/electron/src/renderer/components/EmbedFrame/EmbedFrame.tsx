@@ -725,7 +725,7 @@ export const EmbedFrame: React.FC<EmbedFrameProps> = (props) => {
         >
           <div
             className="embed-frame__editor-host"
-            {...(isSelected ? {} : { inert: '' as unknown as boolean })}
+            {...(isSelected ? {} : { inert: true })}
           >
             <EmbedErrorBoundary onError={setRenderError} absolutePath={null}>
               <React.Suspense
@@ -891,7 +891,7 @@ export const EmbedFrame: React.FC<EmbedFrameProps> = (props) => {
          */}
         <div
           className="embed-frame__editor-host"
-          {...(isSelected ? {} : { inert: '' as unknown as boolean })}
+          {...(isSelected ? {} : { inert: true })}
         >
           <EmbedErrorBoundary onError={setRenderError} absolutePath={absolutePath}>
             {host && (

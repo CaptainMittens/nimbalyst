@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   applyTypeColumnDisplay,
+  getInitials,
   getCellValue,
   getDefaultColumnConfig,
   getEffectiveUpdatedDate,
@@ -332,5 +333,13 @@ describe('legacy qualified label values', () => {
     } finally {
       globalRegistry.setLabels(emptyLabelRegistry());
     }
+  });
+});
+
+describe('getInitials', () => {
+  it('tolerates an identity with no display name instead of crashing the avatar', () => {
+    expect(getInitials(undefined as unknown as string)).toBe('?');
+    expect(getInitials('   ')).toBe('?');
+    expect(getInitials('Ada Lovelace')).toBe('AL');
   });
 });

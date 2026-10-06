@@ -472,7 +472,7 @@ export const BlitzGroup: React.FC<BlitzGroupProps> = memo(({
 
   return (
     <div
-      className={`blitz-group mb-1 ${isArchived ? 'archived' : ''} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}`}
+      className={`blitz-group pb-1 ${isArchived ? 'archived' : ''} ${isActive ? 'active' : ''} ${isSelected ? 'selected' : ''}`}
       data-testid={`blitz-group-${blitzId}`}
       onMouseLeave={handleGroupMouseLeave}
     >

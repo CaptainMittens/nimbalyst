@@ -11,6 +11,7 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { CollapsibleGroup } from './CollapsibleGroup';
 import { WorktreeBaseBranchPicker } from './WorktreeBaseBranchPicker';
 import { SessionListItem } from './SessionListItem';
+import { SessionTreeRow, useVisibleSessionTreeRows, type VisibleSessionTreeRow } from './SessionTree.tsx';
 import { visibleSessionTreeIds, sessionTreeRootId } from './sessionTree';
 import { resolveSessionArchiveSelection, sessionArchiveSubtreeIds } from './sessionArchiveSelection';
 import { WorkstreamGroup } from './WorkstreamGroup';
@@ -88,6 +89,7 @@ import {
   patchWorkstreamChildPin,
   reconcileSessionPinToggle,
   workstreamChildrenNeedRefresh,
+  countRegistryDescendants,
 } from './workstreamChildPinReconciliation';
 import './SessionHistory.css';
 
@@ -130,6 +132,21 @@ type UnifiedListItem =
   | { type: 'blitz'; blitzId: string; worktrees: { worktreeId: string; sessions: SessionItem[] }[]; timestamp: number; rank: number }
   | { type: 'superLoop'; loop: SuperLoop; timestamp: number; rank: number }
 ;
+
+/** Stable identity for virtual list keys; index keys remount rows whenever the list re-sorts. */
+function unifiedItemId(item: UnifiedListItem): string {
+  switch (item.type) {
+    case 'session':
+    case 'workstream':
+      return item.session.id;
+    case 'worktree':
+      return item.worktreeId;
+    case 'blitz':
+      return item.blitzId;
+    case 'superLoop':
+      return item.loop.id;
+  }
+}
 
 // Search filter options for content search
 type SearchTimeRange = '7d' | '30d' | '90d' | 'all';
@@ -423,6 +440,8 @@ const SessionHistoryComponent: React.FC = () => {
   const [workstreamChildrenCache, setWorkstreamChildrenCache] = useState<Map<string, SessionItem[]>>(new Map()); // Cache workstream children
   const [blitzCache, setBlitzCache] = useState<Map<string, BlitzData>>(new Map()); // Cache blitz data
   const pendingWorkstreamChildrenFetchesRef = useRef<Set<string>>(new Set());
+  // childCount each cached children list was fetched for, keyed `${id}|${showArchived}`.
+  const workstreamChildrenFetchedForRef = useRef<Map<string, number>>(new Map());
   // Mirrors `workstreamChildrenCache` so the workstream-children fetch
   // effect below can read the current cache without putting it in deps
   // (which previously formed a self-trigger loop: setCache -> dep change ->
@@ -2075,12 +2094,28 @@ const SessionHistoryComponent: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [sortDropdownOpen]);
 
+  // One pass over the registry: each session's tree root, and the non-root members of
+  // each tree. Scanning the registry once per workstream was quadratic in session count.
+  const sessionTreeIndex = useMemo(() => {
+    const rootOf = new Map<string, string>();
+    const membersByRoot = new Map<string, SessionItem[]>();
+    for (const session of sessionRegistry.values()) {
+      const rootId = sessionTreeRootId(session.id, sessionRegistry);
+      rootOf.set(session.id, rootId);
+      if (rootId === session.id) continue;
+      const members = membersByRoot.get(rootId);
+      if (members) members.push(session);
+      else membersByRoot.set(rootId, [session]);
+    }
+    return { rootOf, membersByRoot };
+  }, [sessionRegistry]);
+
   // Group worktree sessions by worktreeId and compute worktree timestamps
   const worktreeGroupsData = useMemo(() => {
     const groups = new Map<string, { sessions: SessionItem[]; timestamp: number }>();
     const allowedRoots = new Set(sessions.map(session => session.id));
     for (const session of sessionRegistry.values()) {
-      if (!allowedRoots.has(sessionTreeRootId(session.id, sessionRegistry))) continue;
+      if (!allowedRoots.has(sessionTreeIndex.rootOf.get(session.id) ?? session.id)) continue;
       if (!showArchived && session.isArchived) continue;
       if (session.worktreeId) {
         const existing = groups.get(session.worktreeId);
@@ -2100,7 +2135,7 @@ const SessionHistoryComponent: React.FC = () => {
     }
 
     return groups;
-  }, [sessions, sortBy, sessionRegistry, showArchived, getDisplayedOrderTimestamp]);
+  }, [sessions, sortBy, sessionRegistry, sessionTreeIndex, showArchived, getDisplayedOrderTimestamp]);
 
   // Get all worktree IDs for batch fetching
   const sortedWorktreeIds = useMemo(() => {
@@ -2122,7 +2157,7 @@ const SessionHistoryComponent: React.FC = () => {
         const isWorkstream = (session.childCount ?? 0) > 0;
         if (isWorkstream) {
           // Create workstream item with cached children (or empty array if not loaded yet)
-          const cachedChildren = Array.from(sessionRegistry.values()).filter(child => child.id !== session.id && (showArchived || !child.isArchived) && sessionTreeRootId(child.id, sessionRegistry) === session.id);
+          const cachedChildren = (sessionTreeIndex.membersByRoot.get(session.id) ?? []).filter(child => showArchived || !child.isArchived);
 
           // For workstreams, use the maximum updatedAt from all children for sorting
           // This ensures workstreams appear based on their most recent activity
@@ -2330,30 +2365,55 @@ const SessionHistoryComponent: React.FC = () => {
     }
 
     return result as Record<TimeGroupKey | 'Pinned' | 'Meta Agent', UnifiedListItem[]>;
-  }, [sessions, worktreeGroupsData, sortBy, worktreeCache, workstreamChildrenCache, sessionRegistry, blitzCache, superLoops, showArchived, isMetaAgentEnabled, getDisplayedOrderRank, getDisplayedOrderTimestamp, compareSessionOrder, compareUnifiedItems]);
+  }, [sessions, worktreeGroupsData, sortBy, worktreeCache, workstreamChildrenCache, sessionTreeIndex, blitzCache, superLoops, showArchived, isMetaAgentEnabled, getDisplayedOrderRank, getDisplayedOrderTimestamp, compareSessionOrder, compareUnifiedItems]);
 
-  const groupKeys = Object.keys(groupedItems) as (TimeGroupKey | 'Pinned' | 'Meta Agent')[];
+  const groupKeys = useMemo(
+    () => Object.keys(groupedItems) as (TimeGroupKey | 'Pinned' | 'Meta Agent')[],
+    [groupedItems],
+  );
 
   // Flatten groups and their visible items into a single array for Virtuoso.
   // Group headers are included as items; collapsed groups omit their children.
+  // Workstream trees are flattened to one Virtuoso item per visible row.
   type FlatVirtuosoItem =
-    | { kind: 'group-header'; groupKey: string; itemCount: number; isExpanded: boolean }
-    | { kind: 'item'; groupKey: string; item: UnifiedListItem };
+    | { kind: 'group-header'; key: string; groupKey: string; itemCount: number; isExpanded: boolean }
+    | { kind: 'item'; key: string; groupKey: string; item: UnifiedListItem }
+    | { kind: 'tree-row'; key: string; groupKey: string; row: VisibleSessionTreeRow };
+
+  const workstreamTrees = useMemo(() => {
+    const trees: { key: string; rows: SessionItem[] }[] = [];
+    for (const groupKey of groupKeys) {
+      if (collapsedGroups.includes(groupKey)) continue;
+      for (const item of groupedItems[groupKey]) {
+        if (item.type !== 'workstream') continue;
+        const root = sessionRegistry.get(item.session.id) ?? item.session;
+        trees.push({ key: item.session.id, rows: [root, ...item.sessions] });
+      }
+    }
+    return trees;
+  }, [groupKeys, groupedItems, collapsedGroups, sessionRegistry]);
+  const workstreamTreeRows = useVisibleSessionTreeRows(workstreamTrees, activeSessionId, workspacePath);
 
   const flatVirtuosoItems = useMemo(() => {
     const flat: FlatVirtuosoItem[] = [];
     for (const groupKey of groupKeys) {
       const items = groupedItems[groupKey];
       const isExpanded = !collapsedGroups.includes(groupKey);
-      flat.push({ kind: 'group-header', groupKey, itemCount: items.length, isExpanded });
+      flat.push({ kind: 'group-header', key: `group:${groupKey}`, groupKey, itemCount: items.length, isExpanded });
       if (isExpanded) {
         for (const item of items) {
-          flat.push({ kind: 'item', groupKey, item });
+          if (item.type === 'workstream') {
+            for (const row of workstreamTreeRows.get(item.session.id) ?? []) {
+              flat.push({ kind: 'tree-row', key: `tree:${row.node.session.id}`, groupKey, row });
+            }
+            continue;
+          }
+          flat.push({ kind: 'item', key: `${item.type}:${unifiedItemId(item)}`, groupKey, item });
         }
       }
     }
     return flat;
-  }, [groupKeys, groupedItems, collapsedGroups]);
+  }, [groupKeys, groupedItems, collapsedGroups, workstreamTreeRows]);
 
   // Keep visual order ref in sync with the flattened list for shift-click range selection.
   // Must include ALL visible session IDs in exact visual order -- including sessions nested
@@ -2364,6 +2424,10 @@ const SessionHistoryComponent: React.FC = () => {
       store.get(workstreamStateAtom(node.session.id)).treeExpanded ?? node.ids.some(id => id === activeSessionId || store.get(sessionProcessingAtom(id)) || store.get(sessionUnreadAtom(id)) || store.get(sessionHasPendingInteractivePromptAtom(id)))
     );
     for (const entry of flatVirtuosoItems) {
+      if (entry.kind === 'tree-row') {
+        ids.push(entry.row.node.session.id);
+        continue;
+      }
       if (entry.kind !== 'item') continue;
       const item = entry.item;
       switch (item.type) {
@@ -2371,7 +2435,6 @@ const SessionHistoryComponent: React.FC = () => {
           ids.push(item.session.id);
           break;
         case 'workstream':
-          ids.push(...treeOrder([item.session, ...item.sessions]));
           break;
         case 'worktree':
           if (!collapsedGroups.includes(`worktree:${item.worktreeId}`)) ids.push(...treeOrder(item.sessions));
@@ -2495,8 +2558,9 @@ const SessionHistoryComponent: React.FC = () => {
   useEffect(() => {
     const cache = workstreamChildrenCacheRef.current;
     const registrySnapshot = store.get(sessionRegistryAtom);
+    const registryDescendants = countRegistryDescendants(registrySnapshot);
 
-    // Find workstream sessions that are expanded
+    // Find workstream sessions whose subtree is not already in the registry
     const workstreamSessionsNeedingFetch = sessions.filter(s =>
       (s.childCount ?? 0) > 0 &&
       !pendingWorkstreamChildrenFetchesRef.current.has(s.id) &&
@@ -2504,6 +2568,8 @@ const SessionHistoryComponent: React.FC = () => {
         cache.get(s.id),
         s.descendantCount ?? s.childCount ?? 0,
         registrySnapshot,
+        registryDescendants.get(s.id),
+        workstreamChildrenFetchedForRef.current.get(`${s.id}|${showArchived}`),
       )
     );
 
@@ -2516,8 +2582,9 @@ const SessionHistoryComponent: React.FC = () => {
       sessionIds.forEach(sessionId => pendingWorkstreamChildrenFetchesRef.current.add(sessionId));
 
       try {
-        const results = await Promise.all(
-          workstreamSessionsNeedingFetch.map(async (session) => {
+        // At most four in flight: an unbounded burst queued dozens of calls
+        // behind the database worker and stalled sessions:list for seconds.
+        const fetchOne = async (session: SessionItem) => {
             try {
               const result = await window.electronAPI.invoke(
                 'sessions:list-children',
@@ -2554,13 +2621,18 @@ const SessionHistoryComponent: React.FC = () => {
                 ...(c.linkedTrackerItemIds && { linkedTrackerItemIds: c.linkedTrackerItemIds }),
               }));
 
+              workstreamChildrenFetchedForRef.current.set(`${session.id}|${showArchived}`, session.descendantCount ?? session.childCount ?? 0);
               return { sessionId: session.id, children };
             } catch (err) {
               console.error(`[SessionHistory] Failed to fetch children for workstream ${session.id}:`, err);
               return null;
             }
-          })
-        );
+        };
+        const results: Array<{ sessionId: string; children: SessionItem[] } | null> = [];
+        const queue = [...workstreamSessionsNeedingFetch];
+        await Promise.all(Array.from({ length: Math.min(4, queue.length) }, async () => {
+          for (let next = queue.shift(); next; next = queue.shift()) results.push(await fetchOne(next));
+        }));
 
         const successfulResults = results.filter((result): result is { sessionId: string; children: SessionItem[] } => result !== null);
         if (successfulResults.length === 0) {
@@ -3217,7 +3289,9 @@ const SessionHistoryComponent: React.FC = () => {
           </div>
         </div>
       )}
-      <div className="session-history-list nim-scrollbar flex-1 overflow-y-auto overflow-x-hidden py-2 scroll-smooth" ref={scrollContainerCallbackRef}>
+      {/* No scroll-smooth here: Virtuoso corrects scrollTop as rows are measured, and an
+          animated correction reads back mid-flight, which makes the list jump. */}
+      <div className="session-history-list nim-scrollbar flex-1 overflow-y-auto overflow-x-hidden py-2" ref={scrollContainerCallbackRef}>
         {groupKeys.length === 0 && (hasSearchQuery || hasTagFilter) ? (
           // No results for the active search/tag filter - offer a clear affordance
           <div className="session-history-empty flex flex-col items-center justify-center px-4 py-8 text-center text-[var(--nim-text-faint)] text-[13px]">
@@ -3243,13 +3317,33 @@ const SessionHistoryComponent: React.FC = () => {
               ref={virtuosoRef}
               customScrollParent={scrollContainerEl}
               totalCount={flatVirtuosoItems.length}
+              computeItemKey={(index) => flatVirtuosoItems[index]?.key ?? index}
+              defaultItemHeight={46}
               overscan={400}
               itemContent={(index) => {
                 const entry = flatVirtuosoItems[index];
-                if (entry.kind === 'group-header') {
-                  // Render inline group header (same markup as CollapsibleGroup)
+                if (entry.kind === 'tree-row') {
                   return (
-                    <div className="collapsible-group mb-1">
+                    <SessionTreeRow
+                      {...entry.row}
+                      activeSessionId={activeSessionId}
+                      projectPath={workspacePath}
+                      onSessionSelect={handleSessionClick}
+                      onSessionDelete={handleDeleteSession}
+                      onSessionArchive={handleArchiveSession}
+                      onSessionUnarchive={handleUnarchiveSession}
+                      onSessionPinToggle={handleSessionPinToggle}
+                      onSessionRename={onSessionRename}
+                      onSessionBranch={onSessionBranch}
+                    />
+                  );
+                }
+                if (entry.kind === 'group-header') {
+                  // Render inline group header (same markup as CollapsibleGroup).
+                  // Padding, not margin: Virtuoso measures the item box, and a child
+                  // margin collapses outside it.
+                  return (
+                    <div className="collapsible-group pb-1">
                       <button
                         className="collapsible-group-header flex items-center gap-2 w-full py-2 px-3 bg-transparent border-none cursor-pointer text-xs font-semibold text-nim-muted text-left transition-colors duration-150 hover:bg-nim-hover"
                         onClick={() => handleToggleGroup(entry.groupKey)}

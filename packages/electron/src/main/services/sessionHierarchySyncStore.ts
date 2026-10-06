@@ -43,8 +43,6 @@ export function createHierarchySyncMethods(db: HierarchyDatabase, ensureReady: (
       if (!db.runTransaction) throw new Error('Remote hierarchy reconciliation requires transactional storage');
       const { rows: currentRows } = await db.query<HierarchyRow>(`SELECT id, workspace_id, parent_session_id, created_by_session_id, worktree_id, session_type, title, metadata FROM ai_sessions WHERE id IN (${entries.map((_, i) => `$${i + 1}`).join(',')})`, entries.map(entry => entry.sessionId));
       const current = new Map(currentRows.map(row => [row.id, row]));
-      const graphs = new Map<string, HierarchyRow[]>();
-      for (const row of currentRows) if (!graphs.has(row.workspace_id)) graphs.set(row.workspace_id, await readHierarchy(db, row.workspace_id));
       const proposed = new Map<string, HierarchyRow>();
       const protectedIds = new Set<string>();
       const confirmedIds = new Set<string>();
@@ -57,11 +55,27 @@ export function createHierarchySyncMethods(db: HierarchyDatabase, ensureReady: (
         const moved = (row.parent_session_id ?? null) !== entry.parentSessionId;
         proposed.set(row.id, { ...row, parent_session_id: entry.parentSessionId, created_by_session_id: moved ? entry.parentSessionId : row.created_by_session_id });
       }
+      // Read a workspace graph only when the snapshot moves a row in it.
+      const graphs = new Map<string, HierarchyRow[]>();
+      for (const [id, next] of proposed) {
+        const row = current.get(id)!;
+        if ((row.parent_session_id ?? null) !== (next.parent_session_id ?? null) && !graphs.has(row.workspace_id)) {
+          graphs.set(row.workspace_id, await readHierarchy(db, row.workspace_id));
+        }
+      }
       let failure: string | undefined;
       try {
         for (const rows of graphs.values()) {
           const finalGraph = rows.map(row => proposed.get(row.id) ?? row);
-          for (const row of finalGraph) if (proposed.has(row.id)) assertHierarchyPlacement(finalGraph, row, row.parent_session_id);
+          // Only moved rows need checking: each check walks the row's ancestors and
+          // its whole subtree, so it covers every unmoved row it could affect.
+          // Validating every snapshot entry rebuilt the workspace graph per row
+          // and made each fetchIndex quadratic in session count.
+          for (const row of finalGraph) {
+            if (proposed.has(row.id) && (current.get(row.id)?.parent_session_id ?? null) !== (row.parent_session_id ?? null)) {
+              assertHierarchyPlacement(finalGraph, row, row.parent_session_id);
+            }
+          }
         }
       } catch (error) { failure = String(error); }
       if (!isCurrent()) failure = 'Superseded hierarchy snapshot';

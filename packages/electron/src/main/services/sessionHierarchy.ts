@@ -99,21 +99,41 @@ export const SESSION_DESCENDANTS_CTE = `WITH RECURSIVE session_subtree(id) AS (
 )`;
 
 export async function readSessionSubtree(db: HierarchyDatabase, sessionId: string, workspaceId: string) {
-  return (await db.query<any>(`WITH RECURSIVE subtree(id, depth) AS (
+  const rows = (await db.query<any>(`WITH RECURSIVE subtree(id, depth) AS (
     SELECT id, 0 FROM ai_sessions WHERE id = $1 AND workspace_id = $2
     UNION
     SELECT c.id, p.depth + 1 FROM ai_sessions c JOIN subtree p ON c.parent_session_id = p.id
     WHERE c.workspace_id = $2 AND p.depth < ${MAX_SESSION_DEPTH}
-  ), descendants(ancestor_id, id) AS (
-    SELECT parent_session_id, id FROM ai_sessions WHERE workspace_id = $2 AND parent_session_id IS NOT NULL
-    UNION
-    SELECT d.ancestor_id, c.id FROM descendants d JOIN ai_sessions c ON c.parent_session_id = d.id WHERE c.workspace_id = $2
   ) SELECT s.*, t.depth,
     (SELECT COUNT(*) FROM ai_sessions c WHERE c.parent_session_id = s.id) AS child_count,
-    (SELECT COUNT(*) FROM descendants d WHERE d.ancestor_id = s.id AND d.id <> s.id) AS descendant_count,
     (SELECT COUNT(*) FROM ai_agent_messages m WHERE m.session_id = s.id AND m.direction = 'input' AND (m.hidden = FALSE OR m.hidden IS NULL)) AS message_count
     FROM (SELECT id, MIN(depth) AS depth FROM subtree GROUP BY id) t JOIN ai_sessions s ON s.id = t.id
     ORDER BY t.depth, s.created_at`, [sessionId, workspaceId])).rows;
+  // Every descendant of a subtree member is itself in the subtree, so count here.
+  const counts = computeDescendantStats(rows.map(row => ({ id: row.id, parentId: row.parent_session_id, updatedAt: 0 })));
+  return rows.map(row => ({ ...row, descendant_count: counts.get(row.id)?.count ?? 0 }));
+}
+
+/**
+ * Descendant count and latest descendant activity per ancestor, computed in JS.
+ * A recursive closure in SQL went quadratic on SQLite once orchestrator trees
+ * held thousands of sessions and stalled the database worker for minutes.
+ * Cycle-safe: a corrupt parent chain stops at the first repeated id.
+ */
+export function computeDescendantStats(nodes: Array<{ id: string; parentId: string | null | undefined; updatedAt: number }>) {
+  const parentOf = new Map(nodes.map(node => [node.id, node.parentId ?? null]));
+  const stats = new Map<string, { count: number; maxUpdatedAt: number }>();
+  for (const node of nodes) {
+    const seen = new Set<string>([node.id]);
+    for (let ancestor = parentOf.get(node.id); ancestor && parentOf.has(ancestor) && !seen.has(ancestor); ancestor = parentOf.get(ancestor)) {
+      seen.add(ancestor);
+      const entry = stats.get(ancestor) ?? { count: 0, maxUpdatedAt: 0 };
+      entry.count++;
+      entry.maxUpdatedAt = Math.max(entry.maxUpdatedAt, node.updatedAt);
+      stats.set(ancestor, entry);
+    }
+  }
+  return stats;
 }
 
 export async function findSessionTreeRoot(db: HierarchyDatabase, sessionId: string, workspaceId: string): Promise<string> {

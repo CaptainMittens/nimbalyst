@@ -5,7 +5,7 @@ import { sessionMetadataMergeSql } from './sessionMetadataMerge';
 
 import { toMillis } from '../utils/timestampUtils';
 import { parseJsonObjectColumn } from '../utils/jsonColumn';
-import { assertSessionCreation, SESSION_DESCENDANTS_CTE, publishSubtreeArchive, wrapSessionHierarchyWrites, deleteSessionAndLiftChildren, type HierarchyStatement } from './sessionHierarchy';
+import { assertSessionCreation, SESSION_DESCENDANTS_CTE, computeDescendantStats, publishSubtreeArchive, wrapSessionHierarchyWrites, deleteSessionAndLiftChildren, type HierarchyStatement } from './sessionHierarchy';
 import {
   OWNER_METADATA_KEY,
   SESSION_OWNER_KEY,
@@ -845,47 +845,39 @@ export function createPGLiteSessionStore(db: PGliteLike, ensureDbReady?: EnsureR
       const archiveFilter = buildSessionArchiveFilter(includeArchived);
 
       const queryStart = performance.now();
-      // Aggregate direct and recursive counts once, including subtree activity.
-      // Message counts load lazily to keep the history query off the raw log.
+      // Direct counts in SQL; recursive counts and subtree activity in JS (see
+      // computeDescendantStats). Message counts load lazily to keep the history
+      // query off the raw log.
       const { rows } = await db.query<any>(
-        `WITH RECURSIVE descendants(ancestor_id, id) AS (
-           SELECT parent_session_id, id FROM ai_sessions WHERE workspace_id = $1 AND parent_session_id IS NOT NULL
-           UNION
-           SELECT d.ancestor_id, c.id FROM descendants d JOIN ai_sessions c ON c.parent_session_id = d.id WHERE c.workspace_id = $1
-         ) SELECT s.id, s.provider, s.model, s.session_type, s.mode, s.agent_role, s.created_by_session_id, s.title, s.workspace_id,
+        `SELECT s.id, s.provider, s.model, s.session_type, s.mode, s.agent_role, s.created_by_session_id, s.title, s.workspace_id,
                 s.worktree_id, s.parent_session_id, s.created_at, s.updated_at, s.is_archived, s.is_pinned,
                 s.branched_from_session_id, s.branch_point_message_id, s.branched_at, s.metadata,
-                COALESCE(child_stats.child_count, 0) as child_count,
-                COALESCE(descendant_stats.descendant_count, 0) as descendant_count,
-                GREATEST(s.updated_at, COALESCE(descendant_stats.max_updated_at, s.updated_at)) as effective_updated_at
+                COALESCE(child_stats.child_count, 0) as child_count
          FROM ai_sessions s
          LEFT JOIN worktrees w ON s.worktree_id = w.id
          LEFT JOIN (
-           SELECT
-             parent_session_id,
-             COUNT(*) AS child_count,
-             MAX(updated_at) AS max_child_updated_at
+           SELECT parent_session_id, COUNT(*) AS child_count
            FROM ai_sessions
            WHERE parent_session_id IS NOT NULL
              AND workspace_id = $1
            GROUP BY parent_session_id
          ) child_stats ON child_stats.parent_session_id = s.id
-         LEFT JOIN (
-           SELECT d.ancestor_id, COUNT(*) AS descendant_count, MAX(c.updated_at) AS max_updated_at
-           FROM descendants d JOIN ai_sessions c ON c.id = d.id WHERE d.ancestor_id <> d.id
-           GROUP BY d.ancestor_id
-         ) descendant_stats ON descendant_stats.ancestor_id = s.id
-         WHERE s.workspace_id=$1 ${archiveFilter}
-         ORDER BY effective_updated_at DESC`,
+         WHERE s.workspace_id=$1 ${archiveFilter}`,
         [workspaceId]
       );
+      // Archived descendants still count toward their ancestors.
+      const { rows: graph } = await db.query<any>(
+        'SELECT id, parent_session_id, updated_at FROM ai_sessions WHERE workspace_id = $1',
+        [workspaceId]
+      );
+      const descendants = computeDescendantStats(graph.map(row => ({ id: row.id, parentId: row.parent_session_id, updatedAt: toMillis(row.updated_at) ?? 0 })));
       const queryTime = performance.now() - queryStart;
       const totalTime = performance.now() - startTime;
       // console.log(`[PGLiteSessionStore] list() - ensureReady: ${ensureTime.toFixed(1)}ms, query: ${queryTime.toFixed(1)}ms, total: ${totalTime.toFixed(1)}ms, rows: ${rows.length}`);
-      return rows.map(row => {
+      const sessions = rows.map(row => {
         const createdAt = toMillis(row.created_at)!;
         // For workstream parents, use the effective timestamp that includes child activity
-        const updatedAt = toMillis(row.effective_updated_at ?? row.updated_at)!;
+        const updatedAt = Math.max(toMillis(row.updated_at)!, descendants.get(row.id)?.maxUpdatedAt ?? 0);
         const branchedAt = toMillis(row.branched_at) ?? undefined;
         const childCount = parseInt(row.child_count) || 0;
         // SQLite returns JSON text; PGLite returns a parsed object.
@@ -903,7 +895,7 @@ export function createPGLiteSessionStore(db: PGliteLike, ensureDbReady?: EnsureR
           parentSessionId: row.parent_session_id ?? null,
           createdBySessionId: row.created_by_session_id ?? null,
           childCount,
-          descendantCount: Number(row.descendant_count) || 0,
+          descendantCount: descendants.get(row.id)?.count ?? 0,
           uncommittedCount: 0,
           createdAt,
           updatedAt,
@@ -932,6 +924,7 @@ export function createPGLiteSessionStore(db: PGliteLike, ensureDbReady?: EnsureR
           linkedTrackerItemIds: Array.isArray(metadata.linkedTrackerItemIds) ? metadata.linkedTrackerItemIds : undefined,
         } satisfies SessionMeta & { hasPendingInteractivePrompt?: boolean; phase?: string; tags?: string[]; linkedTrackerItemIds?: string[] };
       });
+      return sessions.sort((a, b) => b.updatedAt - a.updatedAt);
     },
 
     async search(workspaceId: string, query: string, options?: SessionSearchOptions): Promise<SessionMeta[]> {

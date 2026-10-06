@@ -58,6 +58,9 @@ it.each(['pglite', 'sqlite'] as const)('%s executes recursive fetch/count/archiv
     expect((await readSessionSubtree(db, 'wrapper', '/p')).map(row => [row.id, Number(row.depth)])).toEqual([
       ['wrapper', 0], ['root', 1], ['child', 2], ['leaf', 3],
     ]);
+    expect((await readSessionSubtree(db, 'wrapper', '/p')).map(row => [row.id, Number(row.descendant_count)])).toEqual([
+      ['wrapper', 3], ['root', 2], ['child', 1], ['leaf', 0],
+    ]);
     expect(await findSessionTreeRoot(db, 'leaf', '/p')).toBe('wrapper');
     expect((await store.list('/p')).find(row => row.id === 'root')).toMatchObject({ childCount: 1, descendantCount: 2 });
     await expect(store.updateMetadata('root', { parentSessionId: 'leaf' })).rejects.toThrow(/cycle/i);

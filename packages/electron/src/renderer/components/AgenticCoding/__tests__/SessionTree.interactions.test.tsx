@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react';
 import { Provider } from 'jotai';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@nimbalyst/runtime/ui/icons/MaterialSymbol', () => ({ MaterialSymbol: () => null }));
 vi.mock('../SessionProviderIcon', () => ({ SessionProviderIcon: () => null }));
@@ -10,7 +10,7 @@ vi.mock('../../../services/ErrorNotificationService', () => ({
   errorNotificationService: { showInfo: vi.fn(), showError: vi.fn() },
 }));
 import { store } from '@nimbalyst/runtime/store';
-import { SessionTree } from '../SessionTree.tsx';
+import { SessionTree, useVisibleSessionTreeRows } from '../SessionTree.tsx';
 import { SessionMovePicker } from '../SessionMovePicker';
 import { useSessionTreeMove } from '../useSessionTreeMove';
 import {
@@ -104,6 +104,19 @@ function tree() {
   );
 }
 describe('tree interactions', () => {
+  it('flattens each tree to one entry per visible row so a virtual list never holds a whole tree', () => {
+    const trees = [{ key: 'root', rows: rows.slice(0, 3) }];
+    const { result } = renderHook(() => useVisibleSessionTreeRows(trees, null, '/project'), {
+      wrapper: ({ children }) => <Provider store={store}>{children}</Provider>,
+    });
+    const visible = () => result.current.get('root')!.map((r) => [r.node.session.id, r.node.depth - r.baseDepth]);
+    expect(visible()).toEqual([['root', 0]]);
+    act(() => store.set(sessionProcessingAtom('leaf'), true));
+    expect(visible()).toEqual([['root', 0], ['middle', 1], ['leaf', 2]]);
+    act(() => store.set(workstreamStateAtom('middle'), { treeExpanded: false }));
+    expect(visible()).toEqual([['root', 0], ['middle', 1]]);
+  });
+
   it.each([false, true])('pins and unpins a merged header using the wrapper placement identity (pinned=%s)', (isPinned) => {
     const wrapper = row('wrapper', null, {sessionType: 'workstream', childCount: 1, isPinned});
     const child = row('child', 'wrapper', {isPinned: !isPinned});

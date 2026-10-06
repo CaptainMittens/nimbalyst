@@ -529,6 +529,8 @@ export function getFieldForColumn(type: string, columnId: string): FieldDefiniti
  * Get initials from a display name (for avatar rendering).
  */
 export function getInitials(name: string): string {
+  // Synced identities can arrive without a display name.
+  if (!name?.trim()) return '?';
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
   return name.substring(0, 2).toUpperCase();

@@ -44,6 +44,7 @@ vi.mock('../SessionContextMenu', () => ({
 import { store, sessionRegistryAtom, type SessionMeta } from '../../../store';
 import { WorkstreamGroup } from '../WorkstreamGroup';
 import {
+  countRegistryDescendants,
   reconcileSessionPinToggle,
   workstreamChildrenNeedRefresh,
 } from '../workstreamChildPinReconciliation';
@@ -270,5 +271,25 @@ describe('expanded workstream child pin reconciliation', () => {
     ]);
 
     expect(workstreamChildrenNeedRefresh(cachedChildren, 2, registryAfterPin)).toBe(false);
+  });
+
+  it('skips the cold-start fetch when sessions:list already loaded the whole subtree', () => {
+    const registry = new Map<string, SessionMeta>([
+      ['root', session({ id: 'root', title: 'root' })],
+      ['a', session({ id: 'a', title: 'a', parentSessionId: 'root' })],
+      ['b', session({ id: 'b', title: 'b', parentSessionId: 'a' })],
+    ]);
+    const counts = countRegistryDescendants(registry);
+    expect(counts.get('root')).toBe(2);
+    expect(workstreamChildrenNeedRefresh(undefined, 2, registry, counts.get('root'))).toBe(false);
+    expect(workstreamChildrenNeedRefresh(undefined, 3, registry, counts.get('root'))).toBe(true);
+  });
+
+  it('does not refetch forever when archived children keep the fetched list shorter than childCount', () => {
+    const live = [session({ id: targetId, title: 'Target' })];
+    const registry = new Map<string, SessionMeta>([[targetId, live[0]]]);
+    // childCount 2 includes an archived child that list-children (archived hidden) never returns.
+    expect(workstreamChildrenNeedRefresh(live, 2, registry, 1, 2)).toBe(false);
+    expect(workstreamChildrenNeedRefresh(live, 3, registry, 1, 2)).toBe(true);
   });
 });

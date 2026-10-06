@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restored edge styling in Mermaid flowcharts.
 - Improved MCP connection reliability while tools await a response.
 - Improved reliability of repeated Anthropic chat requests by releasing completed-request listeners.
+- Fixed a tracker crash when a person has no display name.
 
 ### Removed
 <!-- Removed features go here -->
