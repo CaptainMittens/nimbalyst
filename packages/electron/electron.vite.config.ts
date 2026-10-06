@@ -1,9 +1,10 @@
 import { resolve } from 'path'
+import { createRequire } from 'node:module'
 import { defineConfig } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import viteNimbalystPlugin from '../shared/viteNimbalystPlugin.ts'
 import { viteStaticCopy } from 'vite-plugin-static-copy'
-import { nodePolyfills } from 'vite-plugin-node-polyfills'
+import inject from '@rollup/plugin-inject'
 import fs from 'fs'
 import { findMainBundleGraphViolations } from '../../scripts/main-bundle-graph-policy.mjs'
 import {
@@ -121,6 +122,9 @@ const trackerEngineSrcDir = resolve(__dirname, '../tracker-engine/src');
 const trackerCoreSrcDir = resolve(__dirname, '../tracker-core/src');
 const collabProtocolSrcDir = resolve(__dirname, '../collab-protocol/src');
 const runtimeSrcDir = resolve(__dirname, '../runtime/src');
+const configRequire = createRequire(resolve(__dirname, 'package.json'));
+const browserPath = configRequire.resolve('path-browserify/index.js');
+const browserProcess = configRequire.resolve('process/browser.js');
 const runtimeDistDir = resolve(__dirname, '../runtime/dist');
 const runtimeElectronMainEntry = resolve(runtimeSrcDir, 'electronMain.ts');
 const extensionSdkSrcDir = resolve(__dirname, '../extension-sdk/src');
@@ -396,18 +400,6 @@ const config = {
     },
     plugins: [
       dedupeWatcherAddsPlugin(),
-      // Process polyfill for packaged builds - handles dependencies that access process globals.
-      // Must be first so transforms run before other plugins.
-      // Only polyfills in production builds; dev mode works fine with Vite's built-in handling.
-      nodePolyfills({
-        globals: {
-          Buffer: false,
-          global: false,
-          process: 'build',
-        },
-        include: [],
-        protocolImports: false,
-      }),
       // The Anthropic SDK's agent-toolset (server-side file tools, added in
       // @anthropic-ai/sdk 0.100.x) is dragged into the renderer bundle via the
       // runtime barrel (ai/models.ts value-imports the SDK for the model
@@ -544,6 +536,8 @@ const config = {
       target: 'chrome109',
       sourcemap: isDev,
       rollupOptions: {
+        // Rollup options also reach worker builds; inject only the free identifier.
+        plugins: [inject({ process: browserProcess })],
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
           island: resolve(__dirname, 'src/renderer/island.html'),
@@ -552,6 +546,8 @@ const config = {
     },
     resolve: {
       alias: [
+        { find: /^path$/, replacement: browserPath },
+        { find: /^process$/, replacement: browserProcess },
         // Ensure renderer also points runtime imports at source
         { find: '@nimbalyst/runtime', replacement: runtimeSrcDir },
         { find: '@nimbalyst/tracker-core', replacement: trackerCoreSrcDir },
