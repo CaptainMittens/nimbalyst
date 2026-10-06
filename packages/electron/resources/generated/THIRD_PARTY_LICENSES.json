@@ -15402,9 +15402,9 @@
       "noticeFiles": []
     },
     {
-      "id": "mermaid@11.17.0",
+      "id": "mermaid@11.17.2",
       "name": "mermaid",
-      "version": "11.17.0",
+      "version": "11.17.2",
       "rawLicense": "MIT",
       "selectedLicense": "MIT",
       "reviewRequired": false,
@@ -15416,7 +15416,7 @@
       "installPaths": [
         "node_modules/mermaid"
       ],
-      "resolved": "https://registry.npmjs.org/mermaid/-/mermaid-11.17.0.tgz",
+      "resolved": "https://registry.npmjs.org/mermaid/-/mermaid-11.17.2.tgz",
       "licenseFiles": [
         {
           "fileName": "LICENSE",

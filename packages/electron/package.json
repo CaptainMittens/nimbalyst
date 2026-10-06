@@ -109,7 +109,7 @@
     "json-schema-to-ts": "^3.1.1",
     "marked": "^16.4.0",
     "mcp-remote": "^0.1.38",
-    "mermaid": "^11.12.0",
+    "mermaid": "11.17.2",
     "minimatch": "^10.2.5",
     "monaco-editor": "^0.55.1",
     "mp4-muxer": "^5.2.2",

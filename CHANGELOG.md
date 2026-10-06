@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed formatting loss on other clients when undoing collaborative text deletion.
 - Fixed a crash when stopping an active local database worker.
 - Kept transcript reading position stable when content above the viewport grows.
+- Restored edge styling in Mermaid flowcharts.
 
 ### Removed
 <!-- Removed features go here -->
