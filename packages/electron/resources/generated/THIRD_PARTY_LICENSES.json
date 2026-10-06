@@ -18689,9 +18689,9 @@
       "noticeFiles": []
     },
     {
-      "id": "proxy-addr@2.0.7",
+      "id": "proxy-addr@2.0.8",
       "name": "proxy-addr",
-      "version": "2.0.7",
+      "version": "2.0.8",
       "rawLicense": "MIT",
       "selectedLicense": "MIT",
       "reviewRequired": false,
@@ -18703,7 +18703,7 @@
       "installPaths": [
         "node_modules/proxy-addr"
       ],
-      "resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.7.tgz",
+      "resolved": "https://registry.npmjs.org/proxy-addr/-/proxy-addr-2.0.8.tgz",
       "licenseFiles": [
         {
           "fileName": "LICENSE",

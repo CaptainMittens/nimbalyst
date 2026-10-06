@@ -33966,7 +33966,7 @@ standalone and requires a support library to be linked with it. This
 support library is itself covered by the above license.
 
 ================================================================================
-proxy-addr@2.0.7
+proxy-addr@2.0.8
 Selected license: MIT
 Declared license: MIT
 Install paths: node_modules/proxy-addr
