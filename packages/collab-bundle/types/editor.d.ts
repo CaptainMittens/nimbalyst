@@ -241,6 +241,7 @@ export interface CollabEditorMountOptions {
   onWriteRejected?(rejection: CollabEditorWriteRejection): void;
   onTermination?(termination: CollabEditorTermination): void;
   onReady?(handle: CollabEditorHandle): void;
+  onLexicalEditor?(editor: LexicalEditor | null): void;
   onError?(error: Error): void;
   /**
    * The document reached the Y.Doc but the Lexical binding threw while

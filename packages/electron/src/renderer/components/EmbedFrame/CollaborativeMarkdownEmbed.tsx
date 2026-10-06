@@ -46,6 +46,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { LexicalEditor } from 'lexical';
 import type { Doc } from 'yjs';
 import type { Provider } from '@lexical/yjs';
 
@@ -66,11 +67,12 @@ interface CollaborativeMarkdownEmbedProps {
   toolbar?: boolean;
   /** Publish the document's page history (a body shown as a page, never a card). */
   publishHistory?: boolean;
+  onEditorReady?: (editor: LexicalEditor | null) => void;
 }
 
 export const CollaborativeMarkdownEmbed: React.FC<
   CollaborativeMarkdownEmbedProps
-> = ({ host, resource, toolbar = true, publishHistory = false }) => {
+> = ({ host, resource, toolbar = true, publishHistory = false, onEditorReady }) => {
   const [readOnly, setReadOnly] = useState(host.readOnly !== false);
   useEffect(() => {
     // `onReadOnlyChanged` invokes the callback immediately with the current
@@ -141,7 +143,10 @@ export const CollaborativeMarkdownEmbed: React.FC<
   // renders nothing otherwise; without it that leftover removed text would stay
   // on screen with no way to resolve it.
   const [lexicalEditor, setLexicalEditor] = useState<any | null>(null);
-  const handleEditorReady = useCallback((editor: any) => setLexicalEditor(editor), []);
+  useEffect(() => { lexicalEditor?.setEditable(!readOnly); }, [lexicalEditor, readOnly]);
+  const readyRef = useRef(onEditorReady); readyRef.current = onEditorReady;
+  useEffect(() => () => readyRef.current?.(null), [resource, epoch]);
+  const handleEditorReady = useCallback((editor: LexicalEditor) => { setLexicalEditor(editor); readyRef.current?.(editor); }, []);
 
   const historyClient = useMemo(() => (publishHistory ? new CollabHistoryClient({
     serverUrl: config.serverUrl,

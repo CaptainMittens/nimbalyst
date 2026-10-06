@@ -159,7 +159,8 @@ test('view settings persist in markdown and new items are created from the embed
   await expect.poll(async () => fs.readFile(path.join(workspaceDir, 'landscape.md'), 'utf8'), { timeout: 8000 }).toContain('sort=realtime:asc');
   const settings = page.locator('.placed-view-settings').first();
   await settings.getByRole('button', { name: /View settings/ }).click();
-  await page.getByRole('dialog', { name: 'View settings' }).getByLabel('Layout', { exact: true }).selectOption('list');
+  await page.getByRole('dialog', { name: 'View settings' }).getByRole('button', { name: /Layout/ }).click();
+  await page.getByTestId('tracker-display-view-mode-list').click();
   await page.keyboard.press('Escape');
   await expect.poll(async () => fs.readFile(path.join(workspaceDir, 'landscape.md'), 'utf8'), { timeout: 8000 }).toContain('mode=list');
   await openFileFromTree(page, 'empty.md');
@@ -178,10 +179,40 @@ test('view settings persist in markdown and new items are created from the embed
   await expect(fullView).toContainText('Unsaved view');
   await expect(fullView.getByTestId('tracker-saved-view-embed')).toHaveAttribute('data-view-mode', 'list');
   await fullView.getByRole('button', { name: /View settings/ }).click();
-  await page.getByRole('dialog', { name: 'View settings' }).getByLabel('Layout', { exact: true }).selectOption('table');
+  await page.getByRole('dialog', { name: 'View settings' }).getByRole('button', { name: /Layout/ }).click();
+  await page.getByTestId('tracker-display-view-mode-table').click();
   await page.keyboard.press('Escape');
   await expect(fullView.getByTestId('tracker-saved-view-embed')).toHaveAttribute('data-view-mode', 'table');
   expect(await fs.readFile(path.join(workspaceDir, 'landscape.md'), 'utf8')).toBe(source);
-  await fullView.getByRole('button', { name: 'All', exact: true }).click();
+  await fullView.getByRole('tab', { name: 'All', exact: true }).click();
   await expect(fullView).not.toContainText('Unsaved view');
+});
+
+test('named type views survive reload and carry their definition when placed elsewhere', async () => {
+  const type = page.getByTestId('type-page-table');
+  await type.getByRole('button', { name: 'Add view', exact: true }).click();
+  await type.getByLabel('View name').fill('Research list');
+  await type.getByRole('button', { name: 'Save view', exact: true }).click();
+  await expect(type.getByRole('tab', { name: 'Research list', exact: true })).toHaveAttribute('aria-selected', 'true');
+  await type.getByRole('button', { name: /View settings/ }).click();
+  await page.getByRole('dialog', { name: 'View settings' }).getByRole('button', { name: /Layout/ }).click();
+  await page.getByTestId('tracker-display-view-mode-list').click();
+  await page.keyboard.press('Escape');
+  await expect(type.getByTestId('tracker-saved-view-embed')).toHaveAttribute('data-view-mode', 'list');
+  await type.getByRole('button', { name: 'Place in page', exact: true }).click();
+  await expect(type.getByLabel('View link to copy')).toHaveValue(/mode=list/);
+  await type.getByRole('button', { name: 'Rename view', exact: true }).click();
+  await type.getByLabel('View name').fill('Research');
+  await type.getByRole('button', { name: 'Rename', exact: true }).click();
+  await expect(type.getByRole('tab', { name: 'Research', exact: true })).toBeVisible();
+  // Leave through the tab's existing save/flush lifecycle, then reload the real app.
+  await type.getByRole('tab', { name: 'All', exact: true }).click();
+  await expect.poll(() => page.evaluate(async workspace => {
+    const result = await (window as any).electronAPI.invoke('personal-pages:get-body', workspace, 'type-page:competitor');
+    return result?.content;
+  }, workspaceDir)).toContain('"name":"Research"');
+  await page.reload();
+  await expect(page.getByTestId('type-page-table').getByRole('tab', { name: 'Research', exact: true })).toBeVisible({ timeout: TEST_TIMEOUTS.EDITOR_LOAD });
+  await page.getByTestId('type-page-table').getByRole('tab', { name: 'Research', exact: true }).click();
+  await expect(page.getByTestId('type-page-table').getByTestId('tracker-saved-view-embed')).toHaveAttribute('data-view-mode', 'list');
 });

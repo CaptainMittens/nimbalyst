@@ -56,3 +56,7 @@
     padding-right: 8px;
   }
 }
+
+/* Named definitions are edited by the type page tabs; Markdown keeps their fences. */
+.type-page-prose [data-named-page-view],
+.type-page-tab-prose [data-named-page-view] { display: none; }

@@ -69,6 +69,35 @@ function seeded(): Y.Doc {
 }
 
 describe('applyMarkdownReplacementsToYDoc', () => {
+  it('preserves malformed named-view fences as editable source rather than dropping them', () => {
+    const doc = new Y.Doc();
+    MarkdownCollabContentAdapter.seedFromFile(doc, '```page-view\n{"id":"broken"}\n```\n\nKeep this prose.');
+    const result = MarkdownCollabContentAdapter.exportToFile(doc) as string;
+    expect(result).toContain('{"id":"broken"}');
+    expect(result).toContain('Keep this prose.');
+  });
+  it('keeps named views in the document and merges their independent settings', () => {
+    const doc = new Y.Doc();
+    MarkdownCollabContentAdapter.seedFromFile(doc, '```page-view\n' + JSON.stringify({ id: 'v1', name: 'Open tasks', type: 'task', attrs: { cols: 'title', custom: 'keep' } }) + '\n```\n\nKeep this prose.');
+    const peer = new Y.Doc();
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    for (const [target, patch] of [[doc, { sort: 'title:asc' }], [peer, { cols: 'title,status' }]] as const) {
+      withHeadlessLexicalBridge(target, { nodes: HeadlessBodyNodes }, bridge => bridge.editor.update(() => {
+        const view = $getRoot().getFirstChild();
+        if (!$isEmbeddedFileNode(view)) throw new Error('Expected a named view with independently mergeable settings');
+        view.patchViewAttrs(patch);
+      }, { discrete: true }));
+    }
+    Y.applyUpdate(doc, Y.encodeStateAsUpdate(peer));
+    Y.applyUpdate(peer, Y.encodeStateAsUpdate(doc));
+    const result = MarkdownCollabContentAdapter.exportToFile(doc) as string;
+    expect(result).toContain('```page-view');
+    expect(result).toContain('"sort":"title:asc"');
+    expect(result).toContain('"cols":"title,status"');
+    expect(result).toContain('"custom":"keep"');
+    expect(result).toContain('Keep this prose.');
+    expect(MarkdownCollabContentAdapter.exportToFile(peer)).toBe(result);
+  });
   it('merges different placed-view settings edited concurrently on two clients', () => {
     const doc = new Y.Doc();
     withHeadlessLexicalBridge(doc, { nodes: HeadlessBodyNodes }, bridge => bridge.editor.update(() => {

@@ -14,4 +14,3 @@ export * from './primitives/ScopeSummaryHeader';
 // the menu, its move dialog and the rename modal stay out of the docs-ui
 // entry's eager graph, which has a gzip budget (see check-production-output).
 export * from './SharedDocsListView';
-export { PagesHomeHelp } from './PagesHomeHelp';

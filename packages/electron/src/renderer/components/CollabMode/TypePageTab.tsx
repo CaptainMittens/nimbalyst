@@ -8,7 +8,9 @@
  * the same IPC paths, through the desktop tracker data source given to it.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import type { LexicalEditor } from 'lexical';
+import { ensureTypePageDocument } from '../../services/collaborativeDocumentCreationOrchestrator';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { atom, useAtom, useAtomValue, useSetAtom, useStore, type Atom } from 'jotai';
 import type { CollabOpenOptions, CollabScope } from '@nimbalyst/collab-client/core';
 import type { SharedDocument } from '@nimbalyst/collab-client/docs';
@@ -101,6 +103,9 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
   const typeName = typePageTitle(typeId);
   const scope = useTypePageScope(workspacePath, lane);
   const [temporaryView, setTemporaryView] = useAtom(temporaryTypeViewAtom(temporaryTypeViewKey(workspacePath, scope?.scopeKey ?? '', typeId)));
+  const editorKey = JSON.stringify([workspacePath, scope?.scopeKey, typeId]);
+  const [viewsEditor, setViewsEditor] = useState<{ key: string; editor: LexicalEditor | null } | null>(null);
+  const onViewsEditor = useCallback((editor: LexicalEditor | null) => setViewsEditor(current => current?.key === editorKey && current.editor === editor ? current : { key: editorKey, editor }), [editorKey]);
   const session = useMemo(() => (scope ? getElectronCollabDocsSession(scope) : null), [scope]);
   const typePlacements = useAtomValue<readonly TypePlacementRow[]>(session?.atoms.typePlacements ?? NO_TYPE_PLACEMENTS);
   const itemPlacements = useAtomValue<readonly ItemPlacementRow[]>(session?.atoms.itemPlacements ?? NO_ITEM_PLACEMENTS);
@@ -170,7 +175,8 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
             </div>
           </div>
           <TypePageProse
-            key={typeId}
+            key={editorKey}
+            onEditorReady={onViewsEditor}
             typeId={typeId}
             typeName={typeName}
             itemName={model?.displayName || typeName}
@@ -182,6 +188,13 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
           />
           <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
             <TypePageTable
+              key={editorKey}
+              viewsEditor={viewsEditor?.key === editorKey ? viewsEditor.editor : null}
+              viewScope={lane === 'personal' ? 'local' : scope?.indexConfig.teamProjectId ? { orgId: scope.orgId, projectId: scope.indexConfig.teamProjectId } : undefined}
+              onPrepareViewsDocument={async () => {
+                if (!scope) throw new Error('The page is still opening.');
+                await ensureTypePageDocument({ scope, typeId, typeName, parentFolderId });
+              }}
               typeId={typeId}
               temporaryView={scope ? temporaryView : null}
               onClearTemporaryView={() => setTemporaryView(null)}

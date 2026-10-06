@@ -13,6 +13,7 @@ import { type PlacedViewTarget } from '../../../../runtime/src/core/placedViewUr
 import type { SavedView } from '../../trackers/index';
 import { type PlacedViewReach } from './placedViewDefinition';
 import type { PlacedViewHandoff } from '../page/placedViewHandoff';
+import './ViewEmbedHeader.css';
 export interface PlacedViewEmbedProps {
     target: PlacedViewTarget;
     label: string;
@@ -27,9 +28,10 @@ export interface PlacedViewEmbedProps {
     onOpenAsTable?: (view: SavedView) => void;
     onOpenFullView?: (typeId: string, view: PlacedViewHandoff) => void;
     variant?: 'card' | 'page';
+    settingsTemporary?: boolean;
     /** Opens the page a listed mark is on, by its tab uri. */
     onOpenPage?: (uri: string, options?: CollabOpenOptions) => void;
     /** Opens the view's own console link, for a view this host cannot draw. */
     onOpenLink?: (href: string) => void;
 }
-export declare function PlacedViewEmbed({ target, label, attrs, onAttrsChange, reach, onOpenItem, onOpenAsTable, onOpenFullView, variant, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element;
+export declare function PlacedViewEmbed({ target, label, attrs, onAttrsChange, reach, onOpenItem, onOpenAsTable, onOpenFullView, variant, settingsTemporary, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element;

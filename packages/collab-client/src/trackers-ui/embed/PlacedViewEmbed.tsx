@@ -8,7 +8,7 @@
  * (`LazyPlacedViewEmbed`) so a page with no view does not pay for the grid.
  */
 
-import { useEffect, useMemo, useState, useSyncExternalStore, type JSX } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore, type JSX, type ReactNode } from 'react';
 import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { createPlacedViewUrl, type PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
 import { QuadrantChart } from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/QuadrantChart';
@@ -27,6 +27,8 @@ import { PlacedViewSettings } from './PlacedViewSettings';
 import type { PlacedViewHandoff } from '../page/placedViewHandoff';
 import { createTrackerFilterFields } from '../createTrackerFilterFields';
 
+import './ViewEmbedHeader.css';
+
 const subscribeSchema = (listener: () => void) => globalRegistry.onChange(listener);
 
 export interface PlacedViewEmbedProps {
@@ -43,6 +45,7 @@ export interface PlacedViewEmbedProps {
   onOpenAsTable?: (view: SavedView) => void;
   onOpenFullView?: (typeId: string, view: PlacedViewHandoff) => void;
   variant?: 'card' | 'page';
+  settingsTemporary?: boolean;
   /** Opens the page a listed mark is on, by its tab uri. */
   onOpenPage?: (uri: string, options?: CollabOpenOptions) => void;
   /** Opens the view's own console link, for a view this host cannot draw. */
@@ -54,14 +57,14 @@ function parseHeight(value: string | undefined): number | undefined {
   return Number.isFinite(parsed) ? Math.max(parsed, 120) : undefined;
 }
 
-export function PlacedViewEmbed({ target, label, attrs, onAttrsChange, reach, onOpenItem, onOpenAsTable, onOpenFullView, variant, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element {
+export function PlacedViewEmbed({ target, label, attrs, onAttrsChange, reach, onOpenItem, onOpenAsTable, onOpenFullView, variant, settingsTemporary, onOpenPage, onOpenLink }: PlacedViewEmbedProps): JSX.Element {
   if (!placedViewInReach(target.scope, reach)) {
     return <OutOfScopeViewNote target={target} label={label} onOpenLink={onOpenLink} />;
   }
   if (target.kind === 'marks') {
     return <MarksListEmbed kind={target.marks} label={label} attrs={attrs} onOpenPage={onOpenPage} />;
   }
-  return <TypeViewEmbed typeId={target.typeId} label={label} attrs={attrs} onAttrsChange={onAttrsChange} onOpenItem={onOpenItem} onOpenAsTable={onOpenAsTable} onOpenFullView={onOpenFullView} variant={variant} />;
+  return <TypeViewEmbed typeId={target.typeId} label={label} attrs={attrs} onAttrsChange={onAttrsChange} onOpenItem={onOpenItem} onOpenAsTable={onOpenAsTable} onOpenFullView={onOpenFullView} variant={variant} settingsTemporary={settingsTemporary} />;
 }
 
 /** A view of another project (or of someone's own items, on a shared page): its link, never these items. */
@@ -86,7 +89,7 @@ function OutOfScopeViewNote({ target, label, onOpenLink }: {
   );
 }
 
-function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpenItem, onOpenAsTable, onOpenFullView, variant }: {
+function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpenItem, onOpenAsTable, onOpenFullView, variant, settingsTemporary }: {
   typeId: string;
   label: string;
   attrs: Readonly<Record<string, string>>;
@@ -95,6 +98,7 @@ function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpen
   onOpenAsTable?: (view: SavedView) => void;
   onOpenFullView?: (typeId: string, view: PlacedViewHandoff) => void;
   variant?: 'card' | 'page';
+  settingsTemporary?: boolean;
 }): JSX.Element {
   const [day, setDay] = useState(() => new Date().toDateString());
   useEffect(() => {
@@ -132,20 +136,23 @@ function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpen
   }
   if (!model) return <PlacedViewNote>Loading {label || typeId}…</PlacedViewNote>;
   const fields = createTrackerFilterFields(resolveColumnsForType(typeId), typeId, [model]);
-  const wrap = (view: JSX.Element) => <div className={variant === 'page' ? "placed-view-configurable flex min-h-0 flex-1 flex-col" : "placed-view-configurable"}>
-    <PlacedViewSettings defaultColumns={getDefaultColumnConfig(typeId).visibleColumns} attrs={attrs} fields={fields} temporary={!onAttrsChange} onChange={change} />
-    {onOpenFullView && parsed.placed ? <button type="button" className="my-1 text-xs text-nim-link" onClick={() => onOpenFullView(typeId, { label, attrs: { ...attrs } })}>Open full view</button> : null}
-    {writeError ? <div role="alert" className="text-xs text-nim-error">{writeError}</div> : null}{view}
+  const actions = <div className="placed-view-actions flex shrink-0 items-center gap-1">
+    <PlacedViewSettings availableColumns={resolveColumnsForType(typeId)} defaultColumns={getDefaultColumnConfig(typeId).visibleColumns} attrs={attrs} fields={fields} temporary={settingsTemporary || !onAttrsChange} onChange={change} />
+    {onOpenFullView && parsed.placed ? <button type="button" className="whitespace-nowrap rounded border-none bg-transparent px-2 py-1 text-xs text-nim-muted hover:bg-nim-hover hover:text-nim focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2" onClick={() => onOpenFullView(typeId, { label, attrs: { ...attrs } })}>Open full view</button> : null}
   </div>;
-  if (parsed.error || !parsed.placed) return wrap(<PlacedViewNote><span role="alert">{label || typeId}: {parsed.error}</span></PlacedViewNote>);
+  const notice = writeError ? <div role="alert" className="px-3 py-2 text-xs text-nim-error">{writeError}</div> : null;
+  const wrap = (view: JSX.Element) => <div className={variant === 'page' ? "placed-view-configurable flex min-h-0 flex-1 flex-col" : "placed-view-configurable"}>{view}</div>;
+  if (parsed.error || !parsed.placed) return wrap(<PlacedViewNote><div className="placed-view-invalid-head flex items-center justify-between gap-2"><span role="alert">{label || typeId}: {parsed.error}</span>{actions}</div>{notice}</PlacedViewNote>);
   const placed = parsed.placed;
   if (placed.mode === '2x2' && placed.quadrant) {
-    return wrap(<QuadrantViewEmbed view={placed.view} quadrant={placed.quadrant} onOpenItem={onOpenItem} />);
+    return wrap(<QuadrantViewEmbed view={placed.view} quadrant={placed.quadrant} onOpenItem={onOpenItem} headerActions={actions} headerNotice={notice} />);
   }
   return wrap(
     <TrackerViewEmbed
       view={placed.view}
       variant={variant}
+      headerActions={actions}
+      headerNotice={notice}
       height={parseHeight(attrs.height)}
       hiddenColumns={attrs.hide?.split(',')}
       onSortChange={(field, direction) => change({ sort: `${field}:${direction}` })}
@@ -156,7 +163,9 @@ function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpen
   );
 }
 
-function QuadrantViewEmbed({ view, quadrant, onOpenItem }: {
+function QuadrantViewEmbed({ view, quadrant, onOpenItem, headerActions, headerNotice }: {
+  headerActions?: ReactNode;
+  headerNotice?: ReactNode;
   view: SavedView;
   quadrant: PlacedQuadrant;
   onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
@@ -172,12 +181,14 @@ function QuadrantViewEmbed({ view, quadrant, onOpenItem }: {
       contentEditable={false}
       data-testid="placed-view-quadrant"
     >
-      <div className="placed-view-quadrant-head flex items-center gap-2.5 border-b border-nim px-3 py-2 text-xs">
-        <span className="font-medium text-nim">{view.name}</span>
-        <span className="rounded bg-nim-tertiary px-2 py-0.5 font-mono text-[11px] text-nim-muted">
+      <div className="placed-view-quadrant-head flex shrink-0 items-center gap-2.5 border-b border-nim px-3 py-1.5 text-xs">
+        <span className="min-w-0 truncate font-medium text-nim" title={view.name}>{view.name}</span>
+        <span className="placed-view-query min-w-0 truncate rounded bg-nim-tertiary px-2 py-0.5 font-mono text-[11px] text-nim-muted">
           {quadrant.xField} by {quadrant.yField}
         </span>
+        <div className="ml-auto shrink-0">{headerActions}</div>
       </div>
+      {headerNotice}
       <div className="placed-view-quadrant-body bg-nim p-2">
         <QuadrantChart
           points={data.points}

@@ -15,13 +15,18 @@ import { resolveRoleFieldName } from '@nimbalyst/runtime/plugins/TrackerPlugin/t
 import type { TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
 import { typeWithSubtypes } from '../../docs/collabPageTree';
 import { LazyTrackerViewEmbed as TrackerViewEmbed } from '../embed/LazyTrackerViewEmbed';
-import { LazyPlacedViewEmbed } from '../embed/LazyPlacedViewEmbed';
+import type { LexicalEditor } from 'lexical';
+import type { PlacedViewScope } from '@nimbalyst/runtime/core/placedViewUrl';
+import { TypePageViews } from './TypePageViews';
 import type { PlacedViewHandoff } from './placedViewHandoff';
 import { createTypePageView } from '../embed/typePageView';
 import { createItemWhereResolver, type WherePage, type WherePlacement } from '../embed/typePageWhere';
 
 export interface TypePageTableProps {
   typeId: string;
+  viewsEditor?: LexicalEditor | null;
+  viewScope?: PlacedViewScope;
+  onPrepareViewsDocument?: () => Promise<void>;
   temporaryView?: PlacedViewHandoff | null;
   onClearTemporaryView?: () => void;
   /** The type's name, shown in Where for an item with no placement. */
@@ -45,7 +50,7 @@ export function typePageTypeIds(typeId: string): string[] {
   });
 }
 
-export function TypePageTable({ typeId, typeLabel, rootLabel, itemPlacements, pages, itemTitle, onOpenItem, temporaryView, onClearTemporaryView }: TypePageTableProps): React.JSX.Element {
+export function TypePageTable({ typeId, typeLabel, rootLabel, itemPlacements, pages, itemTitle, onOpenItem, temporaryView, onClearTemporaryView, viewsEditor, viewScope, onPrepareViewsDocument }: TypePageTableProps): React.JSX.Element {
   const model = globalRegistry.get(typeId);
   const view = useMemo(() => createTypePageView(typeId), [typeId]);
   const typeIds = useMemo(() => typePageTypeIds(typeId), [typeId, model]);
@@ -59,11 +64,9 @@ export function TypePageTable({ typeId, typeLabel, rootLabel, itemPlacements, pa
 
   return (
     <div className="type-page-tab-table flex flex-col" data-testid="type-page-table">
-      <div className="type-page-tab-views flex items-center gap-1 border-b border-nim text-xs">
-        <button type="button" onClick={onClearTemporaryView} className={`px-2.5 py-[7px] text-nim ${temporaryView ? '' : '-mb-px border-b-2 border-[var(--nim-primary)]'}`}>All</button>
-        {temporaryView ? <span className="-mb-px border-b-2 border-[var(--nim-primary)] px-2.5 py-[7px] text-nim">{temporaryView.label || 'View'} · Unsaved view</span> : null}
-      </div>
-      {temporaryView ? <LazyPlacedViewEmbed key={JSON.stringify(temporaryView)} target={{ kind: 'type', typeId }} label={temporaryView.label} attrs={temporaryView.attrs} variant="page" onOpenItem={onOpenItem} /> : <TrackerViewEmbed view={view} variant="page" onOpenItem={onOpenItem} derivedColumns={derivedColumns} typeIds={typeIds} />}
+      <TypePageViews typeId={typeId} editor={viewsEditor} scope={viewScope} temporaryView={temporaryView} onClearTemporaryView={onClearTemporaryView} onPrepareDocument={onPrepareViewsDocument} onOpenItem={onOpenItem}>
+        <TrackerViewEmbed view={view} variant="page" onOpenItem={onOpenItem} derivedColumns={derivedColumns} typeIds={typeIds} />
+      </TypePageViews>
     </div>
   );
 }

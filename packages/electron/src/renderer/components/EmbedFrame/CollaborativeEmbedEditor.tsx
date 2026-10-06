@@ -1,3 +1,4 @@
+import type { LexicalEditor } from 'lexical';
 import React, { useEffect, useMemo, useRef, useState } from "react";
 
 import type { EditorHost, EditorViewport } from "@nimbalyst/runtime";
@@ -42,6 +43,7 @@ interface CollaborativeEmbedEditorProps {
    * card, which would publish a second controller for a document open in a tab.
    */
   publishHistory?: boolean;
+  onEditorReady?: (editor: LexicalEditor | null) => void;
 }
 
 export const CollaborativeEmbedEditor: React.FC<
@@ -54,6 +56,7 @@ export const CollaborativeEmbedEditor: React.FC<
   onViewportRegistered,
   toolbar,
   publishHistory,
+  onEditorReady,
 }) => {
   const { theme } = useTheme();
   const themeRef = useRef(theme);
@@ -209,7 +212,7 @@ export const CollaborativeEmbedEditor: React.FC<
     // `acquisition` is non-null whenever `host` is -- they are built from the
     // same memo -- but narrowing needs it said out loud.
     return acquisition === null ? null : (
-      <CollaborativeMarkdownEmbed host={host} resource={acquisition.resource} toolbar={toolbar} publishHistory={publishHistory} />
+      <CollaborativeMarkdownEmbed host={host} resource={acquisition.resource} toolbar={toolbar} publishHistory={publishHistory} onEditorReady={onEditorReady} />
     );
   }
 

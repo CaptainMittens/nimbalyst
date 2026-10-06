@@ -55,6 +55,7 @@ import {
   $isEmbeddedFileNode,
   EmbeddedFileNode,
 } from '../../plugins/EmbedPlugin/EmbeddedFileNode';
+import { NAMED_PAGE_VIEW_TRANSFORMER } from '../../plugins/EmbedPlugin/namedPageView';
 import { EMBED_TRANSFORMER } from '../../plugins/EmbedPlugin/EmbedTransformer';
 import {
   parseEmbedAttrs,
@@ -272,5 +273,5 @@ export const EmbedExtension = defineExtension({
 });
 
 setExtensionContributions(NAME, {
-  markdownTransformers: [EMBED_TRANSFORMER],
+  markdownTransformers: [NAMED_PAGE_VIEW_TRANSFORMER, EMBED_TRANSFORMER],
 });

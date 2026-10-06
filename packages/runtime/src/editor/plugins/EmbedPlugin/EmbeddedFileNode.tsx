@@ -32,6 +32,7 @@ function EmbedFrameSlot(props: {
   attrs: EmbedAttrs;
   nodeKey: NodeKey;
 }): JSX.Element {
+  if (props.attrs.namedPageView) return <span data-named-page-view={props.attrs.namedPageView} className="text-xs text-nim-muted">Named view: {props.label}</span>;
   const callbacks = getEmbedPluginCallbacks();
   const Renderer = callbacks.renderEmbed;
   if (Renderer) {

@@ -33,6 +33,7 @@ import { TrackerReferenceTransformer } from '../../plugins/TrackerLinkPlugin/Tra
 import { CITATION_TRANSFORMER } from '../plugins/CitationPlugin/CitationTransformer';
 import { DECISION_TRANSFORMER } from '../plugins/DecisionPlugin/DecisionTransformer';
 import { PAGE_MARK_TRANSFORMER } from '../plugins/PageMarkPlugin/PageMarkTransformer';
+import { NAMED_PAGE_VIEW_TRANSFORMER } from '../plugins/EmbedPlugin/namedPageView';
 import { EMBED_TRANSFORMER } from '../plugins/EmbedPlugin/EmbedTransformer';
 import { EMOJI_TRANSFORMER } from '../plugins/EmojisPlugin/EmojiTransformer';
 import { IMAGE_TRANSFORMER } from '../plugins/ImagesPlugin/ImageTransformer';
@@ -62,6 +63,7 @@ const HEADLESS_BODY_TRANSFORMERS: Transformer[] = [
   QUADRANT_TRANSFORMER,
   PAGE_BREAK_TRANSFORMER,
   HEADLESS_TABLE_TRANSFORMER,
+  NAMED_PAGE_VIEW_TRANSFORMER,
   EMBED_TRANSFORMER,
   ...CORE_TRANSFORMERS,
 ];

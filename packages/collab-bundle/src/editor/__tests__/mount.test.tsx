@@ -11,6 +11,7 @@ import { $createParagraphNode, $getRoot, type LexicalEditor } from 'lexical';
 import { getAllExtensionUserCommands } from '@nimbalyst/runtime/editor/extensions/extensionContributionsStore';
 import { uint8ArrayToBase64, base64ToUint8Array } from '@nimbalyst/runtime/sync/documentSyncBase64';
 import { $createEmbeddedFileNode } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/EmbeddedFileNode';
+import { createNamedPageViewsController } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/namedPageViewsController';
 import { MarkdownCollabContentAdapter } from '@nimbalyst/runtime/sync/MarkdownCollabContentAdapter';
 import { buildTrackerReferenceHref } from '@nimbalyst/runtime/plugins/TrackerLinkPlugin/trackerReferenceHref';
 import { decisionMembersFromComments, mountCollabEditor } from '../mount';
@@ -40,6 +41,27 @@ afterEach(() => {
 });
 
 describe('in-memory collaborative editor harness', () => {
+  it('edits named views through the browser document and withdraws the editor on teardown', async () => {
+    const yDocument = new Y.Doc();
+    MarkdownCollabContentAdapter.seedFromFile(yDocument, 'Preserve the type description.');
+    const element = document.createElement('div'); document.body.append(element);
+    let editor: LexicalEditor | null = null;
+    const handle = mountCollabEditor({ element, source: { kind: 'in-memory', document: yDocument }, user: { memberId: asTeamMemberId('author'), name: 'Author' }, onLexicalEditor: value => { editor = value; } });
+    mountedHandles.push(handle);
+    await settle();
+    expect(editor).not.toBeNull();
+    const views = createNamedPageViewsController(editor!, 'task');
+    await act(async () => views.add('browser-view', 'Open tasks', { mode: 'list' }));
+    await settle();
+    expect(handle.getMarkdown()).toContain('```page-view');
+    expect(handle.getMarkdown()).toContain('Preserve the type description.');
+    await act(async () => handle.setReadOnly(true));
+    await settle();
+    expect(() => views.patch('browser-view', { mode: 'board' })).toThrow('not editable');
+    await act(async () => handle.destroy());
+    expect(editor).toBeNull();
+    views.dispose();
+  });
   it('renders persisted subject embeds through each mount’s authorized preview without crossing scopes', async () => {
     const mounts = ['one', 'two'].map((scope) => {
       const yDocument = new Y.Doc();

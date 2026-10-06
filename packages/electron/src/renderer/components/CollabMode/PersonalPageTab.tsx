@@ -7,8 +7,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useAtomValue } from 'jotai';
-import { personalPagesDocumentsAtomFamily, getPersonalCollabDocsSession, getPersonalCollabHost } from '../../store/atoms/collabDocuments';
-import { PagesHomeHelp } from '@nimbalyst/collab-client/docs-ui';
+import { personalPagesDocumentsAtomFamily } from '../../store/atoms/collabDocuments';
 import { getSharedDocumentDisplayName } from './collabTree';
 import { PersonalPageBodyEditor } from './PersonalPageBodyEditor';
 
@@ -62,7 +61,6 @@ export const PersonalPageTab: React.FC<PersonalPageTabProps> = ({ documentId, wo
       <div className="personal-page-tab-header shrink-0 px-6 pt-5 pb-2">
         <h1 className="text-xl font-semibold text-nim select-text">{title}</h1>
       </div>
-      {documentId === 'home:personal' && <PagesHomeHelp key={workspacePath} personal host={getPersonalCollabHost(workspacePath)} scope={getPersonalCollabDocsSession(workspacePath).scope} />}
       <PersonalPageBodyEditor documentId={documentId} workspacePath={workspacePath} className="flex min-h-0 flex-1 flex-col" />
     </div>
   );

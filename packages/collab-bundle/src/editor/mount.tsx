@@ -168,6 +168,8 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
    * the same way, and a change that cancels out renders nothing.
    */
   function syncEditorSurface(): void {
+    // Composer configuration is initial state; update the already mounted editor too.
+    lexicalEditor?.setEditable(!session.getState().readOnly);
     if (session.getState().readOnly === renderedReadOnly
       && session.canComment() === renderedCanComment) return;
     renderEditor();
@@ -226,6 +228,7 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      options.onLexicalEditor?.(null);
       assetImages?.release();
       releaseReferenceScope?.();
       session.destroy({
@@ -303,6 +306,8 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
       },
       onEditorReady: (editor) => {
         lexicalEditor = editor as LexicalEditor;
+        lexicalEditor.setEditable(!session.getState().readOnly);
+        options.onLexicalEditor?.(lexicalEditor);
         applyBrowserEditorChrome(options.element);
         if (!readyReported) {
           readyReported = true;

@@ -6,10 +6,11 @@
  * Loaded lazily (`LazyTrackerViewEmbed`): it pulls in the list, grid and board
  * surfaces, and a surface that shows no view must not pay for them.
  */
-import { type JSX } from 'react';
+import { type JSX, type ReactNode } from 'react';
 import type { CollabOpenOptions } from '../../core/index';
 import { type SavedView } from '../../trackers/index';
 import { type TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
+import './ViewEmbedHeader.css';
 export interface TrackerViewEmbedProps {
     /** A view the host already holds, saved or synthetic (e.g. a type page's built-in "All"). */
     view: SavedView;
@@ -31,9 +32,11 @@ export interface TrackerViewEmbedProps {
     typeIds?: readonly string[];
     /** Table cells edit their items unless this is set (or the host has no data source). */
     readOnly?: boolean;
+    headerActions?: ReactNode;
+    headerNotice?: ReactNode;
     hiddenColumns?: readonly string[];
     onSortChange?: (field: string, direction: 'asc' | 'desc') => void;
     onWidthsChange?: (widths: Record<string, number>) => void;
 }
 /** Draws a view the caller supplies, without looking it up among the saved views. */
-export declare function TrackerViewEmbed({ view, onOpenAsTable, onOpenItem, variant, height, derivedColumns, typeIds, readOnly, hiddenColumns, onSortChange, onWidthsChange, }: TrackerViewEmbedProps): JSX.Element;
+export declare function TrackerViewEmbed({ view, onOpenAsTable, onOpenItem, variant, height, derivedColumns, typeIds, readOnly, headerActions, headerNotice, hiddenColumns, onSortChange, onWidthsChange, }: TrackerViewEmbedProps): JSX.Element;

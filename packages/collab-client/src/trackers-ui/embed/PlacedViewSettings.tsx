@@ -1,104 +1,67 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { FloatingFocusManager, FloatingPortal, flip, offset, shift, useClick, useDismiss, useFloating, useInteractions, useRole } from '@floating-ui/react';
+import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
+import type { TrackerColumnDef } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerColumns';
 import type { TrackerFilterField } from '../trackerFilterFields';
+import { PlacedViewSettingsSection, VIEW_LAYOUTS, type ViewSettingsSection } from './PlacedViewSettingsSection';
 
 export interface PlacedViewSettingsProps {
   attrs: Readonly<Record<string, string>>;
   fields: readonly TrackerFilterField[];
+  availableColumns: TrackerColumnDef[];
   temporary: boolean;
   defaultColumns?: readonly string[];
   onChange(patch: Readonly<Record<string, string | null>>): void;
 }
 
-/** Settings edit only the keys touched by the current gesture. */
-export function PlacedViewSettings({ attrs, fields, temporary, onChange, defaultColumns }: PlacedViewSettingsProps) {
-  const [filterField, setFilterField] = useState(fields[0]?.id ?? 'title');
-  const [filterOp, setFilterOp] = useState('=');
-  const [filterValue, setFilterValue] = useState('');
-  const selected = attrs.cols ? attrs.cols.split(',') : [...(defaultColumns ?? ['title'])];
+const SECTION_LABELS: Record<ViewSettingsSection, string> = {
+  layout: 'Layout', properties: 'Property visibility', filter: 'Filter', sort: 'Sort', group: 'Group',
+};
+const ROW = 'placed-view-settings-row flex w-full items-center gap-2.5 rounded px-2 py-2 text-left text-[13px] hover:bg-nim-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px]';
+
+/** A compact index of settings; each section edits only its own view attributes. */
+export function PlacedViewSettings(props: PlacedViewSettingsProps) {
+  const { attrs, fields, temporary, defaultColumns } = props;
   const [open, setOpen] = useState(false);
-  const { refs, floatingStyles, context } = useFloating({ open, onOpenChange: setOpen, placement: 'bottom-start', middleware: [offset(6), flip(), shift({ padding: 12 })] });
+  const [section, setSection] = useState<ViewSettingsSection | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const changeOpen = (value: boolean) => { setOpen(value); if (!value) setSection(null); };
+  const { refs, floatingStyles, context } = useFloating({ open, onOpenChange: changeOpen, placement: 'bottom-end', middleware: [offset(6), flip({ padding: 12 }), shift({ padding: 12 })] });
   const { getReferenceProps, getFloatingProps } = useInteractions([useClick(context), useDismiss(context), useRole(context)]);
-  const sorts = (attrs.sort || '').split(',').filter(Boolean);
-  const setSort = (index: number, value: string | null) => onChange({ sort: sorts.map((sort, i) => i === index ? value : sort).filter(Boolean).join(',') || null });
-  const moveField = (id: string, target: number) => {
-    const next = selected.filter(field => field !== id);
-    next.splice(target, 0, id);
-    onChange({ cols: next.join(',') });
-  };
-  const selectClass = 'rounded border border-nim bg-nim px-2 py-1 text-xs text-nim';
-  return <div className="placed-view-settings text-xs" contentEditable={false}>
-    <button ref={refs.setReference} type="button" className="rounded border border-nim bg-nim-secondary px-3 py-2 font-medium text-nim hover:bg-nim-hover" {...getReferenceProps()}>View settings{temporary ? ' · Not saved: view only' : ''}</button>
+  const mode = VIEW_LAYOUTS.find(layout => layout.value === (attrs.mode || 'table'));
+  const group = attrs.group || (attrs.mode === 'board' ? 'status' : 'none');
+  const count = (value?: string) => value?.split(',').filter(Boolean).length || 0;
+  const rows: Array<{ section: ViewSettingsSection; icon: string; summary: string }> = [
+    { section: 'layout', icon: mode?.icon || 'table_chart', summary: mode?.label || attrs.mode || 'Table' },
+    { section: 'properties', icon: 'visibility', summary: String(attrs.cols ? count(attrs.cols) : (defaultColumns ?? ['title']).length) },
+    { section: 'filter', icon: 'filter_list', summary: count(attrs.filter) ? `${count(attrs.filter)} ${count(attrs.filter) === 1 ? 'rule' : 'rules'}` : 'None' },
+    { section: 'sort', icon: 'sort', summary: count(attrs.sort) ? `${count(attrs.sort)} ${count(attrs.sort) === 1 ? 'rule' : 'rules'}` : 'Default' },
+    { section: 'group', icon: 'view_column', summary: group === 'none' ? 'None' : fields.find(field => field.id === group)?.label || group },
+  ];
+  const back = () => { setSection(null); requestAnimationFrame(() => refs.floating.current?.querySelector<HTMLButtonElement>(`[data-section="${section}"]`)?.focus()); };
+  return <div className="placed-view-settings shrink-0 text-xs" contentEditable={false}>
+    <button ref={refs.setReference} type="button" aria-label="View settings" title="View settings" className="inline-flex h-7 w-7 items-center justify-center rounded text-nim-muted hover:bg-nim-hover hover:text-nim focus-visible:outline focus-visible:outline-2" {...getReferenceProps()}>
+      <MaterialSymbol icon="tune" size={17} />
+    </button>
     {open && <FloatingPortal><FloatingFocusManager context={context} modal={false}>
-    <div ref={refs.setFloating} style={{ ...floatingStyles, zIndex: 1000, maxHeight: '70vh', maxWidth: 'min(680px, calc(100vw - 24px))' }} className="placed-view-settings-popover overflow-auto rounded-lg border border-nim bg-nim p-4 text-xs text-nim shadow-xl" aria-label="View settings" {...getFloatingProps()}>
-    <button type="button" className="float-right text-nim-link" aria-label="Close view settings" onClick={() => setOpen(false)}>Close</button>
-    <div className="mt-3 flex flex-wrap items-start gap-4">
-      <label className="flex flex-col gap-1">Layout
-        <select aria-label="Layout" className={selectClass} value={attrs.mode || 'table'} onChange={e => onChange({ mode: e.target.value })}>
-          <option value="table">Table</option><option value="board">Board</option><option value="list">List</option><option value="timeline">Timeline</option>
-          <option value="2x2">2×2</option>
-        </select>
-      </label>
-      <fieldset className="flex flex-col gap-2"><legend>Sort</legend>
-        {sorts.map((sort, index) => {
-          const [field, direction = 'desc'] = sort.split(':');
-          return <div key={index} className="flex flex-wrap gap-1">
-            <select aria-label={`Sort field ${index + 1}`} className={selectClass} value={field} onChange={event => setSort(index, `${event.target.value}:${direction}`)}>{fields.map(candidate => <option key={candidate.id} value={candidate.id}>{candidate.label}</option>)}</select>
-            <select aria-label={`Sort direction ${index + 1}`} className={selectClass} value={direction} onChange={event => setSort(index, `${field}:${event.target.value}`)}><option value="asc">Ascending</option><option value="desc">Descending</option></select>
-            <button type="button" aria-label={`Remove sort ${index + 1}`} onClick={() => setSort(index, null)}>Remove</button>
-          </div>;
-        })}
-        <button type="button" className="text-nim-link" onClick={() => onChange({ sort: [...sorts, `${fields.find(field => !sorts.some(sort => sort.split(':')[0] === field.id))?.id || 'title'}:asc`].join(',') })}>Add sort</button>
-      </fieldset>
-      <label className="flex flex-col gap-1">Group by
-        <select aria-label="Group by" className={selectClass} value={attrs.group || (attrs.mode === 'board' ? 'status' : 'none')} onChange={e => onChange({ group: e.target.value })}>
-          {[...new Set(['none', 'status', 'priority', 'assignee', 'type', 'tag', 'milestone', 'goal', ...fields.filter(field => !field.multiValue && ['select', 'boolean', 'user', 'relationship'].includes(field.type ?? '')).map(field => field.id)])].map(group => <option key={group} value={group}>{group === 'none' ? 'No grouping' : group}</option>)}
-        </select>
-      </label>
-      <label className="flex flex-col gap-1">Items
-        <select aria-label="Items" className={selectClass} value={attrs.scope || 'all'} onChange={e => onChange({ scope: e.target.value })}>
-          <option value="all">All states</option><option value="open">Open only</option>
-        </select>
-      </label>
-      <fieldset className="flex max-h-40 flex-col gap-1 overflow-y-auto"><legend className="mb-1">Fields</legend>
-        {[...selected.map(id => fields.find(field => field.id === id) ?? { id, label: `${id} (unavailable)` }), ...fields.filter(field => !selected.includes(field.id))].map(field => <div key={field.id} className="flex items-center gap-2" draggable={selected.includes(field.id)} onDragStart={event => event.dataTransfer.setData('text/plain', field.id)} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const id = event.dataTransfer.getData('text/plain'); if (selected.includes(id)) moveField(id, Math.max(0, selected.indexOf(field.id))); }}>
-          <label className="flex flex-1 items-center gap-2"><input type="checkbox" checked={selected.includes(field.id)} onChange={e => {
-            const next = e.target.checked ? [...selected, field.id] : selected.filter(id => id !== field.id);
-            onChange({ cols: next.length ? next.join(',') : 'title' });
-          }} />{field.label}</label>
-          {selected.includes(field.id) ? <><button type="button" aria-label={`Move ${field.label} up`} disabled={selected.indexOf(field.id) === 0} onClick={() => moveField(field.id, selected.indexOf(field.id) - 1)}>↑</button><button type="button" aria-label={`Move ${field.label} down`} disabled={selected.indexOf(field.id) === selected.length - 1} onClick={() => moveField(field.id, selected.indexOf(field.id) + 1)}>↓</button></> : null}
-        </div>)}
-      </fieldset>
-      {attrs.mode === 'timeline' ? <fieldset className="flex gap-2"><legend>Timeline dates</legend>
-        {['start', 'end'].map(key => <label key={key} className="flex flex-col gap-1">{key === 'start' ? 'Start' : 'End'}
-          <select aria-label={`Timeline ${key}`} className={selectClass} value={attrs[key] || ''} onChange={event => onChange({ [key]: event.target.value || null })}>
-            <option value="">{attrs.start || attrs.end ? 'Not selected' : 'Automatic'}</option>
-            {fields.filter(field => !field.multiValue && ['date', 'datetime'].includes(field.type ?? '')).map(field => <option key={field.id} value={field.id}>{field.label}</option>)}
-          </select>
-        </label>)}
-      </fieldset> : null}
-      {attrs.mode === '2x2' ? ['x', 'y'].map(axis => <label key={axis} className="flex flex-col gap-1">{axis.toUpperCase()} axis
-        <select aria-label={`${axis.toUpperCase()} axis`} className={selectClass} value={attrs[axis] || ''} onChange={e => onChange({ [axis]: e.target.value })}>
-          <option value="">Choose field</option>{fields.filter(field => field.type === 'number').map(field => <option key={field.id} value={field.id}>{field.label}</option>)}
-        </select>
-      </label>) : null}
-    </div>
-    <fieldset className="mt-3 border-t border-nim pt-2"><legend>Filters · all conditions must match</legend>
-      {(attrs.filter || '').split(',').filter(Boolean).map((clause, index, clauses) => <div key={`${index}:${clause}`} className="my-1 flex gap-2">
-        <span className="break-all">{clause}</span><button type="button" className="text-nim-link" aria-label={`Remove filter ${clause}`} onClick={() => onChange({ filter: clauses.filter((_, i) => i !== index).join(',') || null })}>Remove</button>
-      </div>)}
-      <div className="mt-2 flex flex-wrap gap-2">
-        <select aria-label="Filter field" className={selectClass} value={filterField} onChange={e => setFilterField(e.target.value)}>{fields.map(field => <option key={field.id} value={field.id}>{field.label}</option>)}</select>
-        <select aria-label="Filter operator" className={selectClass} value={filterOp} onChange={e => setFilterOp(e.target.value)}>
-          <option value="=">is</option><option value="!">is not</option><option value=">">greater than / after</option><option value="<">less than / before</option><option value="empty">is empty</option><option value="!empty">is not empty</option>
-        </select>
-        {!filterOp.endsWith('empty') ? <input aria-label="Filter value" className={selectClass} value={filterValue} placeholder="Value, today or +7d" onChange={e => setFilterValue(e.target.value)} /> : null}
-        <button type="button" className="text-nim-link" disabled={!filterOp.endsWith('empty') && !filterValue.trim()} onClick={() => {
-          const clause = `${filterField}:${filterOp}${filterOp.endsWith('empty') ? '' : encodeURIComponent(filterValue)}`;
-          onChange({ filter: [attrs.filter, clause].filter(Boolean).join(',') });
-        }}>Add filter</button>
+      <div ref={refs.setFloating} style={{ ...floatingStyles, zIndex: 1000, width: 320, maxHeight: 'min(620px, 80vh)', maxWidth: 'calc(100vw - 24px)' }} className="placed-view-settings-popover flex flex-col overflow-hidden rounded-xl border border-nim bg-nim-secondary text-nim shadow-xl" aria-label="View settings" {...getFloatingProps()}>
+        <div className="placed-view-settings-heading flex shrink-0 items-center gap-2 px-3 py-3">
+          {section && <button type="button" aria-label="Back to view settings" className="flex h-6 w-6 items-center justify-center rounded text-nim-muted hover:bg-nim-hover" onClick={back}><MaterialSymbol icon="arrow_back" size={17} /></button>}
+          <h3 ref={heading} tabIndex={-1} className="min-w-0 flex-1 text-xs font-semibold text-nim-muted outline-none">{section ? SECTION_LABELS[section] : 'View settings'}</h3>
+          <button type="button" aria-label="Close view settings" className="flex h-6 w-6 items-center justify-center rounded text-nim-muted hover:bg-nim-hover" onClick={() => changeOpen(false)}><MaterialSymbol icon="close" size={17} /></button>
+        </div>
+        <div className="placed-view-settings-content min-h-0 overflow-y-auto pb-2">
+          {section ? <PlacedViewSettingsSection key={section} {...props} section={section} /> : <div className="placed-view-settings-sections px-1.5">
+            {rows.map(row => <button key={row.section} data-section={row.section} type="button" className={ROW} onClick={() => { setSection(row.section); requestAnimationFrame(() => heading.current?.focus()); }}>
+              <MaterialSymbol icon={row.icon} size={18} className="text-nim-muted" />
+              <span className="flex-1">{SECTION_LABELS[row.section]}</span>
+              <span className="max-w-24 truncate text-xs text-nim-faint">{row.summary}</span>
+              <MaterialSymbol icon="chevron_right" size={16} className="text-nim-faint" />
+            </button>)}
+          </div>}
+        </div>
+        {temporary && <p className="border-t border-nim px-3 py-2 text-[11px] text-nim-muted">Not saved: view only. Changes won’t be saved to this page.</p>}
       </div>
-    </fieldset>
-    </div></FloatingFocusManager></FloatingPortal>}
+    </FloatingFocusManager></FloatingPortal>}
   </div>;
 }

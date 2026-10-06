@@ -88,11 +88,39 @@ describe('TrackerViewEmbed', () => {
     const open = vi.fn();
     render(<TrackersUIProvider dataSource={fakeSource()} identity={null}><PlacedViewEmbed target={{ kind: 'type', typeId: 'ev-target' }} label="Targets" attrs={{ custom: 'preserved' }} onOpenFullView={open} /></TrackersUIProvider>);
     fireEvent.click(screen.getByRole('button', { name: /View settings/ }));
-    fireEvent.change(screen.getByLabelText('Layout'), { target: { value: 'list' } });
+    if (!screen.queryByTestId('tracker-display-view-mode-list')) fireEvent.click(screen.getByRole('button', { name: /Layout/ }));
+    fireEvent.click(screen.getByTestId('tracker-display-view-mode-list'));
     fireEvent.click(screen.getByRole('button', { name: 'Close view settings' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open full view' }));
     expect(open).toHaveBeenCalledWith('ev-target', { label: 'Targets', attrs: { custom: 'preserved', mode: 'list' } });
   });
+  it('navigates settings while patching only the edited properties, sorts and filters', async () => {
+    const change = vi.fn();
+    render(<TrackersUIProvider dataSource={fakeSource()} identity={null}><PlacedViewEmbed target={{ kind: 'type', typeId: 'ev-target' }} label="Targets" attrs={{ cols: 'title,realtime', sort: 'title:asc,realtime:desc', filter: 'title:=Braze', custom: 'keep' }} onAttrsChange={change} /></TrackersUIProvider>);
+    await screen.findByTestId('tracker-saved-view-embed');
+    fireEvent.click(screen.getByRole('button', { name: 'View settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /Property visibility/ }));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Realtime' }), { key: 'ArrowUp' });
+    expect(change).toHaveBeenLastCalledWith({ cols: 'realtime,title' });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Realtime' }));
+    expect(change).toHaveBeenLastCalledWith({ cols: 'title' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to view settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /Sort/ }));
+    fireEvent.change(screen.getByLabelText('Sort direction 1'), { target: { value: 'desc' } });
+    expect(change).toHaveBeenLastCalledWith({ sort: 'title:desc,realtime:desc' });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to view settings' }));
+    fireEvent.click(screen.getByRole('button', { name: /Filter/ }));
+    fireEvent.change(screen.getByLabelText('Filter field'), { target: { value: 'realtime' } });
+    fireEvent.change(screen.getByLabelText('Filter operator'), { target: { value: '>' } });
+    fireEvent.change(screen.getByLabelText('Filter value'), { target: { value: '1' } });
+    // Moving from a number to text must discard the incompatible operator and draft value.
+    fireEvent.change(screen.getByLabelText('Filter field'), { target: { value: 'title' } });
+    expect((screen.getByLabelText('Filter value') as HTMLInputElement).value).toBe('');
+    fireEvent.change(screen.getByLabelText('Filter value'), { target: { value: 'A,B|C' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add filter/ }));
+    expect(change).toHaveBeenLastCalledWith({ filter: 'title:=Braze,title:=A%2CB%7CC' });
+  });
+
   it('routes native header sorting and resize through the shared view write-back', async () => {
     const change = vi.fn();
     render(<TrackersUIProvider dataSource={fakeSource()} identity={null}><PlacedViewEmbed target={{ kind: 'type', typeId: 'ev-target' }} label="Targets" attrs={{ cols: 'title,realtime', sort: 'realtime:desc', w: 'title:320' }} onAttrsChange={change} /></TrackersUIProvider>);
@@ -150,12 +178,14 @@ describe('TrackerViewEmbed', () => {
     </TrackersUIProvider>;
     const { rerender } = render(view(onAttrsChange));
     await screen.findByTestId('tracker-saved-view-embed');
-    if (!screen.queryByLabelText('Layout')) fireEvent.click(screen.getByRole('button', { name: /View settings/ }));
-    fireEvent.change(screen.getByLabelText('Layout'), { target: { value: 'list' } });
+    if (!screen.queryByRole('dialog', { name: 'View settings' })) fireEvent.click(screen.getByRole('button', { name: /View settings/ }));
+    if (!screen.queryByTestId('tracker-display-view-mode-list')) fireEvent.click(screen.getByRole('button', { name: /Layout/ }));
+    fireEvent.click(screen.getByTestId('tracker-display-view-mode-list'));
     expect(onAttrsChange).toHaveBeenCalledWith({ mode: 'list' });
     rerender(view());
-    if (!screen.queryByLabelText('Layout')) fireEvent.click(screen.getByRole('button', { name: /View settings/ }));
-    fireEvent.change(screen.getByLabelText('Layout'), { target: { value: 'list' } });
+    if (!screen.queryByRole('dialog', { name: 'View settings' })) fireEvent.click(screen.getByRole('button', { name: /View settings/ }));
+    if (!screen.queryByTestId('tracker-display-view-mode-list')) fireEvent.click(screen.getByRole('button', { name: /Layout/ }));
+    fireEvent.click(screen.getByTestId('tracker-display-view-mode-list'));
     expect(screen.getByTestId('tracker-saved-view-embed').dataset.viewMode).toBe('list');
     expect(onAttrsChange).toHaveBeenCalledTimes(1);
     expect(screen.getByText(/Not saved: view only/)).toBeTruthy();

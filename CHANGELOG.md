@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- Changes to existing functionality go here -->
 - The extension dev menu lists stale extensions and can reinstall them individually or together.
 - Knowledge setup asks about your goals and creates a Home page with linked starter pages.
-- Pages: get started from Home, configure embedded views, open them full-size with chosen timeline dates, and create items in them, find typed-page decisions, and recover safely from failed edits; pan and pinch to zoom the type map.
+- Pages: save named views, configure them with compact tracker-style controls, open them full-size, create items, find typed-page decisions, and recover failed edits; Home stays user-authored and the type map supports pan and zoom.
 - Removed vendor branding from embedded tracker tables in Pages.
 
 ### Fixed

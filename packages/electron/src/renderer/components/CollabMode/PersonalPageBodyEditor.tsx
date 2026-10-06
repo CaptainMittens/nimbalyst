@@ -11,7 +11,8 @@
  * `personal-doc://<documentId>`, the key main records snapshots under.
  */
 
-import React, { useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
+import type { LexicalEditor } from 'lexical';
 import { NimbalystEditor, type EditorConfig } from '@nimbalyst/runtime/editor';
 import type { UploadedEditorAsset } from '@nimbalyst/runtime/editor/EditorConfig';
 import { DocumentPathProvider } from '@nimbalyst/runtime/DocumentPathContext';
@@ -68,9 +69,12 @@ export interface PersonalPageBodyEditorProps {
   workspacePath: string;
   /** Classes for the element holding the editor (layout differs per host). */
   className?: string;
+  onEditorReady?: (editor: LexicalEditor | null) => void;
 }
 
-export const PersonalPageBodyEditor: React.FC<PersonalPageBodyEditorProps> = ({ documentId, workspacePath, className }) => {
+export const PersonalPageBodyEditor: React.FC<PersonalPageBodyEditorProps> = ({ documentId, workspacePath, className, onEditorReady }) => {
+  const readyRef = useRef(onEditorReady); readyRef.current = onEditorReady;
+  useEffect(() => () => readyRef.current?.(null), [documentId, workspacePath]);
   const body = usePersonalPageBody({ workspacePath, documentId });
   const getContentRef = useRef<(() => string) | null>(null);
   const onEditRef = useRef(body.onEdit);
@@ -85,6 +89,7 @@ export const PersonalPageBodyEditor: React.FC<PersonalPageBodyEditorProps> = ({ 
     if (body.status !== 'ready') return null;
     return {
       ...hostConfig,
+      onEditorReady: editor => readyRef.current?.(editor),
       isRichText: true,
       editable: true,
       showToolbar: false,

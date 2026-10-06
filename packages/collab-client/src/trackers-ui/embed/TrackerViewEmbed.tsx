@@ -27,6 +27,8 @@ import { ViewNewItem } from './ViewNewItem';
 import { createViewItem } from './createViewItem';
 import { isViewRecordEditable, writeViewEdits } from './viewItemEdits';
 
+import './ViewEmbedHeader.css';
+
 const DEFAULT_BODY_HEIGHT_PX = 420;
 const MODE_LABEL: Record<string, string> = {
   list: 'list', table: 'table', kanban: 'board',
@@ -65,6 +67,8 @@ export interface TrackerViewEmbedProps {
   typeIds?: readonly string[];
   /** Table cells edit their items unless this is set (or the host has no data source). */
   readOnly?: boolean;
+  headerActions?: ReactNode;
+  headerNotice?: ReactNode;
   hiddenColumns?: readonly string[];
   onSortChange?: (field: string, direction: 'asc' | 'desc') => void;
   onWidthsChange?: (widths: Record<string, number>) => void;
@@ -80,6 +84,8 @@ export function TrackerViewEmbed({
   derivedColumns,
   typeIds,
   readOnly,
+  headerActions,
+  headerNotice,
   hiddenColumns,
   onSortChange,
   onWidthsChange,
@@ -104,6 +110,8 @@ export function TrackerViewEmbed({
       variant={variant}
       derivedColumns={derivedColumns}
       typeIds={typeIds}
+      headerActions={headerActions}
+      headerNotice={headerNotice}
       hiddenColumns={hiddenColumns}
       onSortChange={onSortChange}
       onWidthsChange={onWidthsChange}
@@ -127,6 +135,8 @@ function LoadedViewEmbed({
   typeIds,
   onItemsUpdate,
   onCreate,
+  headerActions,
+  headerNotice,
   hiddenColumns,
   onSortChange,
   onWidthsChange,
@@ -143,6 +153,8 @@ function LoadedViewEmbed({
   derivedColumns?: readonly TrackerGridDerivedColumn[];
   typeIds?: readonly string[];
   onItemsUpdate?: (entries: readonly TrackerGridUpdateEntry[]) => Promise<void>;
+  headerActions?: ReactNode;
+  headerNotice?: ReactNode;
   hiddenColumns?: readonly string[];
   onSortChange?: (field: string, direction: 'asc' | 'desc') => void;
   onWidthsChange?: (widths: Record<string, number>) => void;
@@ -255,18 +267,22 @@ function LoadedViewEmbed({
       data-view-mode={mode}
       contentEditable={false}
     >
-      {isPage ? null : (
-        <div className="tracker-saved-view-embed-head flex items-center gap-2.5 border-b border-nim px-3 py-2 text-xs">
-          <span className="font-medium text-nim">{view.name}</span>
-          <span className="rounded bg-nim-tertiary px-2 py-0.5 font-mono text-[11px] text-nim-muted">
+      {isPage && !headerActions ? null : (
+        <div className="tracker-saved-view-embed-head flex shrink-0 items-center gap-2.5 border-b border-nim px-3 py-1.5 text-xs">
+          <span className="min-w-0 truncate font-medium text-nim" title={view.name}>{view.name}</span>
+          <span className="placed-view-query min-w-0 truncate rounded bg-nim-tertiary px-2 py-0.5 font-mono text-[11px] text-nim-muted">
             {describeQuery(definition, mode)}
           </span>
-          <span className="ml-auto flex items-center gap-1.5 text-[11px] text-nim-success">
-            <span className="h-1.5 w-1.5 rounded-full bg-[var(--nim-success)]" aria-hidden />
-            live
-          </span>
+          <div className="tracker-saved-view-embed-actions ml-auto flex shrink-0 items-center gap-2.5">
+            <span className="placed-view-live flex shrink-0 items-center gap-1.5 text-[11px] text-nim-success">
+              <span className="h-1.5 w-1.5 rounded-full bg-[var(--nim-success)]" aria-hidden />
+              live
+            </span>
+            {headerActions}
+          </div>
         </div>
       )}
+      {headerNotice}
       <div
         className={isPage
           ? 'tracker-saved-view-embed-body flex min-h-0 flex-1 flex-col bg-nim'

@@ -9,6 +9,7 @@
  * type never adds a document to the team index on its own.
  */
 
+import type { LexicalEditor } from 'lexical';
 import React, { useCallback, useEffect, useState } from 'react';
 import type { CollabScope } from '@nimbalyst/collab-client/core';
 import { TYPE_PAGE_DOCUMENT_PREFIX, type SharedDocument } from '@nimbalyst/collab-client/docs';
@@ -19,6 +20,7 @@ import { PersonalPageBodyEditor } from './PersonalPageBodyEditor';
 
 export interface TypePageProseProps {
   typeId: string;
+  onEditorReady?: (editor: LexicalEditor | null) => void;
   /** The type's plural name: the prose document's name in the index. */
   typeName: string;
   /** The singular name, for the empty-page prompt. */
@@ -41,6 +43,7 @@ export const TypePageProse: React.FC<TypePageProseProps> = ({
   workspacePath,
   parentFolderId,
   documents,
+  onEditorReady,
 }) => {
   const documentId = `${TYPE_PAGE_DOCUMENT_PREFIX}${typeId}`;
   const [created, setCreated] = useState<SharedDocument | null>(null);
@@ -86,7 +89,7 @@ export const TypePageProse: React.FC<TypePageProseProps> = ({
   if (lane === 'personal') {
     return (
       <div className="type-page-prose tracker-page-view-body" data-testid="type-page-prose" data-document-id={documentId}>
-        <PersonalPageBodyEditor documentId={documentId} workspacePath={workspacePath} />
+        <PersonalPageBodyEditor documentId={documentId} workspacePath={workspacePath} onEditorReady={onEditorReady} />
       </div>
     );
   }
@@ -106,7 +109,7 @@ export const TypePageProse: React.FC<TypePageProseProps> = ({
   return (
     <div className="type-page-prose tracker-page-view-body" data-testid="type-page-prose" data-document-id={documentId}>
       {resolution.status === 'ready' ? (
-        <CollaborativeEmbedEditor editor={resolution.editor} request={resolution.request} readOnly={false} toolbar={false} publishHistory />
+        <CollaborativeEmbedEditor editor={resolution.editor} request={resolution.request} readOnly={false} toolbar={false} publishHistory onEditorReady={onEditorReady} />
       ) : (
         <div className="tracker-page-view-gutter py-3 text-sm text-nim-muted">{resolution.error}</div>
       )}
