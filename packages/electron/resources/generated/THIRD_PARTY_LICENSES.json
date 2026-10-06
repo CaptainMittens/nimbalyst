@@ -2479,9 +2479,9 @@
       "noticeFiles": []
     },
     {
-      "id": "@modelcontextprotocol/sdk@1.29.0",
+      "id": "@modelcontextprotocol/sdk@1.30.0",
       "name": "@modelcontextprotocol/sdk",
-      "version": "1.29.0",
+      "version": "1.30.0",
       "rawLicense": "MIT",
       "selectedLicense": "MIT",
       "reviewRequired": false,
@@ -2493,7 +2493,7 @@
       "installPaths": [
         "node_modules/@modelcontextprotocol/sdk"
       ],
-      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.29.0.tgz",
+      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.30.0.tgz",
       "licenseFiles": [
         {
           "fileName": "LICENSE",

@@ -60,7 +60,7 @@
     "@electron-toolkit/utils": "^4.0.0",
     "@excalidraw/excalidraw": "0.18.1",
     "@floating-ui/react": "^0.27.19",
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@monaco-editor/react": "^4.7.0",
     "@nimbalyst/collab-adapters": "*",
     "@nimbalyst/collab-protocol": "*",
