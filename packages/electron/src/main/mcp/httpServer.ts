@@ -60,6 +60,7 @@ import {
   handleListPages,
   handleSearchPages,
   handleSetPageType,
+  handleSetPageFields,
   getCollabIndexToolSchemas,
 } from "./tools/collabIndexToolHandlers";
 import {
@@ -581,6 +582,9 @@ function createSharedMcpServer(
 
         case "setPageType":
           return handleSetPageType(args, workspacePath);
+
+        case "setPageFields":
+          return handleSetPageFields(args, workspacePath);
 
         case "findOrgMembers":
           return handleFindOrgMembers(args, workspacePath);

@@ -32,6 +32,12 @@ export interface PagesSearchRow {
     updated: number;
     /** A typed page's own field values, by field name. */
     fields: Readonly<Record<string, unknown>>;
+    /** Status value: a plain page's own, or a typed page's `status` field. */
+    status: string | null;
+    /** Owner (an email or a member id): a plain page's own, or a typed page's `owner`. */
+    owner: string | null;
+    /** One line about the page (a plain page's own summary). */
+    summary: string | null;
 }
 /** A page as the docs session lists it. */
 export interface PagesSearchPageInput {
@@ -41,6 +47,13 @@ export interface PagesSearchPageInput {
     updatedAt?: number | null;
     trashedAt?: number | null;
     decryptFailed?: boolean;
+    /** The page's own fields (`pageFields.ts`). */
+    fields?: {
+        status?: string;
+        owner?: string;
+        summary?: string;
+        tags?: readonly string[];
+    };
 }
 /** A typed page as the tracker room holds it. */
 export interface PagesSearchItemInput {
@@ -128,6 +141,8 @@ export declare function tallyOptions(entries: ReadonlyArray<{
     value: string;
     label: string;
 }>): TrackerFilterFieldOption[];
+/** A status value as a reader sees it: "in-review" reads "In review". */
+export declare function pageStatusLabel(value: string): string;
 /**
  * Type, Tags, Author and Updated, then the narrowed type's own fields. Options
  * come from `rows` (the rows the clauses would narrow), so the typeahead only

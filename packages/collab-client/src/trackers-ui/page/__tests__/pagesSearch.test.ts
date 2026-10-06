@@ -26,7 +26,7 @@ const NOW = Date.parse('2026-10-05T12:00:00Z');
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
 
 const pages = [
-  { documentId: 'doc-a', title: 'Launch plan', createdBy: 'm-ann', updatedAt: NOW - 1000 },
+  { documentId: 'doc-a', title: 'Launch plan', createdBy: 'm-ann', updatedAt: NOW - 1000, fields: { status: 'current', owner: 'ann@x.dev', tags: ['db'] } },
   { documentId: 'doc-old', title: 'Old notes', createdBy: 'm-bob', updatedAt: NOW - 40 * 86_400_000 },
   { documentId: 'type-page:module', title: 'Modules', createdBy: 'm-ann', updatedAt: NOW },
   { documentId: 'doc-trash', title: 'Gone', createdBy: 'm-ann', updatedAt: NOW, trashedAt: NOW },
@@ -69,12 +69,15 @@ describe('pages search rows', () => {
     const keep = (clauses: Parameters<typeof matchesPagesFilters>[1]) => rows.filter((row) => matchesPagesFilters(row, clauses, NOW)).map((row) => row.id);
     expect(keep({ clauses: [{ field: 'type', op: '=', value: 'module' }] })).toEqual(['i-sync', 'i-store']);
     expect(keep({ clauses: [{ field: 'type', op: '=', value: PLAIN_PAGE_TYPE }] })).toEqual(['doc-a', 'doc-old']);
-    expect(keep({ clauses: [{ field: 'tags', op: 'in', value: ['db'] }] })).toEqual(['i-store']);
+    // A plain page's own tags, status and owner filter alongside a typed page's.
+    expect(keep({ clauses: [{ field: 'tags', op: 'in', value: ['db'] }] })).toEqual(['doc-a', 'i-store']);
+    expect(keep({ clauses: [{ field: 'owner', op: '=', value: 'ann@x.dev' }] })).toEqual(['doc-a', 'i-sync']);
+    expect(keep({ clauses: [{ field: 'status', op: '=', value: 'current' }] })).toEqual(['doc-a']);
     expect(keep({ clauses: [{ field: 'author', op: 'is-current-user' }] })).toEqual([]);
     expect(rows.filter((row) => matchesPagesFilters(row, { clauses: [{ field: 'author', op: 'is-current-user' }] }, NOW, 'ann@x.dev')).map((row) => row.id)).toEqual(['doc-a']);
     expect(keep({ clauses: [{ field: 'updated', op: 'in-last', value: 7 }] })).toEqual(['doc-a', 'i-sync', 'i-bug']);
     expect(keep({ clauses: [{ field: 'field:dependsOn', op: '=', value: 'i-store' }] })).toEqual(['i-sync']);
-    expect(keep({ combinator: 'or', clauses: [{ field: 'tags', op: 'in', value: ['db'] }, { field: 'type', op: '=', value: 'bug' }] })).toEqual(['i-bug', 'i-store']);
+    expect(keep({ combinator: 'or', clauses: [{ field: 'tags', op: 'in', value: ['db'] }, { field: 'type', op: '=', value: 'bug' }] })).toEqual(['doc-a', 'i-bug', 'i-store']);
     expect(keep({ clauses: [{ field: 'updated', op: '>', value: 'not a date' }] })).toEqual([]);
   });
 
@@ -92,7 +95,7 @@ describe('pages search rows', () => {
       ],
       titleOf: (id) => (id === 'i-store' ? 'Store' : null),
     });
-    expect(fields.map((field) => field.id)).toEqual(['type', 'tags', 'author', 'updated', 'field:dependsOn', 'field:owner']);
+    expect(fields.map((field) => field.id)).toEqual(['type', 'tags', 'author', 'status', 'owner', 'updated', 'field:dependsOn', 'field:owner']);
     expect(fields.find((field) => field.id === 'field:dependsOn')?.options).toEqual([{ value: 'i-store', label: 'Store', count: 1 }]);
     expect(fields.find((field) => field.id === 'tags')?.options?.[0]).toEqual({ value: 'core', label: 'core', count: 2 });
   });

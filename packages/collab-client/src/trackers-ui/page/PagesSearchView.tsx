@@ -29,6 +29,7 @@ import {
   narrowedType,
   pagesSearchQuery,
   parsePagesSearch,
+  pageStatusLabel,
   placedTypeScope,
   bodyHitsHiddenByFilters,
   pagesBodySearchTypeIds,
@@ -72,7 +73,7 @@ export interface PagesSearchViewProps {
   headerActions?: React.ReactNode;
 }
 
-type SortColumn = 'relevance' | 'name' | 'type' | 'author' | 'updated';
+type SortColumn = 'relevance' | 'name' | 'type' | 'status' | 'author' | 'updated';
 
 /** Rows drawn at a time: a team's trackers can hold thousands of typed pages, and the table is not virtualized. */
 const ROWS_PER_PAGE = 200;
@@ -223,6 +224,7 @@ export function PagesSearchView({
               <tr className="pages-search-thead sticky top-0 z-10 border-b border-nim bg-nim text-[11px] uppercase tracking-wide text-nim-muted">
                 <SortHeader label="Name" column="name" sort={sort} onSort={toggleSort} className="pl-4" />
                 <SortHeader label="Type" column="type" sort={sort} onSort={toggleSort} className="w-[130px]" />
+                <SortHeader label="Status" column="status" sort={sort} onSort={toggleSort} className="w-[110px]" />
                 <SortHeader label="Author" column="author" sort={sort} onSort={toggleSort} className="w-[140px]" />
                 <SortHeader label="Updated" column="updated" sort={sort} onSort={toggleSort} className="w-[100px] pr-4" />
               </tr>
@@ -265,6 +267,7 @@ function sortMatches(
   const text = (match: PagesSearchMatch): string => {
     switch (sort.column) {
       case 'type': return typeLabel(match.row.typeId);
+      case 'status': return match.row.status ? pageStatusLabel(match.row.status) : '';
       case 'author': return match.row.author ? authorLabel(match.row.author) : '';
       default: return match.row.title;
     }
@@ -322,6 +325,9 @@ function PagesSearchRowView({ match, typeLabel, authorLabel, onOpen }: {
               <span className="truncate text-[13.5px] text-nim">{row.title}</span>
               {row.issueKey && <span className="shrink-0 text-[11.5px] text-nim-faint">{row.issueKey}</span>}
             </div>
+            {!snippet && row.summary && (
+              <div className="pages-search-summary mt-0.5 truncate text-[12px] text-nim-muted">{row.summary}</div>
+            )}
             {snippet && (
               <div className="pages-search-snippet mt-0.5 line-clamp-2 text-[12px] text-nim-muted">
                 {snippetRuns(snippet.text, snippet.highlights).map((run, index) => (run.hit
@@ -337,6 +343,7 @@ function PagesSearchRowView({ match, typeLabel, authorLabel, onOpen }: {
           {typeLabel(row.typeId)}
         </span>
       </td>
+      <td className="truncate px-2 py-2 align-top text-nim-muted">{row.status ? pageStatusLabel(row.status) : ''}</td>
       <td className="truncate px-2 py-2 align-top text-nim-muted">{row.author ? authorLabel(row.author) : ''}</td>
       <td className="truncate py-2 pl-2 pr-4 align-top text-nim-muted">{relativeTime(row.updated)}</td>
     </tr>

@@ -81,7 +81,9 @@ export default function PageMarkEditorPlugin(): JSX.Element | null {
     const onClick = (event: MouseEvent) => {
       const target = event.target;
       if (!(target instanceof HTMLElement) || !target.classList.contains('page-mark')) return;
-      const nodeKey = editor.getEditorState().read(() => {
+      // `editor.read` sets the active editor; `$getNearestNodeFromDOMNode`
+      // needs one to map the span back to its node.
+      const nodeKey = editor.read(() => {
         const node = $getNearestNodeFromDOMNode(target);
         return $isPageMarkNode(node) ? node.getKey() : null;
       });

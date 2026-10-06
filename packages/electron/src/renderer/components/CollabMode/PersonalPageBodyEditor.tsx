@@ -70,9 +70,11 @@ export interface PersonalPageBodyEditorProps {
   /** Classes for the element holding the editor (layout differs per host). */
   className?: string;
   onEditorReady?: (editor: LexicalEditor | null) => void;
+  /** Scrolls with the body, above it (the page's title and type row). */
+  documentHeader?: React.ReactNode;
 }
 
-export const PersonalPageBodyEditor: React.FC<PersonalPageBodyEditorProps> = ({ documentId, workspacePath, className, onEditorReady }) => {
+export const PersonalPageBodyEditor: React.FC<PersonalPageBodyEditorProps> = ({ documentId, workspacePath, className, onEditorReady, documentHeader }) => {
   const readyRef = useRef(onEditorReady); readyRef.current = onEditorReady;
   useEffect(() => () => readyRef.current?.(null), [documentId, workspacePath]);
   const body = usePersonalPageBody({ workspacePath, documentId });
@@ -89,6 +91,7 @@ export const PersonalPageBodyEditor: React.FC<PersonalPageBodyEditorProps> = ({ 
     if (body.status !== 'ready') return null;
     return {
       ...hostConfig,
+      documentHeader,
       onEditorReady: editor => readyRef.current?.(editor),
       isRichText: true,
       editable: true,
@@ -104,7 +107,7 @@ export const PersonalPageBodyEditor: React.FC<PersonalPageBodyEditorProps> = ({ 
         if (isDirty && getContentRef.current) onEditRef.current(getContentRef.current());
       },
     };
-  }, [body.status, body.initialContent, hostConfig]);
+  }, [body.status, body.initialContent, hostConfig, documentHeader]);
 
   const documentPath = personalPageDocumentPath(documentId);
 

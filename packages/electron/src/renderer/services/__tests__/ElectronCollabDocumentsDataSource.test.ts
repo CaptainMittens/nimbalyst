@@ -61,6 +61,51 @@ describe('ElectronCollabDocumentsDataSource', () => {
     }
   });
 
+  it('stores page fields only on a server that says so, confirmed by the echo that holds the patch', async () => {
+    vi.useFakeTimers();
+    let config!: TeamSyncConfig;
+    const provider = {
+      connect: vi.fn(async () => undefined), getStatus: () => 'connected', storesPageFields: vi.fn(() => true),
+      setDocumentFields: vi.fn((_id: string, _fields: Record<string, unknown>, _options: { requestId: string }) => undefined),
+      getDocuments: () => [], getFolders: () => [], getTypePlacements: () => null, getItemPlacements: () => null,
+      getTeamState: () => null, isPageTree: () => true, destroy: vi.fn(),
+    };
+    const source = new ElectronCollabDocumentsDataSource({
+      scope, getJwt: async () => asTeamJwt('team-jwt'), placementConfirmTimeoutMs: 100,
+      createProvider: (next) => { config = next; return provider as any; },
+    });
+    const setFields = () => source.command({ type: 'set-document-fields', documentId: 'page-1', fields: { status: 'current', owner: null } });
+    const row = { documentId: 'page-1', title: 'Design', documentType: 'markdown', createdBy: 'member', createdAt: 1, updatedAt: 2 };
+    try {
+      expect((await source.snapshot()).pageFields).toBe(true);
+      let done = false;
+      const pending = setFields().then(() => { done = true; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(provider.setDocumentFields).toHaveBeenCalledWith('page-1', { status: 'current', owner: null }, { requestId: expect.any(String) });
+      // A teammate's echo that does not hold the patch yet is not the confirmation.
+      config.onDocumentChanged?.({ ...row, fields: { status: 'draft', owner: 'ana@example.com' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(done).toBe(false);
+      // Another key set meanwhile does not stop the patch from being recognized.
+      config.onDocumentChanged?.({ ...row, fields: { status: 'current', tags: ['sync'] } });
+      await pending;
+
+      const refused = setFields().catch((error: Error) => error.message);
+      await vi.advanceTimersByTimeAsync(0);
+      config.onWriteRefused?.(provider.setDocumentFields.mock.calls.at(-1)![2].requestId, { code: 'forbidden', message: 'Read only' });
+      expect(await refused).toMatch(/Read only/);
+
+      provider.storesPageFields.mockReturnValue(false);
+      expect((await source.snapshot()).pageFields).toBeUndefined();
+      const sent = provider.setDocumentFields.mock.calls.length;
+      await expect(setFields()).rejects.toThrow(/page fields/);
+      expect(provider.setDocumentFields).toHaveBeenCalledTimes(sent);
+    } finally {
+      source.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it('projects provider snapshots/events and routes commands through the provider', async () => {
     let config!: TeamSyncConfig;
     const observeStatus = vi.fn();

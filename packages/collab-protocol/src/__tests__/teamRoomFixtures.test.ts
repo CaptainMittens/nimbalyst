@@ -45,6 +45,7 @@ const pageUnderItem = {
   fileExtension: '.md', editorId: 'com.nimbalyst.markdown', createdBy: 'member-1', createdAt: 1790000000000,
   updatedAt: 1790000002000, projectId: 'project-1', lastWriterUserId: 'member-1', parentFolderId: 'NIM-42',
   parentKind: 'item', sortOrder: 2048, trashedAt: null, hasContent: true,
+  fields: { status: 'current', owner: 'greg@example.com', summary: 'Meeting notes', tags: ['notes'] },
 } satisfies Exhaustive<EncryptedDocIndexEntry>;
 
 const pageTreeTeam = {
@@ -59,6 +60,8 @@ const pageTreeTeam = {
     projectId: 'project-1', lastWriterUserId: null, parentFolderId: null, parentKind: 'page', sortOrder: null,
     // A converted folder: its body was never edited, so the tree shows a folder.
     trashedAt: null, hasContent: false,
+    // No fields set.
+    fields: null,
   }, pageUnderItem],
   // The older-client projection: the page has a child placement.
   folders: [{
@@ -67,9 +70,10 @@ const pageTreeTeam = {
   }],
   pageTree: true,
   authorWriteEcho: true,
+  pageFields: true,
   typePlacements: [typeNode],
   itemPlacements: [node, childNode],
-} satisfies Omit<TeamState, 'settings'> & Exhaustive<Pick<TeamState, 'folders' | 'pageTree' | 'authorWriteEcho' | 'typePlacements' | 'itemPlacements'>>;
+} satisfies Omit<TeamState, 'settings'> & Exhaustive<Pick<TeamState, 'folders' | 'pageTree' | 'authorWriteEcho' | 'pageFields' | 'typePlacements' | 'itemPlacements'>>;
 
 // A decision on a plain page, and an open question in a typed page's body
 // (no project or title: the client resolves the tracker item).
@@ -159,6 +163,10 @@ const fixtures: Record<string, unknown> = {
   'docIndexRemove.purge.json': {
     type: 'docIndexRemove', documentId: 'page-3', requestId: 'remove-3', purge: true,
   } satisfies Client<'docIndexRemove'>,
+  // A patch: null clears owner, the other keys keep their stored values.
+  'docIndexSetFields.json': {
+    type: 'docIndexSetFields', documentId: 'page-2', fields: { status: 'outdated', owner: null }, requestId: 'fields-1',
+  } satisfies Client<'docIndexSetFields'>,
   'folderRemove.json': { type: 'folderRemove', folderId: 'page-1', requestId: 'remove-2' } satisfies Client<'folderRemove'>,
   // A refused write, answered with the message's requestId.
   'error.requestId.json': {

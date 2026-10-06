@@ -15,7 +15,8 @@ import { atom, useAtom, useAtomValue, useSetAtom, useStore, type Atom } from 'jo
 import type { CollabOpenOptions, CollabScope } from '@nimbalyst/collab-client/core';
 import type { SharedDocument } from '@nimbalyst/collab-client/docs';
 import { DESKTOP_TRACKER_UI_CAPABILITIES, TrackersUIProvider } from '@nimbalyst/collab-client/trackers-ui';
-import { PageHistoryButton, TypePageTable, crumbItemLookup, trackerPageCrumbFolders, typePageTypeIds } from '@nimbalyst/collab-client/trackers-ui/page';
+import { PageHeaderBar, TypePageTable, crumbItemLookup, trackerPageCrumbFolderRefs, typePageTypeIds } from '@nimbalyst/collab-client/trackers-ui/page';
+import { openPageAncestor } from './pageHeaderNavigation';
 import { TYPE_PAGE_DOCUMENT_PREFIX } from '@nimbalyst/collab-client/docs';
 import { buildCollabUri } from '@nimbalyst/collab-protocol';
 import '@nimbalyst/collab-client/trackers-ui/page.css';
@@ -126,9 +127,9 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [store, typePlacements, itemPlacements, pages],
   );
-  const crumb = useMemo(
-    () => [...(lane === 'personal' ? ['Personal'] : []), ...trackerPageCrumbFolders(typeId, typePlacements, pages, { itemPlacements, item: itemLookup })],
-    [lane, typeId, typePlacements, pages, itemPlacements, itemLookup],
+  const crumbPath = useMemo(
+    () => trackerPageCrumbFolderRefs(typeId, typePlacements, pages, { itemPlacements, item: itemLookup }),
+    [typeId, typePlacements, pages, itemPlacements, itemLookup],
   );
   const parentFolderId = typePlacements.find((placement) => placement.typeId === typeId)?.parentFolderId ?? null;
   const fieldLabels = useMemo(() => typeFieldLabels(typeId), [typeId, model]);
@@ -141,18 +142,21 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
 
   return (
     <div className="type-page-tab tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="type-page-tab" data-type-id={typeId}>
+      <PageHeaderBar
+        testId="type-page-header-bar"
+        section={lane === 'personal' ? 'Personal' : null}
+        path={crumbPath}
+        title={typeName}
+        titleIcon={model?.icon || 'table'}
+        onOpenAncestor={(ancestor) => {
+          if (lane === 'personal') openPageAncestor(ancestor, { personal: true, workspacePath });
+          else if (scope) openPageAncestor(ancestor, { personal: false, scope });
+        }}
+        onShowHistory={historyKey ? () => openHistory(historyKey) : undefined}
+      />
       <div className="type-page-tab-scroller min-h-0 flex-1 overflow-y-auto">
         <div className="type-page-tab-column">
-          <div className="tracker-page-view-header">
-            <div className="tracker-page-view-crumb-row mb-2.5 flex items-center gap-2">
-              <div className="tracker-page-view-crumb min-w-0 flex-1 truncate text-xs text-nim-faint select-text" data-testid="type-page-crumb">
-                {crumb.map((part, index) => (
-                  <span key={`${index}:${part}`}>{part} / </span>
-                ))}
-                <span className="text-nim-muted">{typeName}</span>
-              </div>
-              {historyKey && <PageHistoryButton onClick={() => openHistory(historyKey)} />}
-            </div>
+          <div className="tracker-page-view-header tracker-page-view-header--bar">
             <h1 className="type-page-tab-title m-0 mb-3 flex items-center gap-2 break-words text-[28px] font-medium leading-tight text-nim select-text">
               {model?.icon ? <MaterialSymbol icon={model.icon} size={26} style={{ color: model.color }} /> : null}
               {typeName}

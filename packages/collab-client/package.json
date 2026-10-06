@@ -34,8 +34,8 @@
       "default": "./src/docs-ui/setPageType/index.ts"
     },
     "./docs-ui/EditorHeaderBar": {
-      "types": "./src/docs-ui/primitives/EditorHeaderBar.tsx",
-      "default": "./src/docs-ui/primitives/EditorHeaderBar.tsx"
+      "types": "./src/ui-primitives/EditorHeaderBar.tsx",
+      "default": "./src/ui-primitives/EditorHeaderBar.tsx"
     },
     "./docs-ui/history": {
       "types": "./src/docs-ui/history/index.ts",

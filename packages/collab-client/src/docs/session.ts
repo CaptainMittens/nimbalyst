@@ -28,6 +28,7 @@ import {
   TYPE_PAGE_DOCUMENT_PREFIX,
 } from './collabTree';
 import { pagesTrashedWith, restoredParentGone } from './collabTrash';
+import { applyPageFieldsPatch } from './pageFields';
 import type { CollabDocsCommand, CollabDocsDataChange, CollabDocsDataSource } from './dataSource';
 import type { PageSearchRequest, PageSearchResponse } from '@nimbalyst/collab-protocol';
 import { searchSectionPages } from './pageSearch';
@@ -91,6 +92,7 @@ const typePlacementsByScope = atomFamily((_scopeKey: string) => atom<SharedTypeP
 const itemPlacementsByScope = atomFamily((_scopeKey: string) => atom<SharedItemPlacement[]>([]));
 /** Set from the snapshot: the store has turned folders into pages. */
 const pageTreeByScope = atomFamily((_scopeKey: string) => atom(false));
+const pageFieldsByScope = atomFamily((_scopeKey: string) => atom(false));
 /**
  * The folder list a scope's readers see. In a page tree every page can be a
  * parent, so the pages themselves stand in as folders (paths, crumbs, pickers
@@ -469,6 +471,8 @@ export interface CollabDocsSessionAtoms {
   itemPlacements: ListAtom<SharedItemPlacement>;
   /** True when the tree is the one page tree (documents nest in documents). */
   pageTree: Atom<boolean>;
+  /** True when this section keeps a plain page's own fields (`pageFields.ts`). */
+  pageFields: Atom<boolean>;
   syncStatus: WritableAtom<CollabDocsUIStatus, [CollabDocsUIStatus], void>;
   hasTeam: WritableAtom<boolean, [boolean], void>;
   activeTeamUserId: Atom<string | null>;
@@ -565,6 +569,7 @@ function createSessionAtoms(
     typePlacements: typePlacementsByScope(scopeKey),
     itemPlacements: itemPlacementsByScope(scopeKey),
     pageTree: pageTreeByScope(scopeKey),
+    pageFields: pageFieldsByScope(scopeKey),
     syncStatus,
     hasTeam,
     activeTeamUserId,
@@ -714,6 +719,7 @@ export interface CollabDocsSession {
     metadata?: { metadataVersion: 2; fileExtension: string; editorId: string };
   }): Promise<boolean>;
   updateDocumentTitle(documentId: string, title: string): Promise<CollabPlacementWriteResult>;
+  updateDocumentFields(documentId: string, patch: Record<string, unknown>): Promise<CollabPlacementWriteResult>;
   /**
    * Removes the index row. Only with `purge` (Trash's "Delete permanently" and
    * "Empty Trash") does a page already in Trash go for good; a server that
@@ -942,6 +948,32 @@ class CollabDocsSessionImpl implements CollabDocsSession {
     if (!result.ok && existing && optimistic) {
       // A later rename or server row is authoritative, even on our timeout.
       store.set(target, (current) => current.map((document) => document === optimistic ? existing : document));
+    }
+    return result;
+  }
+
+  /**
+   * Sets some of a plain page's own fields (null clears one). Shown at once and
+   * put back if the store refuses; the store's next row is authoritative.
+   */
+  async updateDocumentFields(documentId: string, patch: Record<string, unknown>): Promise<CollabPlacementWriteResult> {
+    if (!store.get(pageFieldsByScope(this.scope.scopeKey))) {
+      return { ok: false, error: 'Page fields are not available in this section yet.' };
+    }
+    const refused = this.refusedWrite([documentId]);
+    if (refused) return refused;
+    const target = documentsByScope(this.scope.scopeKey);
+    const existing = store.get(target).find((document) => document.documentId === documentId);
+    let optimistic: SharedDocument | null = null;
+    if (existing) {
+      const fields = applyPageFieldsPatch(existing.fields, patch);
+      optimistic = { ...existing, fields, updatedAt: Date.now() };
+      if (Object.keys(fields).length === 0) delete optimistic.fields;
+      store.set(target, (current) => current.map((document) => (document === existing ? optimistic! : document)));
+    }
+    const result = await this.settle(this.dataSource.command({ type: 'set-document-fields', documentId, fields: patch }), 'Failed to update page fields');
+    if (!result.ok && existing && optimistic) {
+      store.set(target, (current) => current.map((document) => (document === optimistic ? existing : document)));
     }
     return result;
   }
@@ -1490,6 +1522,7 @@ class CollabDocsSessionImpl implements CollabDocsSession {
         // Only ever turns on: a snapshot from a host that omits the flag must
         // not drop a converted tree back to folders.
         if (change.snapshot.pageTree) store.set(pageTreeByScope(scopeKey), true);
+        store.set(pageFieldsByScope(scopeKey), change.snapshot.pageFields === true);
         // Path-in-title folders become folder rows; a page tree has none.
         if (!this.isPageTree()) void this.migrateVirtualFolders();
         break;
@@ -1899,6 +1932,7 @@ export function pruneCollabDocsSession(scopeKey: string): void {
   typePlacementsByScope.remove(scopeKey);
   itemPlacementsByScope.remove(scopeKey);
   pageTreeByScope.remove(scopeKey);
+  pageFieldsByScope.remove(scopeKey);
   statusByScope.remove(scopeKey);
   hasTeamByScope.remove(scopeKey);
   orgIdByScope.remove(scopeKey);

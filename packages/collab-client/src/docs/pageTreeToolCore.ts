@@ -2,7 +2,7 @@
  * Agent tools for the one page tree (Pages mode), for the Team and the
  * Personal section alike: list the tree, create a page under a page or a typed
  * page, move or reorder pages, typed pages and placed types, rename, delete,
- * and Set type.
+ * Set type, and a plain page's own fields.
  *
  * Every structural write goes through the same planner the sidebar's drag and
  * drop uses (`collabPageTree`), so an agent gets the same cycle refusals
@@ -17,11 +17,14 @@
  * session's Jotai-held type placements are read through the env.
  */
 import {
+  applyPageFieldsPatch,
   buildConsoleLink,
+  normalizePageFields,
   pageSearchMatches,
   pageSearchQueryTerms,
   type ConsoleLinkScope,
   type ListPagesResult,
+  type PageFields,
   type PageTreeNodeSummary,
   type SearchPagesResult,
   type SearchPagesResultEntry,
@@ -227,6 +230,11 @@ function consoleScopeOf(context: TreeContext): ConsoleLinkScope | null {
   return projectId ? { orgId: context.session.scope.orgId, projectId } : null;
 }
 
+function pageFieldsOf(document: SharedDocument): { fields?: PageFields } {
+  const fields = normalizePageFields(document.fields);
+  return Object.keys(fields).length > 0 ? { fields } : {};
+}
+
 function describeNode(context: TreeContext, env: PageTreeToolEnv, node: CollabTreeNode, depth: number): PageTreeNodeSummary | null {
   const parentNodeId = context.parents.get(node.id)?.id ?? null;
   const scope = consoleScopeOf(context);
@@ -244,6 +252,7 @@ function describeNode(context: TreeContext, env: PageTreeToolEnv, node: CollabTr
       depth,
       sortOrder: node.document.sortOrder ?? null,
       uri: env.pageUri(context.section, node.document.documentId),
+      ...pageFieldsOf(node.document),
       ...(scope ? { link: buildConsoleLink({ kind: 'page', scope, pageId: node.document.documentId }) } : {}),
     };
   }
@@ -468,6 +477,26 @@ export async function renamePageTool(env: PageTreeToolEnv, args: Record<string, 
     return fail(`A page named "${newName}" already sits there.`);
   }
   return settled(context.session.updateDocumentTitle(id, newName), 'rename');
+}
+
+/**
+ * `setPageFields`: a patch of a plain page's own fields. The answer is the
+ * fields the page has after the write, so an agent sees a value that did not
+ * validate (and was ignored) without listing the tree again.
+ */
+export async function setPageFieldsTool(env: PageTreeToolEnv, args: Record<string, unknown>): Promise<PageTreeToolResult> {
+  const id = typeof args.itemId === 'string' ? args.itemId : '';
+  const patch = args.fields && typeof args.fields === 'object' && !Array.isArray(args.fields)
+    ? args.fields as Record<string, unknown>
+    : null;
+  if (!id || !patch) return fail('setPageFields needs itemId and a fields object.');
+  const context = await readTree(env, sectionOf(args.section));
+  const page = findPage(context, id);
+  if (!page || isTypePageDocumentId(id)) return fail(`No plain page "${id}" in the ${context.section} section. Set a typed page's fields with tracker_update.`);
+  if (!context.session.updateDocumentFields) return fail(`The ${context.section} section cannot store page fields.`);
+  const result = await settled(context.session.updateDocumentFields(id, patch), 'field change');
+  // Every store applies the patch with the same function, so this is what it kept.
+  return result.success ? { success: true, fields: applyPageFieldsPatch(page.fields, patch) } : result;
 }
 
 export async function deletePageTool(env: PageTreeToolEnv, args: Record<string, unknown>): Promise<PageTreeToolResult> {

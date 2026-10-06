@@ -23,6 +23,7 @@ export * from "./personal.js";
 export * from "./teamDocument.js";
 export * from "./teamDocumentHistory.js";
 export * from "./teamTracker.js";
+export * from "./pageFields.js";
 export * from "./teamRoom.js";
 export * from "./projectSync.js";
 

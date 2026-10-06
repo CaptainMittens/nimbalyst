@@ -8,6 +8,10 @@
 export { TrackerPageView, type TrackerPageViewProps } from './TrackerPageView';
 export { TrackerPageAddField, type TrackerPageAddFieldProps } from './TrackerPageAddField';
 export { PageHistoryButton } from './PageHistoryButton';
+export { PageHeaderBar, pageAncestorIcon, pageHeaderCrumbs, type PageHeaderBarProps, type PageHeaderMenuItem } from './PageHeaderBar';
+export { PlainPageHeader, type PlainPageHeaderProps } from './PlainPageHeader';
+export { PageFacts, pageTimeFacts, relativePageTime, type PageFact } from './PageFacts';
+export type { PageTreeAncestor } from '../embed/pageTreeAncestors';
 export { TypePageTable, typePageTypeIds, type TypePageTableProps } from './TypePageTable';
 export { TrackerLinksSection, type TrackerLinksSectionProps } from './TrackerLinksSection';
 export { fieldRelationLinks } from './fieldRelationLinks';
@@ -20,6 +24,7 @@ export {
   sameTrackerPageCrumb,
   trackerPageCrumb,
   trackerPageCrumbFolders,
+  trackerPageCrumbFolderRefs,
   type CrumbDocument,
   type CrumbFolder,
   type CrumbItemLookup,

@@ -36,6 +36,12 @@ export interface PagesSearchRow {
   updated: number;
   /** A typed page's own field values, by field name. */
   fields: Readonly<Record<string, unknown>>;
+  /** Status value: a plain page's own, or a typed page's `status` field. */
+  status: string | null;
+  /** Owner (an email or a member id): a plain page's own, or a typed page's `owner`. */
+  owner: string | null;
+  /** One line about the page (a plain page's own summary). */
+  summary: string | null;
 }
 
 /** A page as the docs session lists it. */
@@ -46,6 +52,8 @@ export interface PagesSearchPageInput {
   updatedAt?: number | null;
   trashedAt?: number | null;
   decryptFailed?: boolean;
+  /** The page's own fields (`pageFields.ts`). */
+  fields?: { status?: string; owner?: string; summary?: string; tags?: readonly string[] };
 }
 
 /** A typed page as the tracker room holds it. */
@@ -118,10 +126,13 @@ export function buildPagesSearchRows(
       title: page.title.trim() || 'Untitled',
       typeId: PLAIN_PAGE_TYPE,
       issueKey: null,
-      tags: [],
+      tags: [...(page.fields?.tags ?? [])],
       author: page.createdBy ? options.memberEmail?.(page.createdBy) || page.createdBy : null,
       updated: millis(page.updatedAt),
       fields: {},
+      status: page.fields?.status ?? null,
+      owner: page.fields?.owner ?? null,
+      summary: page.fields?.summary ?? null,
     }));
   const itemRows = items
     .filter((item) => !item.archived && options.inSection(item.primaryType))
@@ -137,6 +148,9 @@ export function buildPagesSearchRows(
         author: identity?.email || identity?.name || null,
         updated: millis(item.system.updatedAt ?? item.system.createdAt),
         fields: item.fields,
+        status: strings(item.fields.status)[0] ?? null,
+        owner: strings(item.fields.owner)[0] ?? null,
+        summary: null,
       };
     });
   return [...pageRows, ...itemRows].sort((a, b) => b.updated - a.updated || a.title.localeCompare(b.title));
@@ -148,6 +162,8 @@ export function pagesSearchValue(row: PagesSearchRow, field: string): unknown {
     case 'type': return row.typeId;
     case 'tags': return row.tags;
     case 'author': return row.author;
+    case 'status': return row.status;
+    case 'owner': return row.owner;
     case 'updated': return row.updated || null;
     default:
       return field.startsWith(TYPE_FIELD_PREFIX) ? strings(row.fields[field.slice(TYPE_FIELD_PREFIX.length)]) : undefined;
@@ -285,6 +301,11 @@ export function tallyOptions(entries: ReadonlyArray<{ value: string; label: stri
   return [...byValue.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0) || a.label.localeCompare(b.label));
 }
 
+/** A status value as a reader sees it: "in-review" reads "In review". */
+export function pageStatusLabel(value: string): string {
+  return fieldLabel(value);
+}
+
 function fieldLabel(name: string): string {
   const words = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim().toLowerCase();
   return words.charAt(0).toUpperCase() + words.slice(1);
@@ -307,6 +328,8 @@ export function buildPagesFilterFields(
     { id: 'type', label: 'Type', type: 'select', group: 'common', options: tallyOptions(rows.map((row) => ({ value: row.typeId, label: labels.type(row.typeId) }))) },
     { id: 'tags', label: 'Tags', type: 'multiselect', multiValue: true, group: 'common', options: tallyOptions(rows.flatMap((row) => row.tags.map((tag) => ({ value: tag, label: tag })))) },
     { id: 'author', label: 'Author', type: 'select', group: 'common', options: tallyOptions(rows.flatMap((row) => (row.author ? [{ value: row.author, label: labels.author(row.author) }] : []))) },
+    { id: 'status', label: 'Status', type: 'select', group: 'common', options: tallyOptions(rows.flatMap((row) => (row.status ? [{ value: row.status, label: pageStatusLabel(row.status) }] : []))) },
+    { id: 'owner', label: 'Owner', type: 'select', group: 'common', options: tallyOptions(rows.flatMap((row) => (row.owner ? [{ value: row.owner, label: labels.author(row.owner) }] : []))) },
     { id: 'updated', label: 'Updated', type: 'datetime', group: 'system' },
   ];
   if (!narrowed) return fields;

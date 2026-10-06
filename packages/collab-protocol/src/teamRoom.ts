@@ -18,6 +18,7 @@ import type {
   ConversationDescriptor,
 } from './conversation.js';
 import type { FeedbackRequestIndexEntry } from './feedbackRequest.js';
+import type { PageFields } from './pageFields.js';
 
 export interface OrgSettings {
   version: 1;
@@ -40,6 +41,7 @@ export type TeamClientMessage =
   | TeamDocIndexSyncRequestMessage
   | TeamDocIndexRegisterMessage
   | TeamDocIndexUpdateMessage
+  | TeamDocIndexSetFieldsMessage
   | TeamDocIndexRemoveMessage
   | TeamDocTrashMessage
   | TeamDocRestoreMessage
@@ -116,6 +118,21 @@ export interface TeamDocIndexUpdateMessage {
   encryptedTitle: string;
   titleIv: string;
   /** Correlates a refused rename with its caller. */
+  requestId?: string;
+}
+
+/**
+ * Set some of a plain page's own fields (`pageFields.ts`). `fields` is a patch:
+ * a key set to null clears that field, a value that does not validate is
+ * ignored, and keys left out keep their stored value. The server applies the
+ * patch to the stored fields, so two members setting different fields do not
+ * overwrite each other. Only sent to a server whose snapshot set `pageFields`.
+ */
+export interface TeamDocIndexSetFieldsMessage {
+  type: 'docIndexSetFields';
+  documentId: string;
+  fields: Record<string, unknown>;
+  /** Echoed on the `error` frame if the server refuses this message. */
   requestId?: string;
 }
 
@@ -586,6 +603,12 @@ export interface EncryptedDocIndexEntry {
    * Once true it stays true. Absent from older servers = true.
    */
   hasContent?: boolean;
+  /**
+   * A plain page's own fields, sent in the clear and encrypted at rest like
+   * the title. Null = none set. Absent = this entry does not say (an older
+   * server, or a row the server cannot read), so a client keeps what it knew.
+   */
+  fields?: PageFields | null;
 }
 
 /**
@@ -684,6 +707,12 @@ export interface TeamState {
   authorWriteEcho?: true;
   /** Rename broadcasts reach the author; refusals carry the rename requestId. */
   authorTitleEcho?: true;
+  /**
+   * The room stores plain-page fields: it takes `docIndexSetFields`, sends
+   * `fields` on document entries, and echoes the write to its author like a
+   * rename (a refusal carries the requestId).
+   */
+  pageFields?: true;
   /** Tracker-type placements in the page tree (omitted by older servers). */
   typePlacements?: TypePlacementNode[];
   /** Tracker-item placements in the page tree (omitted by older servers). */

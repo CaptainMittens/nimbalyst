@@ -33,6 +33,11 @@ export interface PageTreeSession {
   removeItemPlacement(itemId: string): Promise<PageTreeWriteResult>;
   updateDocumentTitle(documentId: string, title: string): Promise<PageTreeWriteResult>;
   /**
+   * Sets some of a plain page's own fields (`pageFields.ts`); null clears one.
+   * Absent, or refusing, where the section's store cannot keep them.
+   */
+  updateDocumentFields?(documentId: string, patch: Record<string, unknown>): Promise<PageTreeWriteResult>;
+  /**
    * Agent deletes are recoverable: a page and a subtree both go to Trash. A
    * permanent delete is left to a person in Trash, so it is not here.
    */

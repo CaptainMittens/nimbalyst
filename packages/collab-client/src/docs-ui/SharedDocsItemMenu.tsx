@@ -28,7 +28,7 @@ import { useCollabDocsUI } from './CollabDocsUIProvider';
 import { applySharedDocumentRenameSuffix, getSharedDocumentRenameParts } from './documentPresentation';
 import { InputModal } from './primitives/InputModal';
 import { confirmDestructive } from './primitives/confirmDestructive';
-import { FloatingPortal, useFloatingMenu, virtualElement } from './primitives/useFloatingMenu';
+import { FloatingPortal, useFloatingMenu, virtualElement } from '../ui-primitives/useFloatingMenu';
 import { stableCategory } from './analytics';
 
 export type SharedDocsMenuTarget =

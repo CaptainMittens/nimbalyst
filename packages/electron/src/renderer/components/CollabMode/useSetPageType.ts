@@ -80,7 +80,7 @@ const OPEN_EDITOR_FLUSH_TIMEOUT_MS = 8_000;
  * page saves on an 800ms debounce; a team page's tab holds its own room
  * connection, whose outbox can still carry edits the server has not seen.
  */
-async function flushPageEditor(context: SetPageTypeContext, pageId: string): Promise<void> {
+export async function flushPageEditor(context: SetPageTypeContext, pageId: string): Promise<void> {
   if (context.lane === 'personal') {
     await flushPersonalPageBody(context.workspacePath, pageId);
     return;
@@ -109,7 +109,7 @@ async function flushPageEditor(context: SetPageTypeContext, pageId: string): Pro
   }
 }
 
-async function readPageMarkdown(context: SetPageTypeContext, pageId: string): Promise<PageCopy> {
+export async function readPageMarkdown(context: SetPageTypeContext, pageId: string): Promise<PageCopy> {
   if (context.lane === 'personal') {
     const body = (await window.electronAPI.invoke('personal-pages:get-body', context.workspacePath, pageId)) as
       { content: string; version: number } | null;
@@ -122,7 +122,7 @@ async function readPageMarkdown(context: SetPageTypeContext, pageId: string): Pr
 }
 
 /** Personal: the stored version. Team: the room's text, read again. */
-async function pageUnchangedSince(context: SetPageTypeContext, pageId: string, copy: PageCopy): Promise<boolean> {
+export async function pageUnchangedSince(context: SetPageTypeContext, pageId: string, copy: PageCopy): Promise<boolean> {
   await flushPageEditor(context, pageId);
   const current = await readPageMarkdown(context, pageId);
   return context.lane === 'personal'

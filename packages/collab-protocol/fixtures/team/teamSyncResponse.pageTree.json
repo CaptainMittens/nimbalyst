@@ -25,7 +25,8 @@
         "parentKind": "page",
         "sortOrder": null,
         "trashedAt": null,
-        "hasContent": false
+        "hasContent": false,
+        "fields": null
       },
       {
         "documentId": "page-2",
@@ -44,7 +45,15 @@
         "parentKind": "item",
         "sortOrder": 2048,
         "trashedAt": null,
-        "hasContent": true
+        "hasContent": true,
+        "fields": {
+          "status": "current",
+          "owner": "greg@example.com",
+          "summary": "Meeting notes",
+          "tags": [
+            "notes"
+          ]
+        }
       }
     ],
     "folders": [
@@ -62,6 +71,7 @@
     ],
     "pageTree": true,
     "authorWriteEcho": true,
+    "pageFields": true,
     "typePlacements": [
       {
         "typeId": "bug",

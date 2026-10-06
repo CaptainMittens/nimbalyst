@@ -30,7 +30,7 @@ import {
   type CollabTreeTypeNode,
   type CollabTypeTreeResolver,
 } from '../collabTree';
-import { pageTreeAncestors } from '../../trackers-ui/embed/pageTreeAncestors';
+import { pageTreeAncestorRefs, pageTreeAncestors } from '../../trackers-ui/embed/pageTreeAncestors';
 import { buildCollabPageTree, buildCollabTreeForScope, nextSiblingOrder, pageTreeDropZone, planPageTreeDrop, treeMoveRefused, typeWithSubtypes } from '../collabPageTree';
 import type { SharedDocument, SharedFolder, SharedItemPlacement, SharedTypePlacement } from '../types';
 
@@ -907,5 +907,8 @@ describe('collabTree', () => {
     // An unplaced typed page sits under its type.
     expect(pageTreeAncestors({ id: 'loose', kind: 'item' }, tree)).toEqual(['Architecture', 'Modules', 'Loose']);
     expect(pageTreeAncestors({ id: 'gone', kind: 'item' }, tree)).toEqual([]);
+    // Header crumbs open each node, so the walk also says what each one is.
+    expect(pageTreeAncestorRefs({ id: 'loose', kind: 'item' }, tree).map(({ id, kind }) => `${kind}:${id}`))
+      .toEqual(['page:arch', 'type:module', 'item:loose']);
   });
 });

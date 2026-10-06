@@ -126,6 +126,13 @@ function renderDetail(props: Record<string, unknown> = {}) {
   );
 }
 
+/** The page's crumb as the header strip reads it, labels only. */
+function pageCrumb(): string {
+  return Array.from(screen.getByTestId('page-header-bar').querySelectorAll('.breadcrumb-segment'))
+    .map((segment) => segment.lastElementChild?.textContent ?? '')
+    .join(' / ');
+}
+
 function renderPage({ collabScope = { scopeKey: '/ws' } as unknown } = {}) {
   render(
     <Provider store={store}>
@@ -213,7 +220,7 @@ describe('TrackerItemDetail metadata region', () => {
 
     renderPage();
 
-    expect(screen.getByTestId('tracker-page-crumb').textContent).toBe('Spec / Modules / Plan / Chip row item');
+    expect(pageCrumb()).toBe('Spec / Modules / Plans / Chip row item');
     expect((screen.getByTestId('tracker-page-title') as HTMLTextAreaElement).value).toBe('Chip row item');
     const chips = Array.from(
       screen.getByTestId('tracker-page-field-pills').querySelectorAll('.tracker-field-pill'),
@@ -253,7 +260,7 @@ describe('TrackerItemDetail metadata region', () => {
     store.set(pageTree.itemPlacements, [{ itemId: ITEM.id, parentId: 'd-research' }]);
     try {
       renderPage();
-      expect(screen.getByTestId('tracker-page-crumb').textContent).toBe('Spec / Research / Chip row item');
+      expect(pageCrumb()).toBe('Spec / Research / Chip row item');
     } finally {
       store.set(pageTree.itemPlacements, []);
     }
@@ -267,9 +274,9 @@ describe('TrackerItemDetail metadata region', () => {
     store.set(pageTree.itemPlacements, [{ itemId: ITEM.id, parentId: 'd-modules' }]);
     try {
       renderPage({ collabScope: null });
-      await waitFor(() => expect(screen.getByTestId('tracker-page-crumb').textContent).toBe('Spec / Modules / Chip row item'));
+      await waitFor(() => expect(pageCrumb()).toBe('Spec / Modules / Chip row item'));
       act(() => store.set(pageTree.itemPlacements, [{ itemId: ITEM.id, parentId: 'd-research' }]));
-      expect(screen.getByTestId('tracker-page-crumb').textContent).toBe('Spec / Research / Chip row item');
+      expect(pageCrumb()).toBe('Spec / Research / Chip row item');
     } finally {
       spy.mockRestore();
       store.set(pageTree.itemPlacements, []);

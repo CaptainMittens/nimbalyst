@@ -139,6 +139,8 @@ export interface CollabDocsSessionAtoms {
     itemPlacements: ListAtom<SharedItemPlacement>;
     /** True when the tree is the one page tree (documents nest in documents). */
     pageTree: Atom<boolean>;
+    /** True when this section keeps a plain page's own fields (`pageFields.ts`). */
+    pageFields: Atom<boolean>;
     syncStatus: WritableAtom<CollabDocsUIStatus, [CollabDocsUIStatus], void>;
     hasTeam: WritableAtom<boolean, [boolean], void>;
     activeTeamUserId: Atom<string | null>;
@@ -199,6 +201,7 @@ export interface CollabDocsSession {
         };
     }): Promise<boolean>;
     updateDocumentTitle(documentId: string, title: string): Promise<CollabPlacementWriteResult>;
+    updateDocumentFields(documentId: string, patch: Record<string, unknown>): Promise<CollabPlacementWriteResult>;
     /**
      * Removes the index row. Only with `purge` (Trash's "Delete permanently" and
      * "Empty Trash") does a page already in Trash go for good; a server that

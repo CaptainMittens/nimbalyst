@@ -56,6 +56,8 @@ export interface BreadcrumbCrumb {
   /** The last crumb: darker, semibold, never a link. */
   current?: boolean;
   title?: string;
+  /** Drawn before the label, as a file crumb draws its folder or file icon. */
+  icon?: React.ReactNode;
 }
 
 /**
@@ -86,19 +88,21 @@ export function EditorBreadcrumb({
           {crumb.onClick ? (
             <button
               type="button"
-              className="breadcrumb-segment breadcrumb-clickable -mx-1 -my-0.5 min-w-0 cursor-pointer overflow-hidden text-ellipsis rounded border-none bg-transparent px-1 py-0.5 text-inherit transition-colors duration-150 hover:bg-nim-hover hover:text-nim"
+              className="breadcrumb-segment breadcrumb-clickable -mx-1 -my-0.5 flex min-w-0 cursor-pointer items-center gap-1 overflow-hidden rounded border-none bg-transparent px-1 py-0.5 text-inherit transition-colors duration-150 hover:bg-nim-hover hover:text-nim"
               onClick={crumb.onClick}
               title={crumb.title ?? crumb.label}
             >
-              {crumb.label}
+              {crumb.icon}
+              <span className="min-w-0 overflow-hidden text-ellipsis">{crumb.label}</span>
             </button>
           ) : (
             <span
-              className={`breadcrumb-segment min-w-0 overflow-hidden text-ellipsis ${crumb.current ? 'breadcrumb-current font-semibold text-nim' : ''}`}
+              className={`breadcrumb-segment flex min-w-0 items-center gap-1 overflow-hidden ${crumb.current ? 'breadcrumb-current font-semibold text-nim' : ''}`}
               title={crumb.title ?? crumb.label}
               aria-current={crumb.current ? 'page' : undefined}
             >
-              {crumb.label}
+              {crumb.icon}
+              <span className="min-w-0 overflow-hidden text-ellipsis">{crumb.label}</span>
             </span>
           )}
         </React.Fragment>

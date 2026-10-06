@@ -26,6 +26,11 @@ export type CollabDocsCommand =
       metadata?: { metadataVersion: 2; fileExtension: string; editorId: string };
     }
   | { type: 'update-document-title'; documentId: string; title: string }
+  /**
+   * A plain page's own fields (`pageFields.ts`), as a patch: a key set to null
+   * clears that field, an absent key keeps it. The store validates the result.
+   */
+  | { type: 'set-document-fields'; documentId: string; fields: Record<string, unknown> }
   /** `purge` permanently deletes a page in Trash; only Trash's permanent delete sets it. */
   | { type: 'remove-document'; documentId: string; purge?: true }
   | { type: 'trash-document'; documentId: string; trashedAt: number }
@@ -115,6 +120,8 @@ export interface CollabDocsSnapshot extends CollabDataSnapshot<SharedDocument, S
    * Absent while unknown; then nothing is split off.
    */
   primaryProjectId?: string | null;
+  /** True when this store keeps a plain page's own fields; absent hides them. */
+  pageFields?: boolean;
 }
 
 export type CollabDocsDataChange =

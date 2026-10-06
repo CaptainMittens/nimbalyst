@@ -170,6 +170,10 @@ export interface CollaborativeDocumentCreationDependencies {
   openPersonal(scope: CollabScope, document: SharedDocument): void;
   /** Drop the optimistic tree row of a Personal page main refused to save. */
   discardPersonal(scope: CollabScope, documentId: string): void;
+  /** Write a new Personal page's first body; throws when it was not saved. */
+  writePersonalBody(scope: CollabScope, documentId: string, content: string): Promise<void>;
+  /** Move a Personal page whose body could not be written to Trash. */
+  trashPersonal(scope: CollabScope, documentId: string): Promise<void>;
   generateId(): string;
   now(): number;
   hashContent(content: string | Uint8Array): Promise<string>;
@@ -333,6 +337,18 @@ function defaultDependencies(): CollaborativeDocumentCreationDependencies {
       // Local only: main never stored the row, so there is nothing to delete.
       store.set(getElectronCollabDocsSession(scope).atoms.allSharedDocuments, (current) =>
         current.filter((document) => document.documentId !== documentId));
+    },
+    writePersonalBody: async (scope, documentId, content) => {
+      const result = await window.electronAPI.invoke(
+        'personal-pages:update-body',
+        workspacePathFromPersonalScopeKey(scope.scopeKey),
+        documentId,
+        content,
+      ) as { version?: number; conflict?: boolean } | null;
+      if (!result || result.conflict) throw new Error('The page body was not saved.');
+    },
+    trashPersonal: async (scope, documentId) => {
+      await getElectronCollabDocsSession(scope).trashDocument(documentId);
     },
     generateId: () => crypto.randomUUID(),
     now: () => Date.now(),
@@ -795,6 +811,26 @@ export class CollaborativeDocumentCreationOrchestrator {
         failure === undefined ? undefined : { cause: failure },
       );
     }
+    // A team page is seeded from `sourceContent` in its room; a Personal page's
+    // body is a separate local write. Without it, content handed in (an agent's
+    // initialContent, a moved page) came back as an empty page.
+    if (input.sourceContent) {
+      try {
+        const body = typeof input.sourceContent === 'string' ? input.sourceContent : new TextDecoder().decode(input.sourceContent);
+        await this.dependencies.writePersonalBody(input.scope, documentId, body);
+      } catch (cause) {
+        // Recoverable from Trash, not a blank page that reads as a success.
+        await this.dependencies.trashPersonal(input.scope, documentId).catch(() => undefined);
+        throw new CollaborativeDocumentCreationError(
+          'seed-failed',
+          `The page was created but its text was not saved: ${cause instanceof Error ? cause.message : String(cause)}`,
+          operationId,
+          documentId,
+          false,
+          { cause },
+        );
+      }
+    }
     const now = this.dependencies.now();
     const document: SharedDocument = {
       documentId,
@@ -813,16 +849,19 @@ export class CollaborativeDocumentCreationOrchestrator {
   }
 }
 
-const sharedCreationOrchestrator = new CollaborativeDocumentCreationOrchestrator();
+// Built on first use, so importing this module (for createCollaborativeDocument)
+// does not read its dependencies at load time.
+let sharedCreationOrchestrator: CollaborativeDocumentCreationOrchestrator | undefined;
+const sharedOrchestrator = () => (sharedCreationOrchestrator ??= new CollaborativeDocumentCreationOrchestrator());
 
 export function createCollaborativeDocument(
   input: CreateCollaborativeDocumentInput,
 ): Promise<SharedDocument> {
-  return sharedCreationOrchestrator.create(input);
+  return sharedOrchestrator().create(input);
 }
 
 export function ensureTypePageDocument(
   input: Parameters<CollaborativeDocumentCreationOrchestrator['ensureTypePage']>[0],
 ): Promise<SharedDocument> {
-  return sharedCreationOrchestrator.ensureTypePage(input);
+  return sharedOrchestrator().ensureTypePage(input);
 }

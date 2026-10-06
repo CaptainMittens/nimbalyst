@@ -46,6 +46,7 @@ export interface PersonalPagesSnapshot {
   typePlacements: SharedTypePlacement[];
   itemPlacements: SharedItemPlacement[];
   pageTree: true;
+  pageFields: true;
 }
 
 export type PersonalBodyWriteResult =
@@ -142,7 +143,7 @@ export class PersonalPagesService {
       store.listTypePlacements(db, ws),
       store.listItemPlacements(db, ws),
     ]);
-    return { items, containers: [], typePlacements, itemPlacements, pageTree: true };
+    return { items, containers: [], typePlacements, itemPlacements, pageTree: true, pageFields: true };
   }
 
   async command(workspacePath: string, command: CollabDocsCommand): Promise<CollabDocsCommandResult> {
@@ -170,6 +171,12 @@ export class PersonalPagesService {
         break;
       case 'update-document-title':
         await this.mustUpdateDocument(db, ws, command.documentId, { title: command.title ?? '' });
+        break;
+      case 'set-document-fields':
+        if (!command.fields || typeof command.fields !== 'object') throw new Error('fields is required');
+        if (!await store.patchDocumentFields(db, ws, requireId(command.documentId, 'documentId'), command.fields)) {
+          throw new Error(`No personal page ${command.documentId}`);
+        }
         break;
       case 'trash-document':
         await this.mustUpdateDocument(db, ws, command.documentId, {

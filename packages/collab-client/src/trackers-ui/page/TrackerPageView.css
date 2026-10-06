@@ -25,21 +25,6 @@
   padding-top: 12px;
 }
 
-/* One row with the type chip first: the chips join the row instead of
-   forming a block of their own (which wrapped below the type chip). */
-.tracker-page-view-props .tracker-field-pills {
-  display: contents;
-}
-
-/* Values stay on one line; the chip's title carries the full text. */
-.tracker-page-view-props .tracker-field-pill-labeled {
-  max-width: 280px;
-}
-
-.tracker-page-view-add-field {
-  padding: 2px 6px;
-}
-
 /* The editor reserves 400px below the last line for a tab that is all body;
    here the Links section follows the body, so keep a normal gap. */
 .tracker-page-view-body .ContentEditable__root {
@@ -60,3 +45,13 @@
 /* Named definitions are edited by the type page tabs; Markdown keeps their fences. */
 .type-page-prose [data-named-page-view],
 .type-page-tab-prose [data-named-page-view] { display: none; }
+
+.tracker-page-view-header--bar {
+  padding-top: 36px;
+}
+
+/* A body that opens with the page title as a heading: the header already
+   shows the title, so the repeated heading is hidden, not removed. */
+.ContentEditable__root[data-title-heading='hidden'] > h1:first-child {
+  display: none;
+}

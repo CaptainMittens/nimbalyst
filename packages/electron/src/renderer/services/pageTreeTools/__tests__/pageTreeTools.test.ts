@@ -14,6 +14,7 @@ import {
   movePageTreeNodeTool,
   renamePageTool,
   searchPagesTool,
+  setPageFieldsTool,
   setPageTypeTool,
   type PageTreeSection,
   type PageTreeToolEnv,
@@ -55,6 +56,7 @@ class FakeSession {
   removePage = (...args: unknown[]) => { this.calls.push(['removePage', ...args]); return this.outcome(); };
   pageRemovalCount = () => 0;
   updateDocumentTitle = async (...args: unknown[]) => { this.calls.push(['updateDocumentTitle', ...args]); return this.outcome(); };
+  updateDocumentFields = async (...args: unknown[]) => { this.calls.push(['updateDocumentFields', ...args]); return this.outcome(); };
   createFolder = async (name: string, parentId: string | null) => {
     this.calls.push(['createFolder', name, parentId]);
     this.documents.push(page(`new-${name}`, name, parentId));
@@ -280,6 +282,22 @@ describe('page tree agent tools', () => {
     expect(await searchPagesTool(envFor({ team: session }), { query: '  ' })).toMatchObject({ success: false });
     Object.assign(session, { searchPages: async () => null });
     expect(await searchPagesTool(envFor({ team: session }), { query: 'sync' })).toMatchObject({ success: false, error: expect.stringMatching(/unavailable/) });
+  });
+
+  it('sets a plain page\'s fields as a patch, reports what the page keeps, and lists them', async () => {
+    const personal = new FakeSession([page('ideas', 'Ideas', null, { fields: { status: 'draft', owner: 'ana@example.com' } })]);
+    const env = envFor({ personal });
+    const set = await setPageFieldsTool(env, { section: 'personal', itemId: 'ideas', fields: { owner: null, status: 'shipped', tags: ['sync'] } });
+    expect(personal.calls).toEqual([['updateDocumentFields', 'ideas', { owner: null, status: 'shipped', tags: ['sync'] }]]);
+    // The invalid status is ignored, so the page keeps 'draft'.
+    expect(set).toEqual({ success: true, fields: { status: 'draft', tags: ['sync'] } });
+
+    const listed = await listPagesTool(env, { section: 'personal', projection: 'compact' }) as unknown as { nodes: Array<{ fields?: unknown }> };
+    expect(listed.nodes[0].fields).toEqual({ status: 'draft', owner: 'ana@example.com' });
+    expect(await setPageFieldsTool(env, { section: 'personal', itemId: 'type-page:module', fields: {} })).toMatchObject({ success: false });
+    personal.refuse = 'Page fields are not available in this section yet.';
+    expect(await setPageFieldsTool(env, { section: 'personal', itemId: 'ideas', fields: { status: 'current' } }))
+      .toMatchObject({ success: false, error: expect.stringMatching(/not available/) });
   });
 
   it('works in the Personal section with no team, through the registered handler', async () => {

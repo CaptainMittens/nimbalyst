@@ -36,6 +36,7 @@ const PAGES_HELP = `Team pages (Nimbalyst Teams sign-in; server = NIM_SERVER, de
   nim pages rename <pageId> "<name>"
   nim pages delete <pageId> --kind doc|folder
   nim pages set-type <pageId> <typeId>
+  nim pages set-fields <pageId> [--owner <email>] [--status draft|current|outdated] [--summary <text>] [--tag <t>]... [--clear <field>]...
   nim pages members [query]
   nim pages types [--search S]
   nim pages define-type [-f <schema.yaml|.json>] [--predicates-file F] [--overwrite]

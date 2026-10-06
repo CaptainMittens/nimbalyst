@@ -14,7 +14,7 @@ import type {
   CollabTreeTypeNode,
   CollabTypeTreeResolver,
 } from '@nimbalyst/collab-client/docs';
-import { FloatingPortal, useFloatingMenu, virtualElement } from './primitives/useFloatingMenu';
+import { FloatingPortal, useFloatingMenu, virtualElement } from '../ui-primitives/useFloatingMenu';
 
 /** The open typed page or type page, whose row reads as the open page's does. */
 export const CollabTreeActiveContext = React.createContext<{ itemId: string | null; typeId: string | null }>({ itemId: null, typeId: null });

@@ -1,16 +1,18 @@
 /**
- * TrackerDocumentHeader - Renders tracker status bar for full-document tracking
+ * TrackerDocumentHeader - the type row of a typed markdown file.
  *
- * This component:
- * - Detects tracker frontmatter in document content
- * - Loads the appropriate tracker data model
- * - Renders the StatusBar component with tracker data
- * - Updates frontmatter when fields change
+ * A file with tracker frontmatter (a plan, a decision, ...) is a typed page
+ * that lives in Files. It draws the same row a typed page in Pages draws
+ * (`TrackerTypeRow`): the type chip, the fields that hold a value, and a "+"
+ * for the rest, with the file's tracker item key at the end. Edits round-trip
+ * through the frontmatter.
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
-import { StatusBar } from '../components/StatusBar';
+import type { FieldDefinition } from '@nimbalyst/tracker-schema';
+import { MaterialSymbol } from '../../../ui/icons/MaterialSymbol';
+import { TrackerTypeRow } from '../components/TrackerTypeRow';
 import { useTrackerChipFieldSections } from '../components/trackerChipFields';
 import { useTrackerRelationshipCandidates } from '../components/useTrackerRelationshipCandidates';
 import type { TeamMemberOption } from '../components/TrackerFieldEditor';
@@ -102,6 +104,10 @@ export const TrackerDocumentHeader: React.FC<DocumentHeaderComponentProps> = ({
     }
   }, [trackerData?.type, trackerType]);
 
+  // The row shows an edit at once; the file's next read confirms it.
+  const [localData, setLocalData] = useState<Record<string, unknown>>(trackerData?.data ?? {});
+  useEffect(() => setLocalData(trackerData?.data ?? {}), [trackerData]);
+
   // Handle field changes - get fresh content at the moment of change
   const handleChange = useCallback((updates: Record<string, any>) => {
     if (!trackerData || !onContentChange) return;
@@ -122,8 +128,13 @@ export const TrackerDocumentHeader: React.FC<DocumentHeaderComponentProps> = ({
       throw error;
     }
     setWriteError(null);
+    setLocalData((current) => ({ ...current, ...updates }));
     onContentChange(updatedContent);
   }, [getContent, trackerData, onContentChange]);
+  const handleSaveField = useCallback(
+    (field: FieldDefinition, value: unknown) => handleChange({ [field.name]: value }),
+    [handleChange],
+  );
 
   const associatedItem = useMemo(() => {
     if (!trackerData) return null;
@@ -183,16 +194,32 @@ export const TrackerDocumentHeader: React.FC<DocumentHeaderComponentProps> = ({
   }
 
   return (
-    <div className="document-header-tracker">
-      <StatusBar
-        model={dataModel}
-        data={trackerData.data}
-        onChange={handleChange}
-        trackerItemLink={trackerItemLink}
+    <div className="document-header-tracker tracker-document-header">
+      <TrackerTypeRow
+        typeId={dataModel.type}
+        values={localData}
+        editable={Boolean(onContentChange)}
+        onSaveField={handleSaveField}
+        fieldSet="all"
+        resetKey={filePath}
         teamMembers={teamMembers}
         relationshipCandidates={relationshipCandidates}
         onOpenItem={handleOpenItem}
         onCreateCollection={trackerFieldCapabilities?.onCreateCollection}
+        testIdBase="tracker-document"
+        className="border-b border-[var(--nim-border)] pb-3"
+        end={trackerItemLink && (
+          <button
+            type="button"
+            className="tracker-document-header-item-link ml-auto inline-flex shrink-0 items-center gap-1 rounded border-none bg-transparent px-1 text-xs text-[var(--nim-text-muted)] cursor-pointer hover:bg-[var(--nim-bg-hover)] hover:text-[var(--nim-text)]"
+            title={`Open tracker item: ${trackerItemLink.title}`}
+            aria-label={`Open tracker item ${trackerItemLink.label}`}
+            onClick={trackerItemLink.onOpen}
+          >
+            <MaterialSymbol icon="tag" size={13} />
+            {trackerItemLink.label}
+          </button>
+        )}
       />
       {writeError && (
         <div

@@ -16,6 +16,7 @@ import type {
   TeamState as ProtocolTeamState,
   EncryptedDocIndexEntry as ProtocolEncryptedDocIndexEntry,
   EncryptedFolderNode as ProtocolEncryptedFolderNode,
+  PageFields,
   PageParentKind,
 } from '@nimbalyst/collab-protocol';
 import type { TeamJwt, TeamMemberId } from '../auth/jwtScopes';
@@ -251,6 +252,8 @@ export interface DocIndexEntry {
   trashedAt?: number | null;
   /** False until the body is first edited; absent from older servers (= true). */
   hasContent?: boolean;
+  /** A plain page's own fields; absent when none are set or the server keeps none. */
+  fields?: PageFields;
   /**
    * True when the server returned a doc index entry whose encrypted title
    * could not be decrypted with the current org key. Preserved in the list

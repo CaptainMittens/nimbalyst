@@ -8,6 +8,6 @@ export * from './documentDrag';
 export * from './documentPresentation';
 export * from './PagesSectionEntries';
 export * from './primitives/CollabSearchInput';
-export * from './primitives/EditorHeaderBar';
+export * from '../ui-primitives/EditorHeaderBar';
 export * from './primitives/ScopeSummaryHeader';
 export * from './SharedDocsListView';

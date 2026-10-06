@@ -101,6 +101,7 @@ function makeHarness(options: {
   const documents = options.documents ?? [];
   const folders = options.folders ?? [];
   const events: string[] = [];
+  const personalBodies = new Map<string, string>();
   const seedResults = [...(options.seedResults ?? [true])];
   const seedRetryFlags: boolean[] = [];
   let extensionLoaded = options.extensionLoaded ?? true;
@@ -169,6 +170,11 @@ function makeHarness(options: {
       events.push('open-personal');
     },
     discardPersonal: () => { events.push('discard-personal'); },
+    writePersonalBody: async (_scope, documentId, content) => {
+      events.push('write-body');
+      personalBodies.set(documentId, content);
+    },
+    trashPersonal: async () => { events.push('trash-personal'); },
     generateId: () => `doc-${++generated}`,
     now: () => 100,
     hashContent: async content => `hash:${typeof content === 'string' ? content : content.byteLength}`,
@@ -176,6 +182,7 @@ function makeHarness(options: {
   return {
     orchestrator: new CollaborativeDocumentCreationOrchestrator(deps),
     deps,
+    personalBodies,
     documents,
     events,
     published,
@@ -200,7 +207,10 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
       sourceContent: '# Reading list',
     });
 
-    expect(harness.events).toEqual(['register', 'open-personal']);
+    // The body is written before the page opens; an agent's initialContent
+    // must not come back as an empty page.
+    expect(harness.events).toEqual(['register', 'write-body', 'open-personal']);
+    expect(harness.personalBodies.get(document.documentId)).toBe('# Reading list');
     expect(document).toMatchObject({
       title: 'Reading list',
       teamProjectId: null,
@@ -230,6 +240,27 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
     })).rejects.toMatchObject({ code: 'register-failed' });
     expect(unsaved.events).toEqual(['register', 'discard-personal']);
     expect(unsaved.published).toEqual([]);
+  });
+
+  it('sends a personal page whose body did not save to Trash and fails, rather than leaving it empty', async () => {
+    const harness = makeHarness();
+    harness.deps.writePersonalBody = async () => {
+      harness.events.push('write-body');
+      throw new Error('disk full');
+    };
+    await expect(harness.orchestrator.create({
+      scope: createPersonalCollabScope('/workspace'), descriptor: markdownDescriptor,
+      requestedName: 'Notes', parentFolderId: null, sourceContent: 'Some notes',
+    })).rejects.toMatchObject({ message: expect.stringContaining('disk full') });
+    expect(harness.events).toEqual(['register', 'write-body', 'trash-personal']);
+    expect(harness.published).toEqual([]);
+
+    // No content, nothing to write.
+    const empty = makeHarness();
+    await empty.orchestrator.create({
+      scope: createPersonalCollabScope('/workspace'), descriptor: markdownDescriptor, requestedName: 'Blank', parentFolderId: null,
+    });
+    expect(empty.events).toEqual(['register', 'open-personal']);
   });
 
   it('can create a cascade child without publishing it as the pending open document', async () => {

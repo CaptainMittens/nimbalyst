@@ -228,6 +228,7 @@ export const SITUATIONAL_TOOLS: readonly string[] = [
   'listPages',
   'searchPages',
   'setPageType',
+  'setPageFields',
   // read-only organization/resource discovery for cross-user collaboration
   'findOrgMembers',
   'getResourceSharingStatus',

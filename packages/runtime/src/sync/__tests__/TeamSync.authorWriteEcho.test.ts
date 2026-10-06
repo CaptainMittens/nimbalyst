@@ -102,3 +102,48 @@ it('re-reads the index after a refused author write, so the refused move does no
   expect(onDocumentsLoaded).toHaveBeenCalledWith([expect.objectContaining({ documentId: 'page-b', parentFolderId: 'page-root' })]);
   provider.destroy();
 });
+
+it('page fields: capability, offline patches merged per page, and a broadcast without fields keeps what was known', async () => {
+  const onDocumentChanged = vi.fn();
+  const provider = new TeamSyncProvider({
+    serverUrl: 'ws://example.test',
+    getJwt: async () => asTeamJwt('token'),
+    orgId: 'org-1',
+    teamMemberId: asTeamMemberId('user-1'),
+    onDocumentChanged,
+  });
+
+  // Two offline edits to one page: the queue keeps one message per page, so
+  // the second must not drop the first's status. A later key wins.
+  provider.setDocumentFields('page-b', { status: 'draft', owner: 'ana@example.com' }, { requestId: 'fields-1' });
+  provider.setDocumentFields('page-b', { owner: null, tags: ['sync'] }, { requestId: 'fields-2' });
+  provider.setDocumentFields('page-c', { summary: 'Other page' });
+  const sent: unknown[] = [];
+  (provider as any).ws = { readyState: WebSocket.OPEN, send: (data: string) => sent.push(JSON.parse(data)), close: () => undefined };
+  (provider as any).replayPendingOfflineMessages();
+  expect(sent).toEqual([
+    { type: 'docIndexSetFields', documentId: 'page-b', fields: { status: 'draft', owner: null, tags: ['sync'] }, requestId: 'fields-2' },
+    { type: 'docIndexSetFields', documentId: 'page-c', fields: { summary: 'Other page' } },
+  ]);
+
+  await receive(provider, { type: 'teamSyncResponse', team: { metadata, members: [], documents: [], pageTree: true } });
+  expect(provider.storesPageFields()).toBe(false);
+  await receive(provider, { type: 'teamSyncResponse', team: { metadata, members: [], documents: [], pageTree: true, pageFields: true } });
+  expect(provider.storesPageFields()).toBe(true);
+
+  const entry = {
+    documentId: 'page-b', encryptedTitle: 'B', titleIv: '', documentType: 'markdown', createdBy: 'user-1', createdAt: 1,
+    updatedAt: 2, projectId: 'p1', lastWriterUserId: 'user-1', parentFolderId: null, parentKind: 'page', sortOrder: 1, trashedAt: null,
+  };
+  await receive(provider, { type: 'docIndexBroadcast', document: { ...entry, fields: { status: 'draft', tags: ['sync'] } } });
+  expect(provider.getDocuments()[0].fields).toEqual({ status: 'draft', tags: ['sync'] });
+  // A path that does not carry fields (absent) keeps them; null clears them.
+  await receive(provider, { type: 'docIndexBroadcast', document: { ...entry, sortOrder: 2 } });
+  expect(provider.getDocuments()[0]).toMatchObject({ sortOrder: 2, fields: { status: 'draft', tags: ['sync'] } });
+  await receive(provider, { type: 'docIndexSyncResponse', documents: [entry] });
+  expect(provider.getDocuments()[0].fields).toEqual({ status: 'draft', tags: ['sync'] });
+  await receive(provider, { type: 'docIndexBroadcast', document: { ...entry, fields: null } });
+  expect(provider.getDocuments()[0].fields).toBeUndefined();
+  expect(onDocumentChanged).toHaveBeenLastCalledWith(expect.not.objectContaining({ fields: expect.anything() }));
+  provider.destroy();
+});

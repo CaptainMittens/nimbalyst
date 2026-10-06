@@ -109,6 +109,20 @@ async function purgeLosesARaceWithARestore(base: TestPagesDb): Promise<void> {
   expect((await other.snapshot(WS)).items.map((item) => item.documentId).sort()).toEqual(['restored']);
 }
 
+
+/** A page's own fields: patched per key, cleared by null, validated on the way in. */
+async function pageFieldsRoundTrip(service: PersonalPagesService, relaunch?: () => Promise<PersonalPagesService>): Promise<void> {
+  await service.command(WS, { type: 'register-document', documentId: 'p1', title: 'Pricing', documentType: 'markdown', parentFolderId: null });
+  expect((await service.snapshot(WS)).pageFields).toBe(true);
+  await service.command(WS, { type: 'set-document-fields', documentId: 'p1', fields: { status: 'current', owner: 'ana@example.com', tags: ['pricing', 'pricing'] } });
+  await service.command(WS, { type: 'set-document-fields', documentId: 'p1', fields: { owner: null, summary: 'What we charge', status: 'shipped' } });
+  const reopened = relaunch ? await relaunch() : service;
+  const page = (await reopened.snapshot(WS)).items.find((doc) => doc.documentId === 'p1');
+  // An unknown status is dropped, not stored; the earlier valid one stays.
+  expect(page?.fields).toEqual({ status: 'current', summary: 'What we charge', tags: ['pricing'] });
+  await expect(reopened.command(WS, { type: 'set-document-fields', documentId: 'missing', fields: { status: 'draft' } })).rejects.toThrow();
+}
+
 describe('PersonalPagesService', () => {
   let tmp: string;
   let db: SQLiteDatabase;
@@ -497,6 +511,15 @@ describe('PersonalPagesService', () => {
     expect(await service.getBody(WS, 'd1')).toEqual({ content: 'second', version: 2 });
   });
 
+  it('keeps a page\'s own fields across a second launch', async () => {
+    const service = await open();
+    await pageFieldsRoundTrip(service, async () => {
+      service.dispose();
+      await db.close();
+      return open();
+    });
+  });
+
   it('requires a workspace path', async () => {
     const service = await open();
     await expect(service.snapshot('')).rejects.toThrow(/workspacePath/);
@@ -552,6 +575,8 @@ describe('PersonalPagesService on PGLite', () => {
     // The worker reruns every block on each launch.
     await pglite.exec(mirrorDdl('0051'));
     await pglite.exec(mirrorDdl('0051'));
+    await pglite.exec(mirrorDdl('0052'));
+    await pglite.exec(mirrorDdl('0052'));
     const db = {
       query: (sql: string, params?: unknown[]) => pglite.query(sql, params) as Promise<{ rows: any[] }>,
       runTransaction: async (statements: Array<{ sql: string; params?: unknown[] }>) => {
@@ -598,6 +623,15 @@ describe('PersonalPagesService on PGLite', () => {
     const { pglite, db } = await openPglite();
     try {
       await purgeLosesARaceWithARestore(db);
+    } finally {
+      await pglite.close();
+    }
+  });
+
+  it('keeps a page\'s own fields', async () => {
+    const { pglite, service } = await openPglite();
+    try {
+      await pageFieldsRoundTrip(service);
     } finally {
       await pglite.close();
     }

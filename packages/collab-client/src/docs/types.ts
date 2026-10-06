@@ -1,3 +1,4 @@
+import type { PageFields } from './pageFields';
 /**
  * A parent in the page tree is a page (a document) or a typed page (a tracker
  * item). Absent on the wire means a page.
@@ -36,6 +37,8 @@ export interface SharedDocument {
   hasContent?: boolean;
   /** True when the encrypted title could not be decrypted. */
   decryptFailed?: boolean;
+  /** A plain page's own fields (owner, status, summary, tags); see `pageFields.ts`. */
+  fields?: PageFields;
 }
 
 export interface SharedFolder {

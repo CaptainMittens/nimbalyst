@@ -23,7 +23,7 @@ Before creating a page, search for an existing one with `searchPages` (`query`, 
 
 ## The model
 
-- **Page.** Markdown in the team's page tree, shared and collaborative. Any page can hold child pages; a page with an empty body works as a folder.
+- **Page.** Markdown in the team's page tree, shared and collaborative. Any page can hold child pages; a page with an empty body works as a folder. A plain page's type is Page, with four fields of its own: status (`draft`, `current`, `outdated`), owner (an email), a one-line summary, and tags. The page shows its title above the body, so start the body with text, never with the title as a heading.
 - **Typed page.** A page with a type. It is a tracker item: a few single-valued fields in its header and a collaborative markdown body. It can live anywhere in the tree; one not placed anywhere else sits under its type.
 - **Type.** A tracker type the team defines (Module, Technology, Competitor). It is placed once in the tree, and its page shows prose about the type above a table of every page of that type. A subtype sets `extends` and nests inside its base (Libraries inside Technologies).
 - **Relation.** A named predicate with an inverse name ("built on" and "underlies"), allowed between particular types. It is written on a link in the body. The Links section at the bottom of each page lists its relations, incoming ones under the inverse name.
@@ -47,7 +47,7 @@ Pages mainly hold what people said and decided. You can look everything else up,
 
    If neither lists it, name the person and where it was said in prose: `(Dana Lee, in a Claude Code session, 2026-10-01)`. A decision the signed-in person made here can always be marked with their name and email from `pages_status` without a quote. Never invent a decision, a reason or a quote.
 4. **Context, with sources.** Facts the team weighs (limits, pricing, maturity, what a competitor ships) carry a source and the date you checked it. Cite a web page or document as an ordinary link titled `cite`: `[TanStack Table docs](https://tanstack.com/table "cite")`; the page lists its sources at the bottom. A table on a type's page or a landscape page is good context; a copy of a vendor's documentation is not. To show a type's pages inside another page, place a view (below) instead of copying rows by hand.
-5. **Short.** A page is a few paragraphs. Update the page instead of adding a second page about the same thing. When a decision changes, rewrite the sentence and say what it replaced and when.
+5. **Short.** A page is a few paragraphs. The page shows its title above the body, so start the body with text, never with the title as a heading. Update the page instead of adding a second page about the same thing. When a decision changes, rewrite the sentence and say what it replaced and when.
 
 ## Typed page example
 
@@ -96,6 +96,7 @@ Every tool here takes `repo` and, when pinned, `project` (see the `connect` skil
 | Place a type in the tree, or move it | `moveSharedItem` with `kind: type` (a subtype stays inside its base) |
 | Give a plain page a type in place | `setPageType` (`pageId`, `typeId`); it keeps its place, body and children |
 | Rename or delete a page | `renameSharedItem`, `deleteSharedItem` (`kind: folder` removes the page with its subtree; ask before deleting) |
+| Set a plain page's status, owner, summary or tags | `setPageFields` (`itemId`, `fields`; only the fields you pass change, `null` clears one). `listPages` shows them on each page |
 | Create a typed page | `tracker_create` (`type`, `title`, `description` = body markdown, header fields in `fields`). It gets its issue key and `link` at once and appears under its type's page; then place it with `moveSharedItem`. |
 | Edit or rename a typed page | `tracker_update` (`title`, fields). Change the body with `applyCollabDocEdit` at `collab://tracker-content/<itemId>`, after reading it with `readCollabDoc`; `description` replaces the body only while nobody has edited it, and is refused otherwise |
 | Define a type, subtype or relation | `knowledge-setup` (`tracker_define_type`) |

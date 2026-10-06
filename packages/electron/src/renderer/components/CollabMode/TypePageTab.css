@@ -9,11 +9,6 @@
   container-type: size;
 }
 
-.type-page-tab-column {
-  max-width: 1180px;
-  margin: 0 auto;
-}
-
 .type-page-tab-type-chip {
   color: var(--nim-purple);
   background-color: color-mix(in srgb, var(--nim-purple) 14%, transparent);

@@ -55,6 +55,7 @@ export class PersonalPagesDataSource implements CollabDocsDataSource {
       typePlacements: snapshot?.typePlacements ?? [],
       itemPlacements: snapshot?.itemPlacements ?? [],
       ...(snapshot?.pageTree ? { pageTree: true } : {}),
+      ...(snapshot?.pageFields ? { pageFields: true } : {}),
     };
     this.lastItemIds = new Set(result.items.map((item) => item.documentId));
     this.lastContainerIds = new Set(result.containers.map((container) => container.folderId));

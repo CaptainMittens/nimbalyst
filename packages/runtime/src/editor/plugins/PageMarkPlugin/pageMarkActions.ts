@@ -32,10 +32,14 @@ function $blockOf(node: LexicalNode): ElementNode | null {
   return $findMatchingParent(node, (candidate) => $isElementNode(candidate) && !candidate.isInline()) as ElementNode | null;
 }
 
-/** The ancestor of `node` (or `node` itself) whose parent is `block`. */
+/**
+ * The ancestor of `node` (or `node` itself) whose parent is `block`. Compared
+ * by key: `selection.extract()` makes the block writable, so its parent
+ * pointer is a different object from the `block` read before the split.
+ */
 function $childOf(block: ElementNode, node: LexicalNode): LexicalNode | null {
   let current: LexicalNode | null = node;
-  while (current && current.getParent() !== block) current = current.getParent();
+  while (current && !current.getParent()?.is(block)) current = current.getParent();
   return current;
 }
 
@@ -52,7 +56,7 @@ export function $markSelection(attrs: PageMarkAttrs): PageMarkNode | null {
   if (existing) return existing;
   if (selection.isCollapsed()) return null;
   const block = $blockOf(selection.anchor.getNode());
-  if (!block || block !== $blockOf(selection.focus.getNode())) return null;
+  if (!block || !block.is($blockOf(selection.focus.getNode()))) return null;
 
   const extracted = selection.extract();
   const children: LexicalNode[] = [];

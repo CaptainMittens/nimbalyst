@@ -34,6 +34,8 @@ export interface BreadcrumbCrumb {
     /** The last crumb: darker, semibold, never a link. */
     current?: boolean;
     title?: string;
+    /** Drawn before the label, as a file crumb draws its folder or file icon. */
+    icon?: React.ReactNode;
 }
 /**
  * The crumb trail, ellipsizing as a whole rather than per crumb, so a long

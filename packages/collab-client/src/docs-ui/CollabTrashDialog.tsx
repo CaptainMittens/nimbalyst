@@ -15,7 +15,7 @@ import { pageDisplayName, type SharedDocument } from '@nimbalyst/collab-client/d
 import { listTrashEntries, restoredParentGone, pagesTrashedWith } from '../docs/collabTrash';
 import { useCollabDocsUI } from './CollabDocsUIProvider';
 import { resolveSharedDocumentTypePresentation } from './documentPresentation';
-import { FloatingPortal } from './primitives/useFloatingMenu';
+import { FloatingPortal } from '../ui-primitives/useFloatingMenu';
 import { getRelativeTimeString } from './time';
 
 const nameOf = (document: SharedDocument) => pageDisplayName(document.title, document.documentType) || 'Untitled';

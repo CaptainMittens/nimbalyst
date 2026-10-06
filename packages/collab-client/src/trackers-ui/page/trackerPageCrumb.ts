@@ -6,7 +6,7 @@
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { getRecordTitle } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
-import { pageTreeAncestors } from '../embed/pageTreeAncestors';
+import { pageTreeAncestorRefs, type PageTreeAncestor } from '../embed/pageTreeAncestors';
 
 type CrumbParentKind = 'page' | 'item';
 export interface CrumbPlacement { typeId: string; parentFolderId?: string | null; parentKind?: CrumbParentKind }
@@ -25,6 +25,11 @@ export interface TrackerPageCrumb {
   ancestors: string[];
   /** Unplaced items sit under their type, which the crumb then names. */
   underType: boolean;
+  /**
+   * The same ancestors with what each one opens, root first, followed by the
+   * type when `underType`. Absent from crumbs built before it existed.
+   */
+  path?: PageTreeAncestor[];
 }
 
 /**
@@ -47,18 +52,27 @@ export function trackerPageCrumb(
   const itemPlacement = tree.itemPlacements.find((candidate) => candidate.itemId === itemId);
   if (itemPlacement) {
     const parent = itemPlacement.parentId ? { id: itemPlacement.parentId, kind: itemPlacement.parentKind ?? 'page' } : null;
-    return { ancestors: pageTreeAncestors(parent, walk), underType: false };
+    const path = pageTreeAncestorRefs(parent, walk);
+    return { ancestors: path.map((ancestor) => ancestor.name), underType: false, path };
   }
   const typePlacement = tree.typePlacements.find((candidate) => candidate.typeId === typeId);
   const parent = typePlacement?.parentFolderId ? { id: typePlacement.parentFolderId, kind: typePlacement.parentKind ?? 'page' } : null;
-  return { ancestors: pageTreeAncestors(parent, walk), underType: true };
+  const above = pageTreeAncestorRefs(parent, walk);
+  const typeName = crumbTypeName(typeId);
+  return {
+    ancestors: above.map((ancestor) => ancestor.name),
+    underType: true,
+    path: typeName ? [...above, { id: typeId, kind: 'type', name: typeName }] : above,
+  };
 }
 
 /** Same crumb, same names: lets a host skip a re-render when only titles elsewhere moved. */
 export function sameTrackerPageCrumb(left: TrackerPageCrumb, right: TrackerPageCrumb): boolean {
   return left.underType === right.underType
     && left.ancestors.length === right.ancestors.length
-    && left.ancestors.every((name, index) => name === right.ancestors[index]);
+    && left.ancestors.every((name, index) => name === right.ancestors[index])
+    && (left.path?.length ?? 0) === (right.path?.length ?? 0)
+    && (left.path ?? []).every((node, index) => node.id === right.path?.[index]?.id && node.name === right.path?.[index]?.name);
 }
 
 /**
@@ -72,9 +86,19 @@ export function trackerPageCrumbFolders(
   folders: readonly CrumbFolder[],
   tree: { itemPlacements?: readonly CrumbItemPlacement[]; item?: CrumbItemLookup } = {},
 ): string[] {
+  return trackerPageCrumbFolderRefs(typeId, placements, folders, tree).map((ancestor) => ancestor.name);
+}
+
+/** `trackerPageCrumbFolders` with what each ancestor opens. */
+export function trackerPageCrumbFolderRefs(
+  typeId: string,
+  placements: readonly CrumbPlacement[],
+  folders: readonly CrumbFolder[],
+  tree: { itemPlacements?: readonly CrumbItemPlacement[]; item?: CrumbItemLookup } = {},
+): PageTreeAncestor[] {
   const placement = placements.find((candidate) => candidate.typeId === typeId);
   const parent = placement?.parentFolderId ? { id: placement.parentFolderId, kind: placement.parentKind ?? 'page' } : null;
-  return pageTreeAncestors(parent, {
+  return pageTreeAncestorRefs(parent, {
     documents: [],
     folders,
     itemPlacements: tree.itemPlacements ?? [],

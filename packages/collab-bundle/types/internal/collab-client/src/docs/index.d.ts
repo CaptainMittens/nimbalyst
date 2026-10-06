@@ -2,6 +2,8 @@ export * from './collabDiscovery';
 export * from './collabTree';
 export * from './collabTypeResolver';
 export * from './dataSource';
+export * from './moveAcrossSections';
+export * from './pageFields';
 export * from './pageSearch';
 export * from './session';
 export * from './sharedHomeTab';

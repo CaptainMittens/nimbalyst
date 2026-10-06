@@ -1,5 +1,3 @@
-# How we write this wiki
-
 These pages hold what the people on this project said and decided, and the context they needed to decide it. Agents can look up everything else. People and agents read this page before writing here.
 
 Edit this page to fit your team. It overrides the base guide Nimbalyst ships.

@@ -35,5 +35,12 @@ export type PageTreeNodeRef = {
     id: string;
     kind: SharedParentKind | 'type';
 };
+/** One node above a position, with its name: what a clickable crumb opens. A typed page carries its type. */
+export type PageTreeAncestor = PageTreeNodeRef & {
+    name: string;
+    typeId?: string;
+};
 /** The ref's own name and everything above it. A missing node or a cycle stops the walk. */
 export declare function pageTreeAncestors(start: PageTreeNodeRef | null, tree: PageTreeAncestorsInput): string[];
+/** `pageTreeAncestors` with each node's id and kind, root first. */
+export declare function pageTreeAncestorRefs(start: PageTreeNodeRef | null, tree: PageTreeAncestorsInput): PageTreeAncestor[];

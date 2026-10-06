@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 <!-- New features go here -->
 - Sessions now form nested trees on desktop and mobile, with drag-to-reassign, Undo, subtree activity summaries, and an optional compact one-line view.
+- Pages: plain pages have a status, owner, summary and tags, and can move between Personal and Team.
 
 ### Changed
 <!-- Changes to existing functionality go here -->
@@ -18,11 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Knowledge setup asks about your goals and creates a Home page with linked starter pages.
 - Pages: save named views, configure them with compact tracker-style controls, open them full-size, create items, find typed-page decisions, and recover failed edits; Home stays user-authored and the type map supports pan and zoom.
 - Removed vendor branding from embedded tracker tables in Pages.
+- Pages and shared documents use one header layout, with a clickable path and history in the same place.
 
 ### Fixed
 <!-- Bug fixes go here -->
 - Effort and Actions menus now support typeahead like the model picker.
 - Pages with citations no longer fail to load with an editor update loop.
+- Fixed clicking a decided or open-question chip in Pages, and the Mark open question toolbar button.
 - Updated the desktop runtime with security fixes while preserving PDF export margins.
 - Fixed security issues in YAML metadata, extension archives, file-pattern matching, Git operations, MCP connections, proxy address handling and development tooling.
 - Fixed formatting loss on other clients when undoing collaborative text deletion.

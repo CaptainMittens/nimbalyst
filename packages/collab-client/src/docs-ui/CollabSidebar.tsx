@@ -46,7 +46,7 @@ import {
   type CollabPageMoveTarget,
   type CollabRowDrop,
 } from './CollabTypeTreeRows';
-import { useFloatingMenu, FloatingPortal, virtualElement } from './primitives/useFloatingMenu';
+import { useFloatingMenu, FloatingPortal, virtualElement } from '../ui-primitives/useFloatingMenu';
 import { CollabSectionMenu, CollabTreeEmptyState } from './CollabSectionRoot';
 import { CollabSidebarTrashEntry } from './CollabTrash';
 import { revealKeysFor } from './collabTreeReveal';

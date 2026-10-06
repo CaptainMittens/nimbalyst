@@ -4,6 +4,7 @@
  * the web console read the same crumb from their own sessions.
  */
 import type { TrackerRecord } from '../../../../runtime/src/core/TrackerRecord';
+import { type PageTreeAncestor } from '../embed/pageTreeAncestors';
 type CrumbParentKind = 'page' | 'item';
 export interface CrumbPlacement {
     typeId: string;
@@ -37,6 +38,11 @@ export interface TrackerPageCrumb {
     ancestors: string[];
     /** Unplaced items sit under their type, which the crumb then names. */
     underType: boolean;
+    /**
+     * The same ancestors with what each one opens, root first, followed by the
+     * type when `underType`. Absent from crumbs built before it existed.
+     */
+    path?: PageTreeAncestor[];
 }
 /**
  * Where a typed page sits in the Pages tree. A placed item reads its own
@@ -61,6 +67,11 @@ export declare function trackerPageCrumbFolders(typeId: string, placements: read
     itemPlacements?: readonly CrumbItemPlacement[];
     item?: CrumbItemLookup;
 }): string[];
+/** `trackerPageCrumbFolders` with what each ancestor opens. */
+export declare function trackerPageCrumbFolderRefs(typeId: string, placements: readonly CrumbPlacement[], folders: readonly CrumbFolder[], tree?: {
+    itemPlacements?: readonly CrumbItemPlacement[];
+    item?: CrumbItemLookup;
+}): PageTreeAncestor[];
 /** A typed page's title and type, for a crumb walking up through typed pages. */
 export declare function crumbItemLookup(records: ReadonlyMap<string, TrackerRecord>): CrumbItemLookup;
 /**

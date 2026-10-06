@@ -17,6 +17,14 @@
     "parentKind": "item",
     "sortOrder": 2048,
     "trashedAt": null,
-    "hasContent": true
+    "hasContent": true,
+    "fields": {
+      "status": "current",
+      "owner": "greg@example.com",
+      "summary": "Meeting notes",
+      "tags": [
+        "notes"
+      ]
+    }
   }
 }

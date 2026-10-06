@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState, memo } from 'react';
+import React, { useCallback, useContext, useEffect, useRef, useState, memo } from 'react';
+import { TrackerTabIssueKeyContext } from './trackerTabIssueKey';
 import { useSetAtom, useAtomValue } from 'jotai';
 import { Tab } from './TabManager';
 import { isTabJumpShortcut } from './tabShortcuts';
@@ -24,11 +25,12 @@ import { getTypeIcon } from '@nimbalyst/runtime/plugins/TrackerPlugin/components
 const TrackerTabLabel = memo<{ trackerItemId: string; fallback: string; isActive: boolean }>(
   ({ trackerItemId, fallback, isActive }) => {
     const item = useAtomValue(trackerItemByIdAtom(trackerItemId));
+    const showIssueKey = useContext(TrackerTabIssueKeyContext);
     const icon = getTypeIcon(item?.primaryType ?? '');
     const title = (item?.fields?.title as string | undefined) ?? '';
-    const label = item?.issueKey
+    const label = item?.issueKey && showIssueKey
       ? `${item.issueKey} ${title}`.trim()
-      : (title || fallback);
+      : (title || item?.issueKey || fallback);
     return (
       <>
         <MaterialSymbol icon={icon} size={13} className="tab-tracker-icon mr-1 shrink-0 opacity-80" />

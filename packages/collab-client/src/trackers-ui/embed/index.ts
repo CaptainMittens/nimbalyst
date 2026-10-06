@@ -7,7 +7,7 @@ export type { TrackerViewEmbedProps } from './TrackerViewEmbed';
 export { createTypePageView } from './typePageView';
 export { createItemWhereResolver, type ItemWhereInput } from './typePageWhere';
 export type { TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
-export { pageTreeAncestors, type PageTreeAncestorsInput, type PageTreeNodeRef } from './pageTreeAncestors';
+export { pageTreeAncestors, pageTreeAncestorRefs, type PageTreeAncestor, type PageTreeAncestorsInput, type PageTreeNodeRef } from './pageTreeAncestors';
 // The type page lists what the tree row counts: a type and its subtypes.
 export { typeWithSubtypes } from '../../docs/collabPageTree';
 // Views placed in a page: a link (`placedViewUrl.ts`) with the definition in its title.

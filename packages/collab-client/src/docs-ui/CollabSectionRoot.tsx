@@ -6,7 +6,7 @@
  */
 import React, { useMemo } from 'react';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
-import { FloatingPortal, useFloatingMenu, virtualElement } from './primitives/useFloatingMenu';
+import { FloatingPortal, useFloatingMenu, virtualElement } from '../ui-primitives/useFloatingMenu';
 
 const MENU_ENTRY_CLASS = 'w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover';
 

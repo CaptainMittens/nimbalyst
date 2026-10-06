@@ -13,7 +13,7 @@ type McpToolResult = {
 /**
  * Page tree MCP tools for Pages mode, Team and Personal sections: list the
  * tree, create pages, move and reorder pages, typed pages and placed types,
- * rename, delete, and Set type. Folders are pages in the page tree; the
+ * rename, delete, Set type, and a plain page's own fields. Folders are pages in the page tree; the
  * `folder` names on the wire (`parentFolderId`, `folderPath`, kind 'folder')
  * stay for callers that already use them and address pages.
  *
@@ -159,6 +159,29 @@ export function getCollabIndexToolSchemas() {
         required: ["pageId", "typeId"],
       },
     },
+    {
+      name: "setPageFields",
+      description:
+        "Set a plain page's own fields: owner (a member's email from findOrgMembers), status (draft, current or outdated), summary (one line, at most 280 characters) and tags. Only the fields you pass change; null clears one. A value that does not fit is ignored, so the reply names the fields the page has now. listPages shows them on each page. A typed page's fields are set with tracker_update.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          section: SECTION,
+          itemId: { type: "string", description: "The page id." },
+          fields: {
+            type: "object",
+            description: "The fields to change. Null clears one.",
+            properties: {
+              owner: { type: ["string", "null"], description: "The owner's email." },
+              status: { type: ["string", "null"], enum: ["draft", "current", "outdated", null] },
+              summary: { type: ["string", "null"], description: "One line: what the page is for." },
+              tags: { type: ["array", "null"], items: { type: "string" } },
+            },
+          },
+        },
+        required: ["itemId", "fields"],
+      },
+    },
   ];
 
   return tools;
@@ -234,6 +257,11 @@ function invalidArguments(tool: string, args: any): string | null {
       return nonEmpty(args?.pageId) && nonEmpty(args?.typeId) ? null : "setPageType requires pageId and typeId.";
     case "searchPages":
       return nonEmpty(args?.query) ? null : "searchPages requires a non-empty query.";
+    case "setPageFields":
+      if (!nonEmpty(args?.itemId)) return "setPageFields requires an itemId.";
+      return args?.fields && typeof args.fields === "object" && !Array.isArray(args.fields)
+        ? null
+        : "setPageFields requires a fields object.";
     default:
       return null;
   }
@@ -259,6 +287,8 @@ function describeSuccess(tool: string, args: any, result: RendererResult): strin
         : `Deleted page ${args.itemId}.`;
     case "setPageType":
       return `Page ${args.pageId} is now a ${args.typeId}${result.itemId ? ` (item id: ${result.itemId})` : ""}.`;
+    case "setPageFields":
+      return `Page ${args.itemId} fields: ${JSON.stringify(result.fields ?? {})}.`;
     default:
       return JSON.stringify(rest);
   }
@@ -273,6 +303,7 @@ const TOOL_NAMES = new Set([
   "renameSharedItem",
   "deleteSharedItem",
   "setPageType",
+  "setPageFields",
 ]);
 
 /** Run a tool on the window's sessions; `extra` is merged into what the renderer answered. */
@@ -322,3 +353,4 @@ export const handleMoveSharedItem = (args: any, workspacePath: string | undefine
 export const handleRenameSharedItem = (args: any, workspacePath: string | undefined) => runPageTreeTool("renameSharedItem", args, workspacePath);
 export const handleDeleteSharedItem = (args: any, workspacePath: string | undefined) => runPageTreeTool("deleteSharedItem", args, workspacePath);
 export const handleSetPageType = (args: any, workspacePath: string | undefined) => runPageTreeTool("setPageType", args, workspacePath);
+export const handleSetPageFields = (args: any, workspacePath: string | undefined) => runPageTreeTool("setPageFields", args, workspacePath);

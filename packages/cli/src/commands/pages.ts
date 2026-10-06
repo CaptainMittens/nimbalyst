@@ -37,6 +37,7 @@ export const PAGES_VERBS = {
   rename: 'renameSharedItem',
   delete: 'deleteSharedItem',
   'set-type': 'setPageType',
+  'set-fields': 'setPageFields',
   members: 'findOrgMembers',
   types: 'tracker_list_types',
   'define-type': 'tracker_define_type',
@@ -170,6 +171,20 @@ const BUILDERS: Record<ToolVerb, (args: ParsedArgs) => Record<string, unknown>> 
     return { ...TEAM, itemId: operandAt(args, 0, 'a page id'), kind };
   },
   'set-type': (args) => ({ ...TEAM, pageId: operandAt(args, 0, 'a page id'), typeId: operandAt(args, 1, 'a type id') }),
+  'set-fields': (args) => {
+    const fields: Record<string, unknown> = {};
+    for (const name of ['owner', 'status', 'summary'] as const) {
+      const value = flagStr(args, name);
+      if (value !== undefined) fields[name] = value;
+    }
+    const tags = flagList(args, 'tag');
+    if (tags.length) fields.tags = tags;
+    for (const name of flagList(args, 'clear')) fields[name] = null;
+    if (Object.keys(fields).length === 0) {
+      throw usageError(`'nim pages set-fields' requires --owner, --status, --summary, --tag or --clear <field>.`);
+    }
+    return { ...TEAM, itemId: operandAt(args, 0, 'a page id'), fields };
+  },
   search: (args) => ({ ...TEAM, query: operandAt(args, 0, 'a query'), limit: flagInt(args, 'limit') }),
   members: (args) => ({ query: args.positionals[0] }),
   types: (args) => ({ search: flagStr(args, 'search') }),

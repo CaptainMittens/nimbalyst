@@ -10,23 +10,23 @@
  * where the links come from (`linksSource`).
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useMemo } from 'react';
 import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import type { FieldDefinition } from '@nimbalyst/tracker-schema';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { getRecordTitle } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
-import { TrackerFieldPills } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/TrackerFieldPills';
-import { getTrackerTagsField, useTrackerChipFieldSections } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerChipFields';
-import { isTrackerFieldEmpty } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerFieldLayout';
-import { unwrapLabelFieldValues, useTrackerLabelFields, wrapLabelFieldValue } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerLabelFields';
+import { TrackerTypeRow } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/TrackerTypeRow';
+import type { TrackerFieldPills } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/TrackerFieldPills';
 import { NEUTRAL_SWATCH, TYPE_COLORS } from '../board/trackerBoardTokens';
 import type { PageLinksSource } from './pageLinks';
 import type { TrackerPageCrumb } from './trackerPageCrumb';
 import { TrackerLinksSection } from './TrackerLinksSection';
-import { TrackerPageAddField } from './TrackerPageAddField';
 import { PageHistoryButton } from './PageHistoryButton';
+import { PageHeaderBar, type PageHeaderMenuItem } from './PageHeaderBar';
+import { PageFacts, pageTimeFacts } from './PageFacts';
+import type { PageTreeAncestor } from '../embed/pageTreeAncestors';
 import { confirmDestructive } from '../../ui-primitives/confirmDestructive';
 import { sanitizeTitleInput, useAutoSizedTitle } from './trackerTitleAutoSize';
 import './TrackerPageView.css';
@@ -65,6 +65,20 @@ export interface TrackerPageViewProps {
    * confirm). Absent where the host cannot write trackers.
    */
   onArchive?: () => void;
+  /**
+   * Draw the page's crumb, History and actions in the document header strip
+   * every tab has, instead of a crumb row above the title. The crumb's pages
+   * open through `onOpenAncestor`.
+   */
+  headerBar?: {
+    onOpenAncestor?: (ancestor: PageTreeAncestor) => void;
+    /** Sync and presence. */
+    status?: React.ReactNode;
+    /** Host buttons before History (table of contents, session chip). */
+    actions?: React.ReactNode;
+    /** Host actions after the page's own (Archive). */
+    menuItems?: readonly PageHeaderMenuItem[];
+  };
 }
 
 export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
@@ -85,64 +99,10 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
   onOpenItem,
   onShowHistory,
   onArchive,
+  headerBar,
 }) => {
-  const itemId = item?.id ?? '';
   const model = useMemo(() => globalRegistry.get(item?.primaryType ?? ''), [item?.primaryType]);
   const titleRef = useAutoSizedTitle(localTitle);
-
-  // One row of single-valued fields: tags, lists and label rows never reach the
-  // page header, and neither does any relationship -- links belong to Links.
-  const tagsField = useMemo(() => getTrackerTagsField(item?.primaryType ?? ''), [item?.primaryType]);
-  const labelLayout = useTrackerLabelFields(item?.primaryType ?? '', item?.fields);
-  const { chipFields: singleValuedFields } = useTrackerChipFieldSections(
-    item?.primaryType ?? '', tagsField ? [tagsField.name] : [], labelLayout.fields, true,
-  );
-  const chipFields = useMemo(
-    () => singleValuedFields.filter((field) => field.type !== 'relationship' && field.type !== 'reference'),
-    [singleValuedFields],
-  );
-  const chipValues = useMemo(() => unwrapLabelFieldValues(labelLayout.fields, storedValues), [labelLayout.fields, storedValues]);
-  const storedValuesRef = useRef(storedValues);
-  storedValuesRef.current = storedValues;
-  const handleChipSave = useCallback((fieldName: string, value: unknown) => {
-    const field = chipFields.find((candidate) => candidate.name === fieldName);
-    if (!field) return;
-    onUpdateField(field, wrapLabelFieldValue(field, value, storedValuesRef.current[fieldName]));
-  }, [chipFields, onUpdateField]);
-
-  // The row shows only fields that hold a value, plus any the user added from
-  // the "+" menu while this page is open (so a just-added field stays put while
-  // it is being filled in).
-  const [addedFields, setAddedFields] = useState<ReadonlySet<string>>(() => new Set());
-  const [fieldToOpen, setFieldToOpen] = useState<string | null>(null);
-  useEffect(() => {
-    setAddedFields(new Set());
-    setFieldToOpen(null);
-  }, [itemId]);
-  const shownFields = useMemo(
-    () => chipFields.filter((field) => addedFields.has(field.name) || !isTrackerFieldEmpty(chipValues[field.name])),
-    [chipFields, chipValues, addedFields],
-  );
-  const emptyFields = useMemo(
-    () => chipFields.filter((field) => !shownFields.includes(field)),
-    [chipFields, shownFields],
-  );
-  const handleAddField = useCallback((fieldName: string) => {
-    setAddedFields((prev) => new Set(prev).add(fieldName));
-    setFieldToOpen(fieldName);
-  }, []);
-  // A field added from the menu opens in its ordinary chip editor. The chip
-  // owns its popover state, so open it the way a user would. Booleans toggle
-  // on click, so they are added without being set.
-  const propsRowRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!fieldToOpen) return;
-    setFieldToOpen(null);
-    if (chipFields.find((field) => field.name === fieldToOpen)?.type === 'boolean') return;
-    const pill = Array.from(propsRowRef.current?.querySelectorAll<HTMLButtonElement>('.tracker-field-pill') ?? [])
-      .find((candidate) => candidate.dataset.field === fieldToOpen);
-    pill?.click();
-  }, [fieldToOpen, chipFields]);
 
   if (!item) {
     return (
@@ -154,13 +114,38 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
 
   const title = getRecordTitle(item);
   const typeName = model?.displayName || item.primaryType;
+  const confirmArchive = onArchive && (() => {
+    void confirmDestructive(
+      'Archive page',
+      `Archive "${title}"? It leaves Pages and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
+      'Archive',
+    ).then((accepted) => { if (accepted) onArchive(); });
+  });
   const typeColor = model?.color || TYPE_COLORS[item.primaryType] || NEUTRAL_SWATCH;
 
   return (
     <div className="tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="tracker-page-view" data-item-id={item.id}>
+      {headerBar && (
+        <PageHeaderBar
+          section={crumb.section}
+          path={crumb.path ?? []}
+          title={localTitle || title}
+          titleIcon={model?.icon || 'label'}
+          onOpenAncestor={headerBar.onOpenAncestor}
+          status={item.archived
+            ? <span className="tracker-page-view-archived shrink-0 px-1 text-xs text-nim-faint">Archived</span>
+            : headerBar.status}
+          actions={headerBar.actions}
+          onShowHistory={onShowHistory}
+          menuItems={[
+            ...(confirmArchive && !item.archived ? [{ id: 'archive', label: 'Archive page', icon: 'archive', onSelect: confirmArchive }] : []),
+            ...(headerBar.menuItems ?? []),
+          ]}
+        />
+      )}
       <div className="tracker-page-view-scroller min-h-0 flex-1 overflow-y-auto">
-        <div className="tracker-page-view-header">
-          <div className="tracker-page-view-crumb-row mb-2.5 flex items-center gap-2">
+        <div className={`tracker-page-view-header${headerBar ? ' tracker-page-view-header--bar' : ''}`}>
+          {!headerBar && <div className="tracker-page-view-crumb-row mb-2.5 flex items-center gap-2">
             <div className="tracker-page-view-crumb min-w-0 flex-1 truncate text-xs text-nim-faint select-text" data-testid="tracker-page-crumb">
               {[...(crumb.section ? [crumb.section] : []), ...crumb.ancestors].map((part, index) => (
                 <span key={`${index}:${part}`}>{part} / </span>
@@ -170,25 +155,19 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
             </div>
             {item.archived
               ? <span className="tracker-page-view-archived shrink-0 text-xs text-nim-faint">Archived</span>
-              : onArchive && (
+              : confirmArchive && (
                 <button
                   type="button"
                   className="tracker-page-view-archive flex shrink-0 items-center rounded border-none bg-transparent px-1.5 py-0.5 text-nim-faint cursor-pointer hover:bg-nim-hover hover:text-nim"
                   title="Archive page"
                   aria-label="Archive page"
-                  onClick={() => {
-                    void confirmDestructive(
-                      'Archive page',
-                      `Archive "${title}"? It leaves Pages and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
-                      'Archive',
-                    ).then((accepted) => { if (accepted) onArchive(); });
-                  }}
+                  onClick={confirmArchive}
                 >
                   <MaterialSymbol icon="archive" size={15} />
                 </button>
               )}
             {onShowHistory && <PageHistoryButton onClick={onShowHistory} />}
-          </div>
+          </div>}
           {editable ? (
             <textarea
               ref={titleRef}
@@ -210,30 +189,24 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
           ) : (
             <h1 className="tracker-page-view-title m-0 mb-3 break-words text-[28px] font-medium leading-tight text-nim select-text">{title}</h1>
           )}
-          <div ref={propsRowRef} className="tracker-page-view-props flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-nim pb-3" data-testid="tracker-page-props">
-            <span
-              className="tracker-page-view-type inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium"
-              style={{ color: typeColor, backgroundColor: `${typeColor}24` }}
-            >
-              <MaterialSymbol icon={model?.icon || 'label'} size={13} />
-              {typeName}
-            </span>
-            {shownFields.length > 0 && (
-              <TrackerFieldPills
-                fields={shownFields}
-                values={chipValues}
-                labelFields
-                editable={editable}
-                teamMembers={teamMembers}
-                onSave={handleChipSave}
-                onOpenItem={onOpenItem}
-                onCreateCollection={onCreateCollection}
-                className="tracker-page-view-field-pills"
-                testIdBase="tracker-page-field"
-              />
+          <TrackerTypeRow
+            typeId={item.primaryType}
+            values={storedValues}
+            editable={editable}
+            onSaveField={onUpdateField}
+            typeColor={typeColor}
+            resetKey={item.id}
+            teamMembers={teamMembers}
+            onOpenItem={onOpenItem}
+            onCreateCollection={onCreateCollection}
+            className="border-b border-nim pb-3"
+            end={headerBar && (
+              <PageFacts facts={[
+                ...pageTimeFacts({ updatedAt: Date.parse(item.system.updatedAt) || null }),
+                ...(item.issueKey ? [{ id: 'key', value: item.issueKey, title: 'Issue key' }] : []),
+              ]} />
             )}
-            {editable && <TrackerPageAddField fields={emptyFields} onAdd={handleAddField} />}
-          </div>
+          />
         </div>
 
         {beforeBody}

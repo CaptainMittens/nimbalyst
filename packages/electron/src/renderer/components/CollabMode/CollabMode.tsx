@@ -26,6 +26,7 @@ import {
   type TabData,
 } from '../../contexts/TabsContext';
 import { TabManager } from '../TabManager/TabManager';
+import { TrackerTabIssueKeyContext } from '../TabManager/trackerTabIssueKey';
 import { TabContent } from '../TabContent/TabContent';
 import type { DocumentSessionActions } from '../TabEditor/DocumentSessionControl';
 import { ChatSidebar, type ChatSidebarRef } from '../ChatSidebar';
@@ -848,6 +849,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
           </div>
         )}
         {hasTabs && (
+          <TrackerTabIssueKeyContext.Provider value={false}>
           <TabManager
             onTabClose={handleTabClose}
             onNewTab={() => (teamScope ? openSectionView('search', 'team') : createPrimaryRef.current?.())}
@@ -867,6 +869,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
               trackerPageHeader
             />
           </TabManager>
+          </TrackerTabIssueKeyContext.Provider>
         )}
       </div>
 

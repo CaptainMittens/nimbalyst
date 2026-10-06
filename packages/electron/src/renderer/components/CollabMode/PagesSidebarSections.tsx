@@ -4,8 +4,8 @@
  * Personal section stands alone under a one-line note.
  */
 
-import React, { useState } from 'react';
-import { atom, useAtomValue } from 'jotai';
+import React, { useEffect, useState } from 'react';
+import { atom, useAtom, useAtomValue } from 'jotai';
 import type { CollabHost, CollabOpenOptions, CollabScope } from '@nimbalyst/collab-client/core';
 import type { CollabDocsSession } from '@nimbalyst/collab-client/docs';
 import type { PageTypeLane } from '@nimbalyst/collab-client/docs/pageTypes';
@@ -23,6 +23,10 @@ import { ElectronCollabDocsUIRoot } from './ElectronCollabDocsUIProvider';
 import { useCollabTypeResolver } from './useCollabTypeResolver';
 import { useDefineTrackerType } from './useDefineTrackerType';
 import { useSetPageType } from './useSetPageType';
+import { pageMoveRequestAtom, pageTypeRequestAtom } from './pageTypeRequest';
+import { movePageAcrossSections } from './moveAcrossSectionsDesktop';
+import { useTabsActions } from '../../contexts/TabsContext';
+import { errorNotificationService } from '../../services/ErrorNotificationService';
 import { usePagesSidebarCollapse } from './usePagesSidebarCollapse';
 import { archiveTrackerItem } from '../../services/archiveTrackerItem';
 
@@ -71,6 +75,26 @@ export function PagesSidebarSections({
   const personalTypeResolver = useCollabTypeResolver('personal');
   const setPageType = useSetPageType(workspacePath, teamScope);
   const [typingPage, setTypingPage] = useState<{ lane: PageTypeLane; page: SharedDocument } | null>(null);
+  // A page's own header asks for Set type through this atom.
+  const [typeRequest, setTypeRequest] = useAtom(pageTypeRequestAtom);
+  useEffect(() => {
+    if (!typeRequest) return;
+    setTypingPage(typeRequest);
+    setTypeRequest(null);
+  }, [typeRequest, setTypeRequest]);
+  const tabsActions = useTabsActions();
+  const [moveRequest, setMoveRequest] = useAtom(pageMoveRequestAtom);
+  useEffect(() => {
+    if (!moveRequest) return;
+    setMoveRequest(null);
+    if (!teamScope) {
+      errorNotificationService.showError('Could not move this page', 'This project is not connected to its team.');
+      return;
+    }
+    void movePageAcrossSections({ ...moveRequest, workspacePath, teamScope, tabsActions }).then((result) => {
+      if (result && !result.ok) errorNotificationService.showError('Could not move this page', result.error);
+    });
+  }, [moveRequest, setMoveRequest, teamScope, workspacePath, tabsActions]);
   const [creatingType, setCreatingType] = useState(false);
   const defineType = useDefineTrackerType(workspacePath);
   const { collapsed, toggle } = usePagesSidebarCollapse(workspacePath, teamScope !== null);

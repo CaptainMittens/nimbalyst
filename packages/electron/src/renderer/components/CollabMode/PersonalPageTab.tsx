@@ -5,11 +5,21 @@
  * server is involved.
  */
 
-import React, { useEffect, useState } from 'react';
-import { useAtomValue } from 'jotai';
-import { personalPagesDocumentsAtomFamily } from '../../store/atoms/collabDocuments';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { PageHeaderBar } from '@nimbalyst/collab-client/trackers-ui/page';
+import { getPersonalCollabHost, personalPagesDocumentsAtomFamily } from '../../store/atoms/collabDocuments';
+import { historyDialogFileAtom } from '../../store/atoms/historyDialog';
 import { getSharedDocumentDisplayName } from './collabTree';
-import { PersonalPageBodyEditor } from './PersonalPageBodyEditor';
+import { PersonalPageBodyEditor, personalPageDocumentPath } from './PersonalPageBodyEditor';
+import { CollabPlainPageHeader } from './CollabPlainPageHeader';
+import { openPageAncestor } from './pageHeaderNavigation';
+import { useSharedPagePath } from './useSharedPagePath';
+import { pageMoveRequestAtom } from './pageTypeRequest';
+import { resolveDesktopCollabScope } from '../../store/atoms/collabDocuments';
+import type { CollabScope } from '@nimbalyst/collab-client/core';
+import { HeaderTableOfContents } from '../TabEditor/HeaderTableOfContents';
+import type { LexicalEditor } from 'lexical';
 
 /**
  * The page's live title from the personal pages list (refreshed on every
@@ -52,16 +62,55 @@ export interface PersonalPageTabProps {
 
 export const PersonalPageTab: React.FC<PersonalPageTabProps> = ({ documentId, workspacePath, fallbackTitle }) => {
   const title = usePersonalPageTitle(workspacePath, documentId, fallbackTitle);
+  const scope = useMemo(() => getPersonalCollabHost(workspacePath).scope, [workspacePath]);
+  const page = useSharedPagePath(scope, documentId);
+  const openHistory = useSetAtom(historyDialogFileAtom);
+  const [editor, setEditor] = useState<LexicalEditor | null>(null);
+  const requestMove = useSetAtom(pageMoveRequestAtom);
+  // "Move to Team" shows once this project has a team to move to.
+  const [teamScope, setTeamScope] = useState<CollabScope | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void resolveDesktopCollabScope(workspacePath).then(({ scope }) => {
+      if (!cancelled) setTeamScope(scope);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath]);
+  const menuItems = useMemo(() => (teamScope ? [{
+    id: 'move-to-team',
+    label: 'Move to Team...',
+    icon: 'group',
+    onSelect: () => requestMove({ from: 'personal', pageId: documentId }),
+  }] : []), [teamScope, documentId, requestMove]);
+  // The same header strip and title block a team page has.
+  const documentHeader = useMemo(
+    () => <CollabPlainPageHeader scope={scope} documentId={documentId} lane="personal" />,
+    [scope, documentId],
+  );
   return (
     <div
       className="personal-page-tab flex h-full min-h-0 flex-col overflow-hidden bg-nim"
       data-testid="personal-page-tab"
       data-document-id={documentId}
     >
-      <div className="personal-page-tab-header shrink-0 px-6 pt-5 pb-2">
-        <h1 className="text-xl font-semibold text-nim select-text">{title}</h1>
-      </div>
-      <PersonalPageBodyEditor documentId={documentId} workspacePath={workspacePath} className="flex min-h-0 flex-1 flex-col" />
+      <PageHeaderBar
+        section="Personal"
+        path={page.path}
+        title={page.title ?? title}
+        onOpenAncestor={(ancestor) => openPageAncestor(ancestor, { personal: true, workspacePath })}
+        actions={editor ? <HeaderTableOfContents editor={editor} /> : undefined}
+        menuItems={menuItems}
+        onShowHistory={() => openHistory(personalPageDocumentPath(documentId))}
+      />
+      <PersonalPageBodyEditor
+        documentId={documentId}
+        workspacePath={workspacePath}
+        className="flex min-h-0 flex-1 flex-col"
+        documentHeader={documentHeader}
+        onEditorReady={setEditor}
+      />
     </div>
   );
 };

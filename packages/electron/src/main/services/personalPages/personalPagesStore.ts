@@ -9,7 +9,8 @@
  * parent column has a `parent_kind` beside it: 'page', or 'item' when the
  * parent is a typed page (a tracker item id); pages carry a `sort_order`.
  */
-import type { SharedDocument, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from '@nimbalyst/collab-client/docs';
+import type { PageFields, SharedDocument, SharedItemPlacement, SharedParentKind, SharedTypePlacement } from '@nimbalyst/collab-client/docs';
+import { applyPageFieldsPatch, normalizePageFields } from '@nimbalyst/collab-client/docs';
 import { toMillis } from '../../utils/timestampUtils';
 
 export interface PersonalPagesDb {
@@ -30,6 +31,7 @@ interface DocumentRow {
   created_at: unknown;
   updated_at: unknown;
   trashed_at: unknown;
+  fields: string | null;
 }
 
 interface PlacementRow {
@@ -58,7 +60,7 @@ const TYPE_PAGE_PREFIX = 'type-page:';
 export async function listDocuments(db: PersonalPagesDb, ws: string): Promise<SharedDocument[]> {
   const { rows } = await db.query<DocumentRow>(
     `SELECT document_id, title, document_type, editor_id, file_extension, metadata_version, parent_folder_id,
-            parent_kind, sort_order, created_at, updated_at, trashed_at
+            parent_kind, sort_order, created_at, updated_at, trashed_at, fields
      FROM personal_page_documents WHERE workspace_path = $1 ORDER BY created_at, document_id`,
     [ws],
   );
@@ -78,7 +80,35 @@ export async function listDocuments(db: PersonalPagesDb, ws: string): Promise<Sh
     parentKind: parentKindOf(row.parent_kind),
     sortOrder: row.sort_order === null || row.sort_order === undefined ? null : Number(row.sort_order),
     trashedAt: toMillis(row.trashed_at),
+    ...pageFieldsOf(row.fields),
   }));
+}
+
+/** The row's stored fields, validated; nothing when none are set or the JSON is bad. */
+function pageFieldsOf(json: string | null): { fields?: PageFields } {
+  if (!json) return {};
+  try {
+    const fields = normalizePageFields(JSON.parse(json));
+    return Object.keys(fields).length > 0 ? { fields } : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Applies a fields patch to one page; false when the page is not in this workspace. */
+export async function patchDocumentFields(
+  db: PersonalPagesDb,
+  ws: string,
+  documentId: string,
+  patch: Record<string, unknown>,
+): Promise<boolean> {
+  const { rows } = await db.query<{ fields: string | null }>(
+    'SELECT fields FROM personal_page_documents WHERE workspace_path = $1 AND document_id = $2',
+    [ws, documentId],
+  );
+  if (rows.length === 0) return false;
+  const next = applyPageFieldsPatch(pageFieldsOf(rows[0].fields).fields, patch);
+  return updateDocument(db, ws, documentId, { fields: Object.keys(next).length > 0 ? JSON.stringify(next) : null });
 }
 
 export async function listTypePlacements(db: PersonalPagesDb, ws: string): Promise<SharedTypePlacement[]> {

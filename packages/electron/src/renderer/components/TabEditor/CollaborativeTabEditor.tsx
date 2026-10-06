@@ -111,6 +111,8 @@ import {
   CollabRecoveryBanner,
   CollabRenderFailureBanner,
 } from './CollabDocumentHeaderMeta';
+import { CollabPlainPageHeader } from '../CollabMode/CollabPlainPageHeader';
+import { pageMoveRequestAtom, pageTypeRequestAtom } from '../CollabMode/pageTypeRequest';
 import {
   getSharedDocumentDisplayPath,
   getSharedDocumentDisplayPathWithFallback,
@@ -975,6 +977,8 @@ export const CollaborativeTabEditor: React.FC<CollaborativeTabEditorProps> = ({
   ]);
 
   const markdownConfig = useMemo(() => ({
+    // A page's title and type row scroll with its body, as on a typed page.
+    documentHeader: <CollabPlainPageHeader scope={activeConfig.scope} documentId={activeConfig.documentId} />,
     onUploadAsset: (file: File) => assetService.uploadFile(file),
     // NIM-1683: intentionally do NOT wire onAssetReferencesRemoved. Deleting an
     // asset the moment it leaves the *current* editor state is data-loss --
@@ -982,7 +986,7 @@ export const CollaborativeTabEditor: React.FC<CollaborativeTabEditorProps> = ({
     // `collab-asset://` URI. Asset lifetime is tied to document lifetime; the
     // server reclaims all of a doc's blobs only when the document itself is
     // deleted. Leaving this unset keeps the asset-GC extension idle.
-  }), [assetService]);
+  }), [assetService, activeConfig.scope, activeConfig.documentId]);
 
   // Create a minimal EditorHost for collaboration mode
   // Most operations are no-ops since content syncs via Y.Doc
@@ -1293,51 +1297,28 @@ export const CollaborativeTabEditor: React.FC<CollaborativeTabEditorProps> = ({
     }
   }, [activeConfig.fileExtension, activeConfig.title, fileName]);
 
+  const requestPageType = useSetAtom(pageTypeRequestAtom);
+  const requestMove = useSetAtom(pageMoveRequestAtom);
+  const moveToPersonal = useCallback((pageId: string) => requestMove({ from: 'team', pageId }), [requestMove]);
   const collabActionItems = useMemo(() => {
-    const actionDisabled = localOrigin.busyAction !== null;
+    const busy = localOrigin.busyAction !== null;
+    const page = sharedDocuments.find((document) => document.documentId === activeConfig.documentId);
+    // Local-source actions only once a local file is linked; until then, only linking one.
+    const linked = localOrigin.binding;
     return [
-      ...(documentType === 'code' ? [{
-        label: 'Save a Copy',
-        icon: 'download',
-        disabled: !hasHydrated,
-        onClick: () => {
-          void handleSaveCodeCopy();
-        },
-      }] : []),
-      {
-        label: 'Open Local',
-        icon: 'folder_open',
-        disabled: !localOrigin.hasResolvedBinding || actionDisabled,
-        onClick: () => {
-          void localOrigin.openLocalSource();
-        },
-      },
-      {
-        label: 'Re-upload to Shared Doc',
-        icon: 'upload',
-        disabled: !localOrigin.binding || actionDisabled,
-        onClick: () => {
-          void handleReuploadFromLocal();
-        },
-      },
-      {
-        label: localOrigin.binding ? 'Relink Local Source' : 'Link Local Source',
-        icon: 'link',
-        disabled: actionDisabled,
-        onClick: () => {
-          void localOrigin.relinkLocalSource();
-        },
-      },
-      {
-        label: 'Clear Local Source',
-        icon: 'link_off',
-        disabled: !localOrigin.binding || actionDisabled,
-        onClick: () => {
-          void localOrigin.clearLocalSource();
-        },
-      },
+      ...(documentType === 'markdown' && page ? [
+        { label: 'Set Type...', icon: 'category', onClick: () => requestPageType({ lane: 'team', page }) },
+        { label: 'Move to Personal...', icon: 'person', onClick: () => moveToPersonal(page.documentId) },
+      ] : []),
+      ...(documentType === 'code' ? [{ label: 'Save a Copy', icon: 'download', disabled: !hasHydrated, onClick: () => { void handleSaveCodeCopy(); } }] : []),
+      ...(linked ? [
+        { label: 'Open Local Source', icon: 'folder_open', disabled: !localOrigin.hasResolvedBinding || busy, onClick: () => { void localOrigin.openLocalSource(); } },
+        { label: 'Update from Local Source', icon: 'upload', disabled: busy, onClick: () => { void handleReuploadFromLocal(); } },
+      ] : []),
+      { label: linked ? 'Relink Local Source' : 'Link Local Source', icon: 'link', disabled: busy, onClick: () => { void localOrigin.relinkLocalSource(); } },
+      ...(linked ? [{ label: 'Clear Local Source', icon: 'link_off', disabled: busy, onClick: () => { void localOrigin.clearLocalSource(); } }] : []),
     ];
-  }, [documentType, handleSaveCodeCopy, hasHydrated, localOrigin, handleReuploadFromLocal]);
+  }, [documentType, handleSaveCodeCopy, hasHydrated, localOrigin, handleReuploadFromLocal, sharedDocuments, activeConfig.documentId, requestPageType, moveToPersonal]);
   const handleLexicalEditorReady = useCallback((editor: any) => {
     setLexicalEditor((prev: any) => (prev === editor ? prev : editor));
     lexicalEditorRef.current = editor ?? null;
@@ -1466,12 +1447,13 @@ export const CollaborativeTabEditor: React.FC<CollaborativeTabEditorProps> = ({
         isMarkdown={documentType === 'markdown'}
         lexicalEditor={documentType === 'markdown' ? (lexicalEditor ?? undefined) : undefined}
         breadcrumbContent={(
-          <CollabDocumentHeaderMeta filePath={filePath} displayPath={sharedDisplayPath} />
+          <CollabDocumentHeaderMeta filePath={filePath} displayPath={sharedDisplayPath} scope={activeConfig.scope} documentId={activeConfig.documentId} />
         )}
         showShareLinkButton={false}
         showSharedDocButton={false}
         showHistoryAction={true}
         showCommonFileActions={false}
+        showDocumentTypeAction={false}
         sharedDocumentLinkTarget={{
           documentId: activeConfig.documentId,
           orgId: activeConfig.orgId,

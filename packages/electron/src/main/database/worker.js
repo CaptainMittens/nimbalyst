@@ -3255,6 +3255,19 @@ class PGLiteWorker {
       throw error;
     }
 
+    // Migration: a plain page's own fields (schema version 52).
+    // Mirror of SQLite migration 0052_personal_pages_fields.sql -- keep in sync.
+    // One column, IF NOT EXISTS, so rerunning it every launch is safe.
+    try {
+      await this.db.exec(`
+        ALTER TABLE personal_page_documents ADD COLUMN IF NOT EXISTS fields TEXT;
+      `);
+      console.log('[PGLite Worker] personal pages fields migration applied');
+    } catch (error) {
+      console.error('[PGLite Worker] Failed to apply the personal pages fields migration:', error);
+      throw error;
+    }
+
     // Migration: team-shared tracker saved views (schema version 28).
     // Mirror of SQLite migration 0028_tracker_shared_saved_views.sql.
     // Payload is stored as TEXT (not JSONB) so the row round-trips byte-for-byte

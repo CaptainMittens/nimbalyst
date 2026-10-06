@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { globalRegistry, type TrackerDataModel } from '@nimbalyst/tracker-schema';
 import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
 import { TrackerPageView } from '../TrackerPageView';
+import { PlainPageHeader } from '../PlainPageHeader';
 
 const MODULE = {
   type: 'tpv-module', displayName: 'Module', displayNamePlural: 'Modules', icon: 'widgets', color: '#888',
@@ -81,6 +82,67 @@ describe('TrackerPageView', () => {
     rerender(page({ ...item, archived: true } as TrackerRecord));
     expect(screen.queryByRole('button', { name: 'Archive page' })).toBeNull();
     screen.getByText('Archived');
+    cleanup();
+  });
+
+  it('in the header strip, opens each page above it and keeps Archive behind the menu', async () => {
+    const onOpenAncestor = vi.fn();
+    const onArchive = vi.fn();
+    const onShowHistory = vi.fn();
+    render(
+      <TrackerPageView
+        item={item} loaded editable title="Sync engine"
+        crumb={{
+          ancestors: ['Architecture'], underType: true,
+          path: [{ id: 'arch', kind: 'page', name: 'Architecture' }, { id: 'tpv-module', kind: 'type', name: 'Modules' }],
+        }}
+        onRename={vi.fn()} fieldValues={item.fields} onUpdateField={vi.fn()} renderBody={() => null}
+        onShowHistory={onShowHistory} onArchive={onArchive} headerBar={{ onOpenAncestor }}
+      />,
+    );
+
+    expect(screen.queryByTestId('tracker-page-crumb')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Modules' }));
+    expect(onOpenAncestor).toHaveBeenCalledWith(expect.objectContaining({ id: 'tpv-module', kind: 'type' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Page history' }));
+    expect(onShowHistory).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
+    fireEvent.click(screen.getByTestId('page-header-menu-archive'));
+    fireEvent.click((await screen.findByTestId('collab-confirm-dialog')).querySelector('.collab-confirm-accept')!);
+    await waitFor(() => expect(onArchive).toHaveBeenCalledOnce());
+    cleanup();
+  });
+});
+
+describe('PlainPageHeader', () => {
+  it('renames on Enter only when the title changed, and Escape puts the title back', () => {
+    const onRename = vi.fn();
+    const onSetType = vi.fn();
+    render(<PlainPageHeader title="Product" editable onRename={onRename} onSetType={onSetType} onUpdateField={vi.fn()} />);
+    const title = screen.getByTestId('plain-page-title') as HTMLTextAreaElement;
+
+    fireEvent.focus(title);
+    fireEvent.keyDown(title, { key: 'Enter' });
+    fireEvent.blur(title);
+    expect(onRename).not.toHaveBeenCalled();
+
+    fireEvent.focus(title);
+    fireEvent.change(title, { target: { value: 'Draft' } });
+    fireEvent.keyDown(title, { key: 'Escape' });
+    expect(title.value).toBe('Product');
+
+    fireEvent.focus(title);
+    fireEvent.change(title, { target: { value: 'Product areas ' } });
+    fireEvent.blur(title);
+    expect(onRename).toHaveBeenCalledExactlyOnceWith('Product areas');
+
+    // A plain page's type chip changes its type; its "+" offers its own fields.
+    fireEvent.click(screen.getByTestId('plain-page-type'));
+    expect(onSetType).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: 'Add field' }));
+    expect(Array.from(screen.getByTestId('plain-page-add-field-menu').querySelectorAll('[role="menuitem"]'))
+      .map((entry) => entry.getAttribute('data-field'))).toEqual(['status', 'owner', 'summary']);
     cleanup();
   });
 });

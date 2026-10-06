@@ -10,6 +10,7 @@
 
 import { database } from '../../database/PGLiteDatabaseWorker';
 import { readHeadlessBodyMarkdown } from '../MainBodyDocService';
+import { normalizeBodyForComparison } from '@nimbalyst/collab-client/docs';
 
 export type ItemBodyCheck =
   | { status: 'match' }
@@ -28,20 +29,8 @@ export interface ItemBodyReaders {
   readLocalBody(workspacePath: string, itemId: string): Promise<string | null>;
 }
 
-/**
- * The seed goes through a markdown import and the read through an export, so
- * line endings, trailing spaces and runs of blank lines can differ while the
- * text is the same. Anything else is a real difference.
- */
-export function normalizeBodyForComparison(markdown: string): string {
-  return markdown
-    .replace(/\r\n?/g, '\n')
-    .split('\n')
-    .map((line) => line.replace(/[ \t]+$/, ''))
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
+// One comparison for every copy-then-verify path (Set type, moving a page between sections).
+export { normalizeBodyForComparison };
 
 export async function checkTrackerItemBody(
   input: ItemBodyCheckInput,

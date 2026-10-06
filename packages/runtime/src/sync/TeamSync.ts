@@ -41,7 +41,7 @@ import type {
   DocumentPlacementOptions,
 } from './teamSyncTypes';
 import type { PageParentKind } from '@nimbalyst/collab-protocol';
-import { decodeDocEntry, lockedDocEntry } from './teamDocEntries';
+import { decodeDocEntry, lockedDocEntry, mergeQueuedMessage } from './teamDocEntries';
 import { asTeamMemberId } from '../auth/jwtScopes';
 import type { BoundedPreview } from '@nimbalyst/collab-protocol';
 import { appendSyncClientParams } from './syncClientInfo';
@@ -110,6 +110,8 @@ export class TeamSyncProvider {
   /** Set by a snapshot from a TeamRoom that echoes the author's page writes back to it. */
   private authorWriteEcho = false;
   private authorTitleEcho = false;
+  /** Set by a snapshot from a TeamRoom that stores plain-page fields. */
+  private pageFields = false;
 
   /**
    * Resolvers waiting for a `docIndexRegistered` ack, keyed by document id.
@@ -327,6 +329,14 @@ export class TeamSyncProvider {
     });
   }
 
+  /**
+   * Set some of a plain page's own fields: a patch, null clears a key. Only a
+   * server whose snapshot set `pageFields` takes it (`storesPageFields`).
+   */
+  setDocumentFields(documentId: string, fields: Record<string, unknown>, options: { requestId?: string } = {}): void {
+    this.send({ type: 'docIndexSetFields', documentId, fields, ...requestIdField(options.requestId) });
+  }
+
   /** `purge` permanently deletes a page in Trash; only Trash's permanent delete sends it. */
   removeDocument(documentId: string, options: { requestId?: string; purge?: true } = {}): void {
     this.localEntries.delete(documentId);
@@ -537,6 +547,11 @@ export class TeamSyncProvider {
     return this.authorTitleEcho;
   }
 
+  /** True once a snapshot said the room stores plain-page fields and echoes their writes. */
+  storesPageFields(): boolean {
+    return this.pageFields;
+  }
+
   /**
    * Place an item (or move its placement). `parentId` is a page id, or an item
    * id with `parentKind: 'item'`; null = root level. The server refuses a
@@ -736,6 +751,7 @@ export class TeamSyncProvider {
     this.pageTree = server.pageTree === true;
     this.authorWriteEcho = server.authorWriteEcho === true;
     this.authorTitleEcho = server.authorTitleEcho === true;
+    this.pageFields = server.pageFields === true;
 
     // Decrypt document titles. NIM-910: in server-managed mode this teamSync
     // path returns titles RAW (DEK-ciphertext the client cannot read); the
@@ -852,7 +868,7 @@ export class TeamSyncProvider {
   private async handleDocIndexBroadcast(msg: TeamDocIndexBroadcastMessage): Promise<void> {
     let entry: DocIndexEntry;
     try {
-      entry = decodeDocEntry(msg.document);
+      entry = decodeDocEntry(msg.document, this.localEntries.get(msg.document.documentId));
     } catch (err) {
       console.warn(
         '[TeamSync] Title decrypt failed on broadcast; keeping a known title or surfacing as locked:',
@@ -991,7 +1007,7 @@ export class TeamSyncProvider {
     let quietLockedCount = 0;
     for (const e of encrypted) {
       try {
-        results.push(decodeDocEntry(e));
+        results.push(decodeDocEntry(e, this.localEntries.get(e.documentId)));
       } catch (err) {
         // Preserve the entry as a locked placeholder so the user can see
         // that a doc exists and take action (refresh keys, ask admin to
@@ -1054,11 +1070,12 @@ export class TeamSyncProvider {
       return;
     }
     // Collapse a duplicate of the same logical mutation; both queued kinds are
-    // idempotent server-side, so the last one wins.
+    // idempotent server-side, so the last one wins (field patches merge).
+    const previous = this.pendingOfflineMessages.find(pending => this.offlineQueueKey(pending) === key);
     this.pendingOfflineMessages = this.pendingOfflineMessages.filter(
       pending => this.offlineQueueKey(pending) !== key,
     );
-    this.pendingOfflineMessages.push(message);
+    this.pendingOfflineMessages.push(mergeQueuedMessage(previous, message));
     console.warn(`[TeamSync] Queued offline ${message.type} (${this.pendingOfflineMessages.length} pending)`);
   }
 
@@ -1082,7 +1099,8 @@ export class TeamSyncProvider {
   }
 
   private isDocIndexMessage(msg: TeamClientMessage): boolean {
-    return msg.type === 'docIndexRegister' || msg.type === 'docIndexUpdate' || msg.type === 'docIndexRemove'
+    return msg.type === 'docIndexRegister' || msg.type === 'docIndexUpdate' || msg.type === 'docIndexSetFields'
+      || msg.type === 'docIndexRemove'
       || msg.type === 'docTrash' || msg.type === 'docRestore' || msg.type === 'docMove'
       || msg.type === 'folderRegister' || msg.type === 'folderRename'
       || msg.type === 'folderMove' || msg.type === 'folderRemove';

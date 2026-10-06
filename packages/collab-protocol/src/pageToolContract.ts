@@ -20,6 +20,7 @@
  */
 
 import type { ConsoleLinkScope, ConsoleTeamScope } from './consoleLinks.js';
+import type { PageFields } from './pageFields.js';
 
 export type PageToolJsonSchema = { readonly [key: string]: unknown };
 
@@ -73,6 +74,7 @@ export const PAGE_TOOL_NAMES = [
   'renameSharedItem',
   'deleteSharedItem',
   'setPageType',
+  'setPageFields',
   'findOrgMembers',
   'tracker_list_types',
   'tracker_define_type',
@@ -367,6 +369,32 @@ export const PAGE_TOOL_CONTRACT: readonly PageToolContract[] = [
     remoteAcceptedValues: TEAM_SECTION_ONLY,
   },
   {
+    name: 'setPageFields',
+    availability: 'shared',
+    readOnly: false,
+    description:
+      "Set a plain page's own fields: owner (a member's email from findOrgMembers), status (draft, current or outdated), summary (one line, at most 280 characters) and tags. Only the fields you pass change; null clears one. A value that does not fit is ignored, so the reply names the fields the page has now. listPages shows them on each page. A typed page's fields are set with tracker_update.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        section: SECTION,
+        itemId: { type: 'string', description: 'The page id.' },
+        fields: {
+          type: 'object',
+          description: 'The fields to change. Null clears one.',
+          properties: {
+            owner: { type: ['string', 'null'], description: "The owner's email." },
+            status: { type: ['string', 'null'], enum: ['draft', 'current', 'outdated', null] },
+            summary: { type: ['string', 'null'], description: 'One line: what the page is for.' },
+            tags: { type: ['array', 'null'], items: { type: 'string' } },
+          },
+        },
+      },
+      required: ['itemId', 'fields'],
+    },
+    remoteAcceptedValues: TEAM_SECTION_ONLY,
+  },
+  {
     name: 'findOrgMembers',
     availability: 'shared',
     readOnly: true,
@@ -653,7 +681,8 @@ interface PageTreeNodeBase {
 }
 
 export type PageTreeNodeSummary =
-  | (PageTreeNodeBase & { kind: 'page'; uri: string | null })
+  /** `fields`: the page's own fields, when any are set. */
+  | (PageTreeNodeBase & { kind: 'page'; uri: string | null; fields?: PageFields })
   | (PageTreeNodeBase & { kind: 'typedPage'; typeId: string; issueKey?: string; placed: boolean })
   | (PageTreeNodeBase & { kind: 'type'; viewLink?: string });
 
@@ -722,6 +751,11 @@ export interface SetPageTypeResult {
   itemId?: string;
   issueKey?: string;
   link?: string;
+}
+
+export interface SetPageFieldsResult {
+  /** The page's fields after the write. */
+  fields: PageFields;
 }
 
 export interface FindOrgMembersResult {
