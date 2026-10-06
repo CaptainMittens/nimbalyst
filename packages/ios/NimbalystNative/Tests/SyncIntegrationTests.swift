@@ -625,6 +625,45 @@ final class SyncIntegrationTests: XCTestCase {
         XCTAssertEqual(entry.parentSessionId, "workstream-1")
     }
 
+    @MainActor
+    func testParentClearPublishesExplicitNullAndRetriesWithoutAssigningManager() throws {
+        let recorder = SendRecorder()
+        let sync = manager(recorder)
+        try seedSession("child")
+        var cached = try XCTUnwrap(database.session(byId: "child"))
+        cached.parentSessionId = "old-parent"
+        cached.createdBySessionId = "desktop-manager"
+        try database.upsertSession(cached)
+
+        try sync.updateSessionParent(sessionId: "child", parentSessionId: "new-parent")
+        var message = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(recorder.sent.last).utf8)) as? [String: Any])
+        var entry = try XCTUnwrap(message["session"] as? [String: Any])
+        XCTAssertEqual(entry["parentSessionId"] as? String, "new-parent")
+        XCTAssertNil(entry["createdBySessionId"], "Desktop alone assigns the manager")
+        XCTAssertEqual(try database.session(byId: "child")?.createdBySessionId, "desktop-manager")
+
+        try sync.updateSessionParent(sessionId: "child", parentSessionId: nil)
+        message = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(recorder.sent.last).utf8)) as? [String: Any])
+        entry = try XCTUnwrap(message["session"] as? [String: Any])
+        XCTAssertTrue(entry["parentSessionId"] is NSNull, "Omission is not a clear")
+        XCTAssertNil(entry["createdBySessionId"])
+        XCTAssertNil(try database.session(byId: "child")?.parentSessionId)
+
+        recorder.failure = NSError(domain: "test", code: 1)
+        try sync.updateSessionParent(sessionId: "child", parentSessionId: nil)
+        XCTAssertEqual(sync.requests.replayCount, 1)
+        let beforeReplay = recorder.sent.count
+        recorder.failure = nil
+        sync.requests.reconnect()
+        XCTAssertEqual(recorder.sent.count, beforeReplay + 1, "A nil parent must not drop the queued clear")
+        message = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try XCTUnwrap(recorder.sent.last).utf8)) as? [String: Any])
+        entry = try XCTUnwrap(message["session"] as? [String: Any])
+        XCTAssertTrue(entry["parentSessionId"] is NSNull)
+        XCTAssertNil(entry["createdBySessionId"])
+        XCTAssertEqual(try database.session(byId: "child")?.createdBySessionId, "desktop-manager")
+        XCTAssertEqual(sync.requests.replayCount, 0)
+    }
+
     private func messageBroadcast(id: String, sequence: Int, text: String,
                                   readable: Bool = true) throws -> Data {
         // `readable: false` encrypts under a key this manager cannot

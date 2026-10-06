@@ -11,10 +11,11 @@ import { Virtuoso, VirtuosoHandle } from 'react-virtuoso';
 import { CollapsibleGroup } from './CollapsibleGroup';
 import { WorktreeBaseBranchPicker } from './WorktreeBaseBranchPicker';
 import { SessionListItem } from './SessionListItem';
+import { visibleSessionTreeIds, sessionTreeRootId } from './sessionTree';
+import { resolveSessionArchiveSelection, sessionArchiveSubtreeIds } from './sessionArchiveSelection';
 import { WorkstreamGroup } from './WorkstreamGroup';
 import { BlitzGroup } from './BlitzGroup';
 import { SuperLoopGroup } from './SuperLoopGroup';
-import { MetaAgentGroup } from './MetaAgentGroup';
 import { NewSuperLoopDialog } from './NewSuperLoopDialog';
 import { ArchiveProgress } from './ArchiveProgress';
 import { IndexBuildDialog } from './IndexBuildDialog';
@@ -42,7 +43,8 @@ import {
 import { alphaFeatureEnabledAtom, worktreesFeatureAvailableAtom } from '../../store/atoms/appSettings';
 import { activeWorkspacePathAtom } from '../../store/atoms/openProjects';
 import { useGitRepoProbe } from '../../hooks/useGitRepoProbe';
-import { activeSessionIdAtom as globalActiveSessionIdAtom, sessionPinnedUpdateAtom } from '../../store/atoms/sessions';
+import { workstreamStateAtom } from '../../store/atoms/workstreamState';
+import { sessionProcessingAtom, sessionUnreadAtom, sessionHasPendingInteractivePromptAtom, activeSessionIdAtom as globalActiveSessionIdAtom, sessionPinnedUpdateAtom } from '../../store/atoms/sessions';
 import { collapsedGroupsAtom, sortOrderAtom, setCollapsedGroupsAtom, setSortOrderAtom } from '../../store/atoms/agentMode';
 import {
   recentlyRenamedSessionAtom,
@@ -127,7 +129,7 @@ type UnifiedListItem =
   | { type: 'worktree'; worktreeId: string; sessions: SessionItem[]; timestamp: number; rank: number }
   | { type: 'blitz'; blitzId: string; worktrees: { worktreeId: string; sessions: SessionItem[] }[]; timestamp: number; rank: number }
   | { type: 'superLoop'; loop: SuperLoop; timestamp: number; rank: number }
-  | { type: 'metaAgent'; metaSession: SessionItem; childSessions: SessionItem[]; timestamp: number; rank: number };
+;
 
 // Search filter options for content search
 type SearchTimeRange = '7d' | '30d' | '90d' | 'all';
@@ -411,7 +413,7 @@ const SessionHistoryComponent: React.FC = () => {
   const showArchived = showArchivedAtom;
   const setShowArchived = setShowArchivedAtom;
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set()); // Format: "blitz:id", "worktree:id", "workstream:id", "superloop:id", "meta-agent:id"
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<string>>(new Set()); // Format: "blitz:id", "worktree:id", "workstream:id", "superloop:id"
   const lastSelectedIdRef = useRef<string | null>(null); // For shift+click range selection
   // Tracks the last searchQuery|tagFilter|mode combination the title-filter effect ran for, so
   // it can tell a real user-driven filter change apart from an unrelated `allSessions` reference
@@ -1181,50 +1183,6 @@ const SessionHistoryComponent: React.FC = () => {
     }
   };
 
-  const getMetaAgentGroupSessionIds = (metaSessionId: string) => {
-    return [
-      metaSessionId,
-      ...sessions
-        .filter(session => session.createdBySessionId === metaSessionId)
-        .map(session => session.id),
-    ];
-  };
-
-  const handleArchiveMetaAgentSession = async (metaSessionId: string) => {
-    const sessionIds = getMetaAgentGroupSessionIds(metaSessionId);
-    try {
-      const results = await Promise.all(
-        sessionIds.map(sessionId => window.electronAPI.invoke('sessions:update-metadata', sessionId, { isArchived: true }))
-      );
-      // Same rejection-surfacing as handleArchiveSession: if any per-session
-      // archive came back `{success: false}`, surface it rather than silently
-      // proceeding with the optimistic UI update. See #282.
-      const failures = results
-        .map((r, i) => ({ r, sessionId: sessionIds[i] }))
-        .filter(({ r }) => r && typeof r === 'object' && r.success === false);
-      if (failures.length > 0) {
-        const message = failures
-          .map(({ r, sessionId }) => `${sessionId}: ${(r && r.error && String(r.error)) || 'rejected'}`)
-          .join('\n');
-        errorNotificationService.showError(
-          `Failed to archive meta-agent session (${failures.length} of ${sessionIds.length} rejected)`,
-          message,
-        );
-        console.error('[SessionHistory] Meta-agent archive rejected by backend:', failures);
-        return;
-      }
-      sessionIds.forEach(sessionId => {
-        updateSessionStore({ sessionId, updates: { isArchived: true } });
-        onSessionArchive?.(sessionId);
-      });
-      setSessions(prev => prev.filter(session => !sessionIds.includes(session.id)));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      errorNotificationService.showError('Failed to archive meta-agent session', message);
-      console.error('[SessionHistory] Failed to archive meta-agent session:', err);
-    }
-  };
-
   // Clean up UI state after a worktree archive (used by both auto-archive and dialog confirm paths)
   const cleanupAfterWorktreeArchive = (worktreeId: string) => {
     const worktreeSessions = allSessions.filter(s => s.worktreeId === worktreeId);
@@ -1320,38 +1278,6 @@ const SessionHistoryComponent: React.FC = () => {
     }
   };
 
-  const handleUnarchiveMetaAgentSession = async (metaSessionId: string) => {
-    const sessionIds = getMetaAgentGroupSessionIds(metaSessionId);
-    try {
-      await Promise.all(
-        sessionIds.map(sessionId => window.electronAPI.invoke('sessions:update-metadata', sessionId, { isArchived: false }))
-      );
-      sessionIds.forEach(sessionId => {
-        updateSessionStore({ sessionId, updates: { isArchived: false } });
-      });
-      setSessions(prev => prev.map(session => (
-        sessionIds.includes(session.id)
-          ? { ...session, isArchived: false }
-          : session
-      )));
-    } catch (err) {
-      console.error('[SessionHistory] Failed to unarchive meta-agent session:', err);
-    }
-  };
-
-  const handleDeleteMetaAgentSession = async (metaSessionId: string) => {
-    if (!onSessionDelete) return;
-
-    const sessionIds = getMetaAgentGroupSessionIds(metaSessionId);
-    const childSessionIds = sessionIds.filter(sessionId => sessionId !== metaSessionId);
-
-    for (const sessionId of childSessionIds) {
-      await onSessionDelete(sessionId);
-    }
-    await onSessionDelete(metaSessionId);
-    await loadAllSessions();
-  };
-
   const toggleShowArchived = async () => {
     const newValue = !showArchived;
     setShowArchived(newValue);
@@ -1369,7 +1295,7 @@ const SessionHistoryComponent: React.FC = () => {
 
   // Refs for shift-click range selection. Using refs instead of state means handleSessionClick
   // has a stable identity and memoized child components won't hold stale references.
-  const visualOrderRef = useRef<string[]>([]);
+  const visualOrderRef = useRef<() => string[]>(() => []);
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
 
@@ -1399,7 +1325,7 @@ const SessionHistoryComponent: React.FC = () => {
       // Shift+click: range selection
       const anchorId = lastSelectedIdRef.current || activeSessionIdRef.current;
       if (anchorId) {
-        const ids = visualOrderRef.current;
+        const ids = visualOrderRef.current();
         const anchorIndex = ids.indexOf(anchorId);
         const currentIndex = ids.indexOf(sessionId);
 
@@ -1461,16 +1387,8 @@ const SessionHistoryComponent: React.FC = () => {
       return `blitz:${activeSession.parentSessionId}`;
     }
 
-    // Meta-agent session or child of meta-agent
-    if (activeSession.agentRole === 'meta-agent') {
-      return `meta-agent:${activeSession.id}`;
-    }
-    if (activeSession.createdBySessionId) {
-      const parentSession = allSessions.find(s => s.id === activeSession.createdBySessionId);
-      if (parentSession?.agentRole === 'meta-agent') {
-        return `meta-agent:${parentSession.id}`;
-      }
-    }
+    const treeRootId = sessionTreeRootId(activeSession.id, sessionRegistry);
+    if (treeRootId !== activeSession.id && !activeSession.worktreeId) return `workstream:${treeRootId}`;
 
     // Workstream (has children, no worktreeId)
     if (!activeSession.worktreeId && (activeSession.childCount ?? 0) > 0) {
@@ -1478,7 +1396,7 @@ const SessionHistoryComponent: React.FC = () => {
     }
 
     return null;
-  }, [activeSessionId, allSessions, blitzCache, superLoops, sessions]);
+  }, [activeSessionId, allSessions, blitzCache, superLoops, sessions, sessionRegistry]);
 
   // Handle Cmd+click on group headers (blitz, worktree, workstream, superloop)
   const handleGroupMultiSelect = (groupKey: string) => {
@@ -1582,20 +1500,25 @@ const SessionHistoryComponent: React.FC = () => {
       }
     }
 
-    // Archive workstream sessions and regular sessions via metadata update
-    const allSessionIds = [...regularSessionIds, ...workstreamIds];
-    if (allSessionIds.length > 0) {
-      const promises = allSessionIds.map(id =>
-        window.electronAPI.invoke('sessions:update-metadata', id, { isArchived: true })
-      );
-      await Promise.all(promises);
-      allSessionIds.forEach(id => {
-        updateSessionStore({ sessionId: id, updates: { isArchived: true } });
-      });
-      setSessions(prev => prev.filter(s => !allSessionIds.includes(s.id)));
-      if (onSessionArchive) {
-        allSessionIds.forEach(id => onSessionArchive(id));
+    // The server archives each selected subtree. Reconcile all descendants only
+    // after success, so nested tabs close and rejected requests stay visible.
+    const archivedIds: string[] = [];
+    for (const id of [...regularSessionIds, ...workstreamIds]) {
+      try {
+        const result = await window.electronAPI.invoke('sessions:update-metadata', id, { isArchived: true });
+        if (result?.success === false) {
+          errorNotificationService.showError('Failed to archive session', result.error || 'The backend rejected the archive request.');
+          continue;
+        }
+        archivedIds.push(...sessionArchiveSubtreeIds(sessionRegistry, [id]));
+      } catch (error) {
+        errorNotificationService.showError('Failed to archive session', String(error));
       }
+    }
+    if (archivedIds.length > 0) {
+      archivedIds.forEach(id => updateSessionStore({ sessionId: id, updates: { isArchived: true } }));
+      setSessions(prev => prev.filter(s => !archivedIds.includes(s.id)));
+      archivedIds.forEach(id => onSessionArchive?.(id));
     }
 
     clearSelection();
@@ -1631,48 +1554,7 @@ const SessionHistoryComponent: React.FC = () => {
 
   // Bulk archive all selected items (sessions + groups)
   const handleBulkArchive = async () => {
-    const selectedSessions = sessions.filter(s => selectedSessionIds.has(s.id));
-
-    // Separate worktree and regular sessions from selectedSessionIds
-    const worktreeIds = new Set<string>();
-    const regularSessionIds: string[] = [];
-
-    for (const session of selectedSessions) {
-      if (session.worktreeId) {
-        worktreeIds.add(session.worktreeId);
-      } else {
-        regularSessionIds.push(session.id);
-      }
-    }
-
-    // Collect group IDs by type from selectedGroupIds
-    const blitzIds: string[] = [];
-    const superLoopIds: string[] = [];
-    const workstreamIds: string[] = [];
-    const groupWorktreeIds: string[] = [];
-
-    for (const key of selectedGroupIds) {
-      const [type, id] = key.split(':');
-      switch (type) {
-        case 'blitz': blitzIds.push(id); break;
-        case 'superloop': superLoopIds.push(id); break;
-        case 'workstream': workstreamIds.push(id); break;
-        case 'worktree': groupWorktreeIds.push(id); break;
-      }
-    }
-
-    // Merge worktree IDs from sessions and from group selection
-    for (const id of groupWorktreeIds) {
-      worktreeIds.add(id);
-    }
-
-    const archiveParams = {
-      worktreeIds: Array.from(worktreeIds),
-      regularSessionIds,
-      blitzIds,
-      superLoopIds,
-      workstreamIds,
-    };
+    const archiveParams = resolveSessionArchiveSelection(sessionRegistry, selectedSessionIds, selectedGroupIds);
 
     // Collect all worktree IDs that will be archived (including from blitzes and super loops)
     const allWorktreeIds = collectAllWorktreeIds(archiveParams);
@@ -2196,7 +2078,10 @@ const SessionHistoryComponent: React.FC = () => {
   // Group worktree sessions by worktreeId and compute worktree timestamps
   const worktreeGroupsData = useMemo(() => {
     const groups = new Map<string, { sessions: SessionItem[]; timestamp: number }>();
-    for (const session of sessions) {
+    const allowedRoots = new Set(sessions.map(session => session.id));
+    for (const session of sessionRegistry.values()) {
+      if (!allowedRoots.has(sessionTreeRootId(session.id, sessionRegistry))) continue;
+      if (!showArchived && session.isArchived) continue;
       if (session.worktreeId) {
         const existing = groups.get(session.worktreeId);
         if (existing) {
@@ -2214,36 +2099,8 @@ const SessionHistoryComponent: React.FC = () => {
       }
     }
 
-    // Include child sessions of worktree-group members that don't have a worktreeId themselves.
-    // This handles the case where a worktree session is also a workstream parent (has children
-    // created via mobile/sync with parentSessionId but no worktreeId). Without this, those
-    // children are invisible - filtered out of the root list by parentSessionId, but not
-    // included in any worktree group by worktreeId.
-    const worktreeSessionIds = new Set<string>();
-    for (const [, group] of groups) {
-      for (const s of group.sessions) {
-        worktreeSessionIds.add(s.id);
-      }
-    }
-    for (const child of sessionRegistry.values()) {
-      if (child.parentSessionId && worktreeSessionIds.has(child.parentSessionId) && !child.worktreeId) {
-        // Find which worktree group the parent belongs to
-        const parent = sessions.find(s => s.id === child.parentSessionId);
-        if (parent?.worktreeId) {
-          const group = groups.get(parent.worktreeId);
-          if (group) {
-            group.sessions.push(child);
-            if (sortBy === 'updated') {
-              const childTimestamp = getDisplayedOrderTimestamp(child);
-              group.timestamp = Math.max(group.timestamp, childTimestamp);
-            }
-          }
-        }
-      }
-    }
-
     return groups;
-  }, [sessions, sortBy, sessionRegistry, getDisplayedOrderTimestamp]);
+  }, [sessions, sortBy, sessionRegistry, showArchived, getDisplayedOrderTimestamp]);
 
   // Get all worktree IDs for batch fetching
   const sortedWorktreeIds = useMemo(() => {
@@ -2255,72 +2112,23 @@ const SessionHistoryComponent: React.FC = () => {
     const timestampField = sortBy === 'updated' ? 'updatedAt' : 'createdAt';
     const items: UnifiedListItem[] = [];
     const pinnedItems: UnifiedListItem[] = [];
-    const metaAgentItems: UnifiedListItem[] = [];
-
-    // Identify meta-agent sessions and their child sessions
-    const metaAgentSessionIds = new Set<string>();
-    const metaAgentChildSessionIds = new Set<string>();
-    if (isMetaAgentEnabled) {
-      for (const session of sessions) {
-        if (session.agentRole === 'meta-agent') {
-          metaAgentSessionIds.add(session.id);
-        }
-      }
-      // Collect children (sessions created by meta-agent sessions)
-      for (const session of sessions) {
-        if (session.createdBySessionId && metaAgentSessionIds.has(session.createdBySessionId)) {
-          metaAgentChildSessionIds.add(session.id);
-        }
-      }
-      // Build meta-agent group items (always at top)
-      for (const session of sessions) {
-        if (session.agentRole === 'meta-agent') {
-          const childSessions = sessions
-            .filter(s => s.createdBySessionId === session.id)
-            .sort(compareSessionOrder);
-          const latestChildTimestamp = childSessions.length > 0
-            ? Math.max(...childSessions.map(s => getDisplayedOrderTimestamp(s)))
-            : 0;
-          const rank = Math.min(
-            getDisplayedOrderRank(session.id),
-            ...childSessions.map(s => getDisplayedOrderRank(s.id)),
-          );
-          const timestamp = Math.max(
-            timestampField === 'updatedAt' ? getDisplayedOrderTimestamp(session) : session.createdAt,
-            latestChildTimestamp
-          );
-          metaAgentItems.push({
-            type: 'metaAgent' as const,
-            metaSession: session,
-            childSessions,
-            timestamp,
-            rank,
-          });
-        }
-      }
-      // Sort meta-agent items by timestamp (newest first)
-      metaAgentItems.sort(compareUnifiedItems);
-    }
-
     // Add regular sessions and workstreams (those without worktreeId)
     for (const session of sessions) {
       // Skip blitz sessions - they're rendered via BlitzGroup, not as individual items
       if (session.sessionType === 'blitz') continue;
-      // Skip meta-agent sessions and their children - they're rendered via MetaAgentGroup
-      if (metaAgentSessionIds.has(session.id) || metaAgentChildSessionIds.has(session.id)) continue;
 
       if (!session.worktreeId) {
         // Check if this is a workstream (has children)
         const isWorkstream = (session.childCount ?? 0) > 0;
         if (isWorkstream) {
           // Create workstream item with cached children (or empty array if not loaded yet)
-          const cachedChildren = workstreamChildrenCache.get(session.id) || [];
+          const cachedChildren = Array.from(sessionRegistry.values()).filter(child => child.id !== session.id && (showArchived || !child.isArchived) && sessionTreeRootId(child.id, sessionRegistry) === session.id);
 
           // For workstreams, use the maximum updatedAt from all children for sorting
           // This ensures workstreams appear based on their most recent activity
           let timestamp: number;
           if (timestampField === 'updatedAt' && cachedChildren.length > 0) {
-            timestamp = Math.max(...cachedChildren.map(child => getDisplayedOrderTimestamp(child)));
+            timestamp = Math.max(getDisplayedOrderTimestamp(session), ...cachedChildren.map(child => getDisplayedOrderTimestamp(child)));
           } else {
             timestamp = timestampField === 'updatedAt' ? getDisplayedOrderTimestamp(session) : session.createdAt;
           }
@@ -2363,10 +2171,7 @@ const SessionHistoryComponent: React.FC = () => {
         continue;
       }
 
-      // Skip worktrees whose sessions are all meta-agent children
-      if (metaAgentChildSessionIds.size > 0 && data.sessions.every(s => metaAgentChildSessionIds.has(s.id))) {
-        continue;
-      }
+
 
       // Check if any session in this worktree has a parentSessionId pointing to a blitz session
       const blitzParentId = data.sessions.find(s => s.parentSessionId && blitzCache.has(s.parentSessionId))?.parentSessionId;
@@ -2506,13 +2311,11 @@ const SessionHistoryComponent: React.FC = () => {
     // Sort pinned items by timestamp (newest first)
     pinnedItems.sort(compareUnifiedItems);
 
-    // Build the result with meta-agent items always first
+    // Build pinned and time groups
     const result: Record<string, UnifiedListItem[]> = {};
 
     // Meta-agent sessions always appear at the very top
-    if (metaAgentItems.length > 0) {
-      result['Meta Agent'] = metaAgentItems;
-    }
+
 
     // If we have pinned items, add them as a "Pinned" group
     if (pinnedItems.length > 0) {
@@ -2527,7 +2330,7 @@ const SessionHistoryComponent: React.FC = () => {
     }
 
     return result as Record<TimeGroupKey | 'Pinned' | 'Meta Agent', UnifiedListItem[]>;
-  }, [sessions, worktreeGroupsData, sortBy, worktreeCache, workstreamChildrenCache, blitzCache, superLoops, showArchived, isMetaAgentEnabled, getDisplayedOrderRank, getDisplayedOrderTimestamp, compareSessionOrder, compareUnifiedItems]);
+  }, [sessions, worktreeGroupsData, sortBy, worktreeCache, workstreamChildrenCache, sessionRegistry, blitzCache, superLoops, showArchived, isMetaAgentEnabled, getDisplayedOrderRank, getDisplayedOrderTimestamp, compareSessionOrder, compareUnifiedItems]);
 
   const groupKeys = Object.keys(groupedItems) as (TimeGroupKey | 'Pinned' | 'Meta Agent')[];
 
@@ -2554,9 +2357,12 @@ const SessionHistoryComponent: React.FC = () => {
 
   // Keep visual order ref in sync with the flattened list for shift-click range selection.
   // Must include ALL visible session IDs in exact visual order -- including sessions nested
-  // inside worktree, workstream, blitz, superLoop, and metaAgent groups.
-  visualOrderRef.current = useMemo(() => {
+  // inside worktree, workstream, blitz, superLoop groups.
+  visualOrderRef.current = () => {
     const ids: string[] = [];
+    const treeOrder = (rows: SessionItem[]) => visibleSessionTreeIds(rows.map(row => ({...row, updatedAt: Math.max(row.updatedAt, workspaceTurnActivity.get(row.id) ?? 0)})), node =>
+      store.get(workstreamStateAtom(node.session.id)).treeExpanded ?? node.ids.some(id => id === activeSessionId || store.get(sessionProcessingAtom(id)) || store.get(sessionUnreadAtom(id)) || store.get(sessionHasPendingInteractivePromptAtom(id)))
+    );
     for (const entry of flatVirtuosoItems) {
       if (entry.kind !== 'item') continue;
       const item = entry.item;
@@ -2565,12 +2371,10 @@ const SessionHistoryComponent: React.FC = () => {
           ids.push(item.session.id);
           break;
         case 'workstream':
-          // Workstream header session + its children
-          ids.push(item.session.id);
-          for (const child of item.sessions) ids.push(child.id);
+          ids.push(...treeOrder([item.session, ...item.sessions]));
           break;
         case 'worktree':
-          for (const s of item.sessions) ids.push(s.id);
+          if (!collapsedGroups.includes(`worktree:${item.worktreeId}`)) ids.push(...treeOrder(item.sessions));
           break;
         case 'blitz':
           for (const wt of item.worktrees) {
@@ -2585,15 +2389,12 @@ const SessionHistoryComponent: React.FC = () => {
           }
           break;
         }
-        case 'metaAgent':
-          ids.push(item.metaSession.id);
-          for (const child of item.childSessions) ids.push(child.id);
-          break;
+
       }
     }
     // console.log('[SessionHistory] visualOrderRef updated:', ids.length, 'session IDs (from', flatVirtuosoItems.filter(e => e.kind === 'item').length, 'items). First 5:', ids.slice(0, 5).map(id => id.slice(0, 8)));
     return ids;
-  }, [flatVirtuosoItems, worktreeGroupsData]);
+  };
 
   // Ref for Virtuoso to support scroll-to-active
   const virtuosoRef = useRef<VirtuosoHandle>(null);
@@ -2697,13 +2498,11 @@ const SessionHistoryComponent: React.FC = () => {
 
     // Find workstream sessions that are expanded
     const workstreamSessionsNeedingFetch = sessions.filter(s =>
-      !s.worktreeId &&
       (s.childCount ?? 0) > 0 &&
-      !collapsedGroups.includes(`workstream:${s.id}`) &&
       !pendingWorkstreamChildrenFetchesRef.current.has(s.id) &&
       workstreamChildrenNeedRefresh(
         cache.get(s.id),
-        s.childCount ?? 0,
+        s.descendantCount ?? s.childCount ?? 0,
         registrySnapshot,
       )
     );
@@ -2746,6 +2545,8 @@ const SessionHistoryComponent: React.FC = () => {
                 worktreeId: c.worktreeId || null,
                 parentSessionId: c.parentSessionId || null,
                 childCount: c.childCount || 0,
+                descendantCount: c.descendantCount || 0,
+                createdBySessionId: c.createdBySessionId || null,
                 uncommittedCount: c.uncommittedCount || 0,
                 // Metadata fields for TrackerPanel and kanban
                 ...(c.phase && { phase: c.phase }),
@@ -3514,6 +3315,7 @@ const SessionHistoryComponent: React.FC = () => {
                   return (
                     <WorkstreamGroup
                       type="worktree"
+                      projectPath={workspacePath}
                       id={item.worktreeId}
                       title={worktreeData?.displayName || worktreeData?.name || 'Loading...'}
                       isExpanded={isWorktreeExpanded}
@@ -3592,34 +3394,6 @@ const SessionHistoryComponent: React.FC = () => {
                       projectPath={session.workspaceId}
                       onWorkstreamArchive={handleArchiveSession}
                       onWorkstreamPinToggle={handleSessionPinToggle}
-                    />
-                  );
-                }
-                if (item.type === 'metaAgent') {
-                  const isMetaExpanded = !collapsedGroups.includes(`meta-agent:${item.metaSession.id}`);
-                  const isMetaActive = item.metaSession.id === activeSessionId
-                    || item.childSessions.some(s => s.id === activeSessionId);
-
-                  return (
-                    <MetaAgentGroup
-                      metaSession={item.metaSession}
-                      childSessions={item.childSessions}
-                      isExpanded={isMetaExpanded}
-                      isActive={isMetaActive}
-                      isSelected={selectedGroupIds.has(`meta-agent:${item.metaSession.id}`)}
-                      onToggle={() => handleToggleGroup(`meta-agent:${item.metaSession.id}`)}
-                      onMultiSelect={() => handleGroupMultiSelect(`meta-agent:${item.metaSession.id}`)}
-                      activeSessionId={activeSessionId}
-                      onSessionSelect={handleSessionClick}
-                      onSessionArchive={handleArchiveSession}
-                      onSessionUnarchive={handleUnarchiveSession}
-                      onSessionDelete={handleDeleteSession}
-                      onMetaSessionArchive={handleArchiveMetaAgentSession}
-                      onMetaSessionUnarchive={handleUnarchiveMetaAgentSession}
-                      onMetaSessionDelete={handleDeleteMetaAgentSession}
-                      onSessionPinToggle={handleSessionPinToggle}
-                      onSessionBranch={onSessionBranch}
-                      onWorktreeArchive={handleArchiveWorktree}
                     />
                   );
                 }

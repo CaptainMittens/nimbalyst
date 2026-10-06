@@ -58,6 +58,7 @@ internal fun SessionRow(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)?,
     isChild: Boolean = false,
+    treeIndentationLevel: Int = 0,
 ) {
     val unread = session.hasUnread
     Row(
@@ -66,7 +67,7 @@ internal fun SessionRow(
             .clip(MaterialTheme.shapes.small)
             .background(if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
             .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(start = if (isChild) 24.dp else 8.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            .padding(start = (if (isChild) 24.dp else 8.dp) + (treeIndentationLevel.coerceIn(0, 2) * 12).dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {

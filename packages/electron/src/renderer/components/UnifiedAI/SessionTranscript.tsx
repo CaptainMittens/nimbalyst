@@ -106,7 +106,7 @@ import {
 } from '../../store';
 import { streamCompletionSignalAtom } from '../../store/atoms/sessionTranscript';
 import { sessionBackgroundTasksAtom } from '../../store/atoms/sessionBackgroundTasks';
-import { convertToWorkstreamAtom, sessionPromptAdditionsAtom, sessionLastSubmitAtAtom, sessionDraftLocalModifiedAtAtom, nextOptimisticId } from '../../store/atoms/sessions';
+import { sessionPromptAdditionsAtom, sessionLastSubmitAtAtom, sessionDraftLocalModifiedAtAtom, nextOptimisticId } from '../../store/atoms/sessions';
 import { clearAIInputHistoryAtom } from '../../store/atoms/aiInputUndo';
 import {
   cliTerminalExpandedAtom,
@@ -435,7 +435,6 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
 
   // Child session creation for "start new session" option
   const createChildSession = useSetAtom(createChildSessionAtom);
-  const convertToWorkstream = useSetAtom(convertToWorkstreamAtom);
   const sessionChildren = useAtomValue(sessionChildrenAtom(sessionId));
   const sessionParentId = useAtomValue(sessionParentIdAtom(sessionId));
   const defaultModel = useAtomValue(defaultAgentModelAtom);
@@ -1722,45 +1721,15 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
 
   // Handler for "Start new session to implement" option
   // Creates a new session and opens it with a populated draft before stopping the current plan session.
-  // For worktree sessions: creates a new session in the same worktree (no parent-child hierarchy)
-  // For regular sessions: creates a workstream hierarchy (converts to workstream if needed)
+  // The implementation session stays under the planning session in the same container.
   const handleExitPlanModeStartNewSession = useCallback(async (requestId: string, confirmSessionId: string, planFilePath: string) => {
     try {
-      let newSessionId: string | null = null;
-
-      // Check if we're in a worktree session
-      if (worktreeId && onCreateWorktreeSession) {
-        // Worktree sessions: create a new session in the same worktree (NOT a workstream)
-        // This avoids creating workstreams-within-worktrees which is not supported
-        console.log('[SessionTranscript] Creating new session in worktree:', worktreeId);
-        newSessionId = await onCreateWorktreeSession(worktreeId);
-      } else {
-        // Regular sessions: use workstream hierarchy logic
-        const hasChildren = sessionChildren.length > 0;
-
-        if (hasChildren || sessionParentId) {
-          // Already part of a workstream hierarchy - create a child of the appropriate parent
-          // If sessionParentId exists, we're a child session - create sibling under the same parent
-          // If hasChildren, we're the root - create child under us
-          const parentId = sessionParentId || confirmSessionId;
-          newSessionId = await createChildSession({
-            parentSessionId: parentId,
-            workspacePath: workspacePath || '',
-            provider: 'claude-code',
-            model: defaultModel,
-          });
-        } else {
-          // Single session - convert to workstream first, which creates a sibling session
-          const result = await convertToWorkstream({
-            sessionId: confirmSessionId,
-            workspacePath: workspacePath || '',
-            model: defaultModel,
-          });
-          if (result?.siblingId) {
-            newSessionId = result.siblingId;
-          }
-        }
-      }
+      const newSessionId = await createChildSession({
+        parentSessionId: confirmSessionId,
+        workspacePath: workspacePath || '',
+        provider: 'claude-code',
+        model: defaultModel,
+      });
 
       if (!newSessionId) {
         console.error('[SessionTranscript] Failed to create new implementation session');
@@ -1790,7 +1759,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
     } catch (error) {
       console.error('[SessionTranscript] Failed to start new session for implementation:', error);
     }
-  }, [sessionChildren, sessionParentId, workspacePath, worktreeId, onCreateWorktreeSession, createChildSession, convertToWorkstream, sessionWorktreePath, posthog, defaultModel, openSessionWithDraft, stopExitPlanModeSession]);
+  }, [sessionChildren, sessionParentId, workspacePath, worktreeId, onCreateWorktreeSession, createChildSession, sessionWorktreePath, posthog, defaultModel, openSessionWithDraft, stopExitPlanModeSession]);
 
   const handleExitPlanModeCancel = useCallback(async (requestId: string, confirmSessionId: string) => {
     try {

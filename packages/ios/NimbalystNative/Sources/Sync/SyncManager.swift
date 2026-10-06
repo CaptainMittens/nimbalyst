@@ -1583,7 +1583,7 @@ public final class SyncManager: ObservableObject {
     /// Local first for instant UI feedback, then published. #NIM-5922: this
     /// used to write locally and send nothing, so the desktop reasserted the
     /// old parent on the next index page and the move silently undid itself.
-    public func updateSessionParent(sessionId: String, parentSessionId: String) throws {
+    public func updateSessionParent(sessionId: String, parentSessionId: String?) throws {
         try database.writer.write { db in
             try db.execute(
                 sql: "UPDATE sessions SET parentSessionId = ? WHERE id = ?",
@@ -1608,9 +1608,8 @@ public final class SyncManager: ObservableObject {
     }
 
     private func rebuildParentIndexUpdate(sessionId: String) -> String? {
-        guard let session = try? database.session(byId: sessionId),
-              let parentSessionId = session.parentSessionId else { return nil }
-        return try? SessionIndexUpdates.parent(session: session, parentSessionId: parentSessionId, crypto: crypto)
+        guard let session = try? database.session(byId: sessionId) else { return nil }
+        return try? SessionIndexUpdates.parent(session: session, parentSessionId: session.parentSessionId, crypto: crypto)
     }
 
     /// Archive or unarchive a session.

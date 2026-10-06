@@ -9,6 +9,8 @@
  */
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { database } from '../database/PGLiteDatabaseWorker';
+import { findSessionTreeRoot, readSessionSubtree } from '../services/sessionHierarchy';
 import {
   AISessionsRepository,
   SessionFilesRepository,
@@ -339,32 +341,14 @@ async function handleGetWorkstreamOverview(
   currentSessionId: string,
   workspaceId: string
 ): Promise<string> {
-  let parentId = workstreamId;
-
-  if (!parentId) {
-    const currentSession = await AISessionsRepository.get(currentSessionId);
-    if (!currentSession) {
-      return "Error: Current session not found";
-    }
-    parentId = currentSession.parentSessionId ?? undefined;
-    if (!parentId) {
-      return "This session is not part of a workstream (no parent session). Use get_session_summary to view the current session.";
-    }
-  }
+  const parentId = await findSessionTreeRoot(database, workstreamId || currentSessionId, workspaceId);
 
   const parent = await AISessionsRepository.get(parentId);
   if (!parent) {
     return `Error: Workstream session ${parentId} not found`;
   }
 
-  const { database } = await import("../database/PGLiteDatabaseWorker");
-  const { rows } = await database.query<any>(
-    `SELECT s.id, s.title, s.provider, s.model, s.session_type, s.created_at, s.updated_at
-     FROM ai_sessions s
-     WHERE s.parent_session_id = $1 AND s.workspace_id = $2
-     ORDER BY s.created_at ASC`,
-    [parentId, workspaceId]
-  );
+  const rows = await readSessionSubtree(database, parentId, workspaceId);
 
   if (rows.length === 0) {
     return `Workstream: "${parent.title || "Untitled"}" (${parentId})\nNo child sessions found.`;
@@ -589,23 +573,8 @@ async function handleGetWorkstreamEditedFiles(
     return "Error: Current session not found";
   }
 
-  const parentId = currentSession.parentSessionId;
-  if (!parentId) {
-    const files = await SessionFilesRepository.getFilesBySession(
-      currentSessionId,
-      "edited"
-    );
-    if (files.length === 0) {
-      return "No files have been edited in this session. This session is not part of a workstream.";
-    }
-    return `This session is not part of a workstream. Files edited in current session (${files.length}):\n${files.map((f) => `- ${stripWorkspacePath(f.filePath, workspaceId)}`).join("\n")}`;
-  }
-
-  const { database } = await import("../database/PGLiteDatabaseWorker");
-  const { rows } = await database.query<any>(
-    `SELECT id, title FROM ai_sessions WHERE parent_session_id = $1 AND workspace_id = $2 ORDER BY created_at ASC`,
-    [parentId, workspaceId]
-  );
+  const parentId = await findSessionTreeRoot(database, currentSessionId, workspaceId);
+  const rows = await readSessionSubtree(database, parentId, workspaceId);
 
   if (rows.length === 0) {
     return "No child sessions found in this workstream.";

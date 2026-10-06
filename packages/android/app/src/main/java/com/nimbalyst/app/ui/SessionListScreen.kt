@@ -408,18 +408,19 @@ private fun LazyListScope.groupItems(
         }
         val expanded = isExpanded(group)
         item(key = group.key) {
-            val isMeta = group.kind == GroupKind.META_AGENT
+            val headerIsSession = group.kind == GroupKind.META_AGENT ||
+                (group.kind == GroupKind.WORKSTREAM && group.parent.sessionType != SessionListGrouping.WORKSTREAM_TYPE)
             Box {
                 GroupHeader(
                     group = group,
                     isExpanded = expanded,
-                    // Meta-agent headers are sessions in their own right; the others are containers.
-                    isSelected = (isMeta || group.children.isEmpty()) && group.parent.id == selectedSessionId,
+                    // Ordinary tree roots remain selectable; wrappers only expand.
+                    isSelected = (headerIsSession || group.children.isEmpty()) && group.parent.id == selectedSessionId,
                     onClick = {
-                        if (isMeta || group.children.isEmpty()) onSelectSession(group.parent.id) else toggle(group)
+                        if (headerIsSession || group.children.isEmpty()) onSelectSession(group.parent.id) else toggle(group)
                     },
                     onLongClick = { onLongPress(group) },
-                    onToggleExpanded = if (isMeta && group.children.isNotEmpty()) ({ toggle(group) }) else null
+                    onToggleExpanded = if (headerIsSession && group.children.isNotEmpty()) ({ toggle(group) }) else null
                 )
                 rowMenu(group)
             }
@@ -432,7 +433,8 @@ private fun LazyListScope.groupItems(
                         isSelected = child.id == selectedSessionId,
                         onClick = { onSelectSession(child.id) },
                         onLongClick = null,
-                        isChild = true
+                        isChild = true,
+                        treeIndentationLevel = SessionListGrouping.indentationLevel(child, group)
                     )
                 }
             }

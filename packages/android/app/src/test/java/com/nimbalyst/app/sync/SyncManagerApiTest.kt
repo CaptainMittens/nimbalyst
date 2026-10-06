@@ -178,7 +178,7 @@ class SyncManagerApiTest {
 
     @Test
     fun `controls go to the session host, and archive and reparent are written locally and published`() = runBlocking<Unit> {
-        broadcast(entry("s1") { addProperty("hostDeviceId", "desk-1") })
+        broadcast(entry("s1") { addProperty("hostDeviceId", "desk-1"); addProperty("createdBySessionId", "desktop-manager") })
 
         manager.cancelSession("s1").getOrThrow()
         val cancel = sent("sessionControl").single().getAsJsonObject("message")
@@ -197,6 +197,13 @@ class SyncManagerApiTest {
         val move = sent("indexUpdate").last().getAsJsonObject("session")
         assertEquals("ws-1", move.get("parentSessionId").asString)
         assertNull("a move must not overwrite the message count", move.get("messageCount"))
+        assertFalse(move.has("createdBySessionId"))
+        manager.updateSessionParent("s1", null).getOrThrow()
+        assertNull(repository.getSession("s1")!!.parentSessionId)
+        assertEquals("desktop-manager", repository.getSession("s1")!!.createdBySessionId)
+        val clear = sent("indexUpdate").last().getAsJsonObject("session")
+        assertTrue(clear.get("parentSessionId").isJsonNull)
+        assertFalse(clear.has("createdBySessionId"))
 
         val worktreeId = manager.createWorktree("/p").getOrThrow()
         assertEquals(worktreeId, sent("createWorktreeRequest").single().getAsJsonObject("request").get("requestId").asString)
@@ -404,6 +411,8 @@ class SyncManagerApiTest {
         assertEquals("second", repository.getSession("s1")!!.draftInput)
         assertTrue(manager.setSessionArchived("s1", true).isFailure)
         assertTrue(manager.updateSessionParent("s1", "ws-1").isFailure)
+        assertTrue(manager.updateSessionParent("s1", null).isFailure)
+        assertNull(repository.getSession("s1")!!.parentSessionId)
         manager.markSessionRead("s1", 700L)
         // An interactive answer is never replayed: by reconnect the desktop has moved on.
         assertTrue(manager.sendSessionControlMessage("s1", "prompt_response").isFailure)
@@ -422,7 +431,9 @@ class SyncManagerApiTest {
         val controls = sent("sessionControl").map { it.getAsJsonObject("message") }
         assertEquals(listOf("archive"), controls.map { it.get("messageType").asString })
         assertTrue(controls.single().getAsJsonObject("payload").get("isArchived").asBoolean)
-        assertEquals("ws-1", sent("indexUpdate").single().getAsJsonObject("session").get("parentSessionId").asString)
+        val clear = sent("indexUpdate").single().getAsJsonObject("session")
+        assertTrue(clear.get("parentSessionId").isJsonNull)
+        assertFalse(clear.has("createdBySessionId"))
 
         // Once the room has answered every ping, delivery is proven and nothing is
         // left parked: the next reconnect publishes none of it again.

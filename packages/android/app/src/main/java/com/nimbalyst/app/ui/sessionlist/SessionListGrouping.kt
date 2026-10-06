@@ -56,9 +56,8 @@ internal fun aggregatedStatus(sessions: Collection<SessionEntity>): AggregatedSt
 /**
  * Pure grouping for the session list. Mirrors the iOS SQL grouping in
  * `SessionListQueries.swift`: every visible session belongs to exactly one display
- * group, resolved in this order -- meta-agent, workstream, worktree, standalone. A link
- * to a parent that is missing, hidden by the current filter, or not a workstream does not
- * claim the child; it falls through to the next rule, so no session can disappear.
+ * group. Parent links resolve the visible tree root; manager links do not group
+ * sessions. Missing/filtered parents release a subtree, and worktrees stay containers.
  */
 object SessionListGrouping {
 
@@ -116,17 +115,26 @@ object SessionListGrouping {
         val visible = sessions.filter { isVisible(it, filter) }
         val byId = visible.associateBy { it.id }
 
+        val parentIds = visible.mapNotNull { child ->
+            child.parentSessionId?.let(byId::get)?.takeIf {
+                it.projectId == child.projectId && it.worktreeId == child.worktreeId
+            }?.id
+        }.toSet()
         fun keyFor(s: SessionEntity): String {
-            if (filter.metaAgentEnabled) {
-                if (s.agentRole == META_AGENT_ROLE) return "meta:${s.id}"
-                val creator = s.createdBySessionId?.let(byId::get)
-                if (creator != null && creator.agentRole == META_AGENT_ROLE) return "meta:${creator.id}"
-            }
-            if (s.sessionType == WORKSTREAM_TYPE) return "ws:${s.id}"
-            val parent = s.parentSessionId?.takeIf { it.isNotBlank() }?.let(byId::get)
-            if (parent != null && parent.sessionType == WORKSTREAM_TYPE) return "ws:${parent.id}"
             s.worktreeId?.takeIf { it.isNotBlank() }?.let { return "wt:$it" }
-            return "s:${s.id}"
+            var root = s
+            val seen = linkedSetOf<String>()
+            while (seen.add(root.id) && root.sessionType !in setOf(WORKSTREAM_TYPE, "blitz")) {
+                val parent = root.parentSessionId?.let(byId::get)
+                    ?.takeIf { it.projectId == s.projectId && it.worktreeId == s.worktreeId } ?: break
+                if (parent.id in seen) {
+                    root = byId.getValue(seen.min())
+                    break
+                }
+                root = parent
+            }
+            return if (root.sessionType == WORKSTREAM_TYPE || root.id in parentIds) "ws:${root.id}"
+                else "s:${root.id}"
         }
 
         return visible.groupBy(::keyFor)
@@ -152,27 +160,28 @@ object SessionListGrouping {
             GroupKind.WORKTREE -> members.minWith(compareBy<SessionEntity> { it.createdAt }.thenBy { it.id })
             else -> byId[anchor] ?: return null
         }
-        val children = when (kind) {
+        val children = treeOrder(when (kind) {
             GroupKind.STANDALONE -> emptyList()
             GroupKind.WORKTREE -> if (members.size > 1) members else emptyList()
             else -> members.filter { it.id != parent.id }
-        }.sortedWith(compareByDescending<SessionEntity> { it.updatedAt }.thenByDescending { it.id })
+        })
 
         val phasePass = when {
             phase == PhaseFilter.ALL -> true
             kind == GroupKind.META_AGENT -> true
             kind == GroupKind.STANDALONE -> phase.matches(parent.phase)
             kind == GroupKind.WORKTREE && children.isEmpty() -> phase.matches(parent.phase)
-            else -> children.any { phase.matches(it.phase) }
+            parent.sessionType == WORKSTREAM_TYPE -> children.any { phase.matches(it.phase) }
+            else -> members.any { phase.matches(it.phase) }
         }
         if (!phasePass) return null
 
-        val orderTimestamp = if (kind == GroupKind.WORKSTREAM && children.isNotEmpty()) {
+        val orderTimestamp = if (kind == GroupKind.WORKSTREAM && parent.sessionType == WORKSTREAM_TYPE && children.isNotEmpty()) {
             children.maxOf { it.updatedAt }
         } else {
             members.maxOf { it.updatedAt }
         }
-        val statusSource = if (kind == GroupKind.WORKSTREAM && children.isNotEmpty()) children else members
+        val statusSource = if (kind == GroupKind.WORKSTREAM && parent.sessionType == WORKSTREAM_TYPE && children.isNotEmpty()) children else members
         return Group(
             key = key,
             kind = kind,
@@ -183,6 +192,41 @@ object SessionListGrouping {
             isPinned = members.any { it.isPinned },
             isActive = members.any { it.isExecuting || it.hasQueuedPrompts },
         )
+    }
+
+    /** Preorder with pinned/subtree activity ordering; malformed cycles stay visible. */
+    private fun treeOrder(rows: List<SessionEntity>): List<SessionEntity> {
+        val byId = rows.associateBy { it.id }
+        val children = rows.groupBy { it.parentSessionId }
+        fun activity(row: SessionEntity, seen: Set<String> = emptySet()): Long =
+            if (row.id in seen) row.updatedAt else maxOf(row.updatedAt,
+                children[row.id].orEmpty().maxOfOrNull { activity(it, seen + row.id) } ?: row.updatedAt)
+        val order = compareByDescending<SessionEntity> { it.isPinned }
+            .thenByDescending { activity(it) }.thenByDescending { it.id }
+        val result = mutableListOf<SessionEntity>()
+        val seen = mutableSetOf<String>()
+        fun visit(row: SessionEntity) {
+            if (!seen.add(row.id)) return
+            result.add(row)
+            children[row.id].orEmpty().sortedWith(order).forEach(::visit)
+        }
+        rows.filter { it.parentSessionId !in byId }.sortedWith(order).forEach(::visit)
+        rows.sortedWith(order).forEach(::visit)
+        return result
+    }
+
+    fun indentationLevel(session: SessionEntity, group: Group): Int {
+        val byId = (group.children + group.parent).associateBy { it.id }
+        var depth = 0
+        var current = session
+        val seen = mutableSetOf(current.id)
+        while (true) {
+            val parent = current.parentSessionId?.let(byId::get) ?: break
+            if (!seen.add(parent.id)) break
+            depth++
+            current = parent
+        }
+        return depth.coerceAtMost(2)
     }
 
     /**

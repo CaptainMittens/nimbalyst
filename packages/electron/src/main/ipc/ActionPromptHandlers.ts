@@ -15,6 +15,8 @@ import { getActionPromptService } from '../services/ActionPromptService';
 import { findWindowByWorkspace } from '../window/WindowManager';
 import { safeHandle } from '../utils/ipcRegistry';
 import { MetaAgentService } from '../services/MetaAgentService';
+import { database } from '../database/PGLiteDatabaseWorker';
+import { findSessionTreeRoot } from '../services/sessionHierarchy';
 
 const broadcastSubscribed = new Set<string>();
 
@@ -110,25 +112,22 @@ export function registerActionPromptHandlers() {
         autoSubmit: config.autoSubmit,
         useWorktree: !!config.worktree,
       });
+      const rootId = launch.workstreamId ? await findSessionTreeRoot(database, launch.sessionId, launch.workspacePath) : null;
 
       // Tell the renderer to wire up the new session: prefill its draft if
       // autoSubmit is false, focus it if foreground is true. Centralizing this
       // in a single broadcast keeps the renderer changes to one listener
       // entry instead of threading sessionId through component trees.
       //
-      // We include both workstreamId (regular sibling case) and worktreeId
-      // (worktree sibling case — workstreamId is null when the parent lives in
-      // a worktree, since the worktree itself is the container). The renderer
-      // needs both to drive `selectedWorkstreamAtom`, which is the actual
-      // driver of the right-hand panel — without it, focus only updates the
-      // global active-session atom and the panel can stay on the old session.
+      // The tab strip belongs to the tree root, even when the launching
+      // session is nested. Separate-worktree launches select their container.
       const window = BrowserWindow.fromWebContents(event.sender);
       if (window && !window.isDestroyed()) {
         window.webContents.send('action-prompts:launched', {
           workspacePath,
           parentSessionId,
           sessionId: launch.sessionId,
-          workstreamId: launch.workstreamId,
+          workstreamId: rootId,
           worktreeId: launch.worktreeId,
           // The renderer prefills with the same prompt only when nothing was
           // queued. If autoSubmit was true the prompt is already on its way
@@ -140,7 +139,7 @@ export function registerActionPromptHandlers() {
 
       return {
         sessionId: launch.sessionId,
-        workstreamId: launch.workstreamId,
+        workstreamId: rootId,
         worktreeId: launch.worktreeId,
         queuedInitialPrompt: launch.queuedInitialPrompt,
       };

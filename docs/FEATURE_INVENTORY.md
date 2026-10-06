@@ -81,15 +81,15 @@ Twelve built-in provider lanes, plus any agent an extension contributes. Every l
 - Read/unread indicators, with mark-all-read actions for a workstream and the macOS menu bar sessions panel
 - Auto-continue sessions after app restart
 - AI auto-naming of sessions after first turn
-- Drag-and-drop reparenting into workstreams
+- Drag-and-drop session reparenting and searchable move actions, with manager reassignment and Undo
 - Session launch history links orchestrating sessions to the sessions they created
 
 ## Workstreams
 
-- Parent sessions grouping related child sessions
+- Nested session trees within a workspace or worktree, with collapsible orchestrators and subtree activity, unread, and uncommitted-file rollups
 - Workstream editor tabs (multi-file editing per session)
 - Workstream session tabs (switch between child sessions)
-- Agent-to-agent session spawning (`/launch-new-session` slash command + `spawn_session` MCP tool) — sibling mode auto-promotes the caller into a workstream so the new session shares files-edited, tabs, and `get_workstream_overview`; isolated mode (`isolated: true`) creates a top-level session with no parent so fix-and-commit work doesn't pollute the caller's workstream
+- Agent-to-agent session spawning (`/launch-new-session`, `spawn_session`, and `create_session`) places workers beneath their caller and shares the tree's files, tabs, and overview; isolated sessions and workers launched into another worktree remain separate roots managed by their caller
 - Launching sessions can select a child session's reasoning effort, and coordinating sessions can interrupt a running session to deliver an instruction immediately
 
 ## Session Kanban Board
@@ -253,7 +253,7 @@ Twelve built-in provider lanes, plus any agent an extension contributes. Every l
 - Archive/unarchive sessions
 - Context usage display
 - Queued prompt management
-- Hierarchical session navigation (workstream/worktree aware)
+- Hierarchical session navigation follows nested orchestrators within workstreams and worktrees on iOS and Android
 - Create and follow Meta Agent sessions with children grouped under their parent when the desktop-synced Meta Agent alpha feature is enabled
 - Multiple signed-in accounts with an active account for personal sync
 - Mobile voice mode (soft chime + haptic cue when the session connects and it's your turn to talk)

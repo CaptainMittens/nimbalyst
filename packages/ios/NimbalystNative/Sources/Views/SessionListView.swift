@@ -505,11 +505,11 @@ public struct SessionListView: View {
                 hasMoreChildren: model.childrenHaveMore.contains(pageItem.group.key),
                 isExpanded: groupExpansionBinding(for: pageItem.group.key),
                 voiceFocusedSessionId: voiceFocusedSessionId,
-                onLoadMoreChildren: { model.loadMoreChildren(groupKey: pageItem.group.key) }
+                onLoadMoreChildren: { model.loadMoreChildren(groupKey: pageItem.group.key) },
+                onSelectRoot: { selection = .session(pageItem.parent.id) },
+                headerContextMenu: { groupContextMenu(for: pageItem) },
+                childContextMenu: { row in moveToWorkstreamMenu(for: row) }
             )
-            .contextMenu {
-                groupContextMenu(for: pageItem)
-            }
         case .session(let row):
             SessionRow(
                 session: row,
@@ -568,21 +568,7 @@ public struct SessionListView: View {
             Label("Start Workstream", systemImage: "folder.badge.plus")
         }
 
-        if !model.workstreamParents.isEmpty {
-            Menu("Move to Workstream") {
-                if model.canLoadPreviousWorkstreams {
-                    Button("Newer Workstreams") { model.loadNewerWorkstreams() }
-                }
-                ForEach(model.workstreamParents) { workstream in
-                    Button(workstream.titleDecrypted ?? "Workstream") {
-                        reparentSession(sessionId: row.id, newParentId: workstream.id)
-                    }
-                }
-                if model.workstreamParentsHaveMore {
-                    Button("Older Workstreams") { model.loadOlderWorkstreams() }
-                }
-            }
-        }
+        moveToWorkstreamMenu(for: row)
 
         Divider()
 
@@ -603,7 +589,29 @@ public struct SessionListView: View {
     }
 
     @ViewBuilder
+    private func moveToWorkstreamMenu(for row: SessionListRow) -> some View {
+        if !model.workstreamParents.isEmpty {
+            Menu("Move to Workstream") {
+                if model.canLoadPreviousWorkstreams {
+                    Button("Newer Workstreams") { model.loadNewerWorkstreams() }
+                }
+                ForEach(model.workstreamParents.filter { $0.id != row.id && $0.id != row.parentSessionId && $0.worktreeId == row.worktreeId }) { workstream in
+                    Button(workstream.titleDecrypted ?? "Workstream") {
+                        reparentSession(sessionId: row.id, newParentId: workstream.id)
+                    }
+                }
+                if model.workstreamParentsHaveMore {
+                    Button("Older Workstreams") { model.loadOlderWorkstreams() }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private func groupContextMenu(for item: SessionListPageItem) -> some View {
+        if item.parent.sessionType != "workstream" && item.parent.sessionType != "blitz" {
+            moveToWorkstreamMenu(for: item.parent)
+        }
         Button {
             createChildSession(parentId: item.parent.id, groupKey: item.group.key)
         } label: {

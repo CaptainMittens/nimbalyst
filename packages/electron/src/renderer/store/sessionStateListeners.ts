@@ -227,14 +227,14 @@ export function initSessionStateListeners(): () => void {
     workspacePath: string,
     timestamp: number,
   ) => {
-    const meta = store.get(sessionRegistryAtom).get(sessionId);
-    const parentId = meta?.parentSessionId;
-    if (!parentId) return;
-    store.set(markSessionTurnActivityAtom, {
-      sessionId: parentId,
-      workspacePath,
-      timestamp,
-    });
+    const registry = store.get(sessionRegistryAtom);
+    const seen = new Set([sessionId]);
+    let parentId = registry.get(sessionId)?.parentSessionId;
+    while (parentId && !seen.has(parentId)) {
+      seen.add(parentId);
+      store.set(markSessionTurnActivityAtom, { sessionId: parentId, workspacePath, timestamp });
+      parentId = registry.get(parentId)?.parentSessionId;
+    }
   };
 
   /**

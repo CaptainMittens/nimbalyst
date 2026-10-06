@@ -2,6 +2,7 @@ package com.nimbalyst.app.sync
 
 import com.google.gson.Gson
 import com.google.gson.JsonObject
+import com.google.gson.JsonNull
 import com.nimbalyst.app.crypto.CryptoManager
 import com.nimbalyst.app.data.SessionEntity
 
@@ -80,8 +81,12 @@ internal class SessionIndexUpdates(private val gson: Gson) {
      * undoes itself. The row's own updatedAt is kept so a move does not
      * reorder the list.
      */
-    fun parent(session: SessionEntity, parentSessionId: String?, crypto: CryptoManager): String =
-        encode(base(session, crypto, updatedAt = session.updatedAt).copy(parentSessionId = parentSessionId))
+    fun parent(session: SessionEntity, parentSessionId: String?, crypto: CryptoManager): String {
+        val entry = base(session, crypto, updatedAt = session.updatedAt).copy(parentSessionId = parentSessionId)
+        val message = gson.toJsonTree(IndexUpdateMessage(session = entry)).asJsonObject
+        if (parentSessionId == null) message.getAsJsonObject("session").add("parentSessionId", JsonNull.INSTANCE)
+        return message.toString()
+    }
 
     private fun base(session: SessionEntity, crypto: CryptoManager, updatedAt: Long): IndexUpdateEntry {
         // Pass the stored title ciphertext through, and re-encrypt only when we

@@ -135,9 +135,9 @@ internal class SessionEntryDecoder(private val gson: Gson) {
                 model = entry.model ?: existing?.model,
                 mode = entry.mode ?: existing?.mode,
                 sessionType = entry.sessionType ?: existing?.sessionType,
-                parentSessionId = entry.parentSessionId ?: existing?.parentSessionId,
+                parentSessionId = if (entry.parentSessionIdPresent) entry.parentSessionId else entry.parentSessionId ?: existing?.parentSessionId,
                 agentRole = entry.agentRole ?: existing?.agentRole,
-                createdBySessionId = entry.createdBySessionId ?: existing?.createdBySessionId,
+                createdBySessionId = if (entry.createdBySessionIdPresent) entry.createdBySessionId else entry.createdBySessionId ?: existing?.createdBySessionId,
                 hostDeviceId = entry.hostDeviceId ?: existing?.hostDeviceId,
                 // Transient and never stored by the server: an entry is a full
                 // snapshot of the sender's view, so absent means none pending.

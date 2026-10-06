@@ -257,6 +257,7 @@ data class SyncedActionPrompt(
     val isSupportedOnMobile: Boolean get() = worktree != true
 }
 
+@com.google.gson.annotations.JsonAdapter(SessionHierarchyAdapter::class)
 data class ServerSessionEntry(
     val sessionId: String,
     val encryptedProjectId: String,
@@ -293,6 +294,9 @@ data class ServerSessionEntry(
     val encryptedClientMetadata: String? = null,
     val clientMetadataIv: String? = null,
     val lastReadAt: Long? = null,
+    // Local decode metadata, never serialized as wire fields.
+    @Transient var parentSessionIdPresent: Boolean = false,
+    @Transient var createdBySessionIdPresent: Boolean = false,
 )
 
 data class ClientMetadata(
