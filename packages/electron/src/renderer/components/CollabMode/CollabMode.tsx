@@ -41,6 +41,7 @@ import {
 import { activePageRow, openPageTab } from './collabPageTabs';
 import { composePagesCreateMenu } from './pagesCreateMenu';
 import { PagesTabHistoryButtons, usePagesTabNavigation } from './usePagesTabNavigation';
+import { PagesSwipeNavigation } from './PagesSwipeNavigation';
 import { useCollabTabPersistence } from './useCollabTabPersistence';
 import { usePublishPagesTabStrip } from '../../services/pageTreeTools/pagesTabStrip';
 import { PagesSidebarSections, useSectionHomeId } from './PagesSidebarSections';
@@ -243,6 +244,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
   useTabNavigationShortcuts(isActive);
   // A click opens in the current tab (Cmd/Ctrl: a new one); each tab keeps Back/Forward.
   const { addTabFor, step: stepPagesHistory } = usePagesTabNavigation(isActive, workspacePath);
+  const tabContentAreaRef = useRef<HTMLDivElement>(null);
   const pendingDoc = useAtomValue(pendingCollabDocumentAtom);
   const sharedDocuments = useAtomValue(sharedDocumentsAtom);
   // Opening and naming an existing link also finds other projects' pages,
@@ -839,7 +841,8 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
       {/* Center: Tabs + editor. With a team the team's Home page reopens when
           the last tab closes, so the tab strip is always present; without one
           an empty Personal section shows a hint instead. */}
-      <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+      <div ref={tabContentAreaRef} className="relative flex-1 flex flex-col overflow-hidden min-h-0">
+        {hasTabs && <PagesSwipeNavigation targetRef={tabContentAreaRef} onStep={stepPagesHistory} />}
         {!hasTabs && !teamScope && (
           <div
             className="pages-mode-empty flex-1 flex items-center justify-center text-sm text-nim-faint"
