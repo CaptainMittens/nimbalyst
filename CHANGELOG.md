@@ -16,12 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 <!-- Bug fixes go here -->
-- A window that switched to Standard Mode while Developer Mode was still enabled now switches back when focused, and a failed read of the settings file no longer resets settings to their defaults.
 
 ### Removed
 <!-- Removed features go here -->
 
-## [0.80.2] - 2026-10-07
+## [0.80.3] - 2026-10-07
+
 
 
 
