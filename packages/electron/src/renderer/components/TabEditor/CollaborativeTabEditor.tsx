@@ -35,6 +35,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { MarkdownEditor, MonacoEditor, DocumentPathProvider } from '@nimbalyst/runtime';
 import { $convertFromEnhancedMarkdownString, getEditorTransformers, type CommentsConfig } from '@nimbalyst/runtime/editor';
 import {
+  getElectronCollabDocsSession,
   getTeamSyncProvider,
   getSharedDocumentsForScopeKey,
   sharedDocumentsAtom,
@@ -112,7 +113,7 @@ import {
   CollabRenderFailureBanner,
 } from './CollabDocumentHeaderMeta';
 import { CollabPlainPageHeader } from '../CollabMode/CollabPlainPageHeader';
-import { pageMoveRequestAtom, pageTypeRequestAtom } from '../CollabMode/pageTypeRequest';
+import { usePageMenuItems } from '../CollabMode/usePageMenuItems';
 import {
   getSharedDocumentDisplayPath,
   getSharedDocumentDisplayPathWithFallback,
@@ -1297,28 +1298,31 @@ export const CollaborativeTabEditor: React.FC<CollaborativeTabEditorProps> = ({
     }
   }, [activeConfig.fileExtension, activeConfig.title, fileName]);
 
-  const requestPageType = useSetAtom(pageTypeRequestAtom);
-  const requestMove = useSetAtom(pageMoveRequestAtom);
-  const moveToPersonal = useCallback((pageId: string) => requestMove({ from: 'team', pageId }), [requestMove]);
+  const pageMenuItems = usePageMenuItems({
+    lane: 'team',
+    session: getElectronCollabDocsSession(activeConfig.scope),
+    page: (documentType === 'markdown' && sharedDocuments.find((document) => document.documentId === activeConfig.documentId)) || null,
+    canMoveAcross: true,
+  });
   const collabActionItems = useMemo(() => {
     const busy = localOrigin.busyAction !== null;
-    const page = sharedDocuments.find((document) => document.documentId === activeConfig.documentId);
     // Local-source actions only once a local file is linked; until then, only linking one.
     const linked = localOrigin.binding;
+    const pageItems = pageMenuItems.map(({ label, icon, onSelect, destructive, dividerBefore }) => ({ label, icon, onClick: onSelect, destructive, dividerBefore }));
+    const treeItems = pageItems.filter((item) => !item.destructive);
     return [
-      ...(documentType === 'markdown' && page ? [
-        { label: 'Set Type...', icon: 'category', onClick: () => requestPageType({ lane: 'team', page }) },
-        { label: 'Move to Personal...', icon: 'person', onClick: () => moveToPersonal(page.documentId) },
-      ] : []),
+      // Trash stays last, after the local-source actions.
+      ...treeItems,
       ...(documentType === 'code' ? [{ label: 'Save a Copy', icon: 'download', disabled: !hasHydrated, onClick: () => { void handleSaveCodeCopy(); } }] : []),
       ...(linked ? [
-        { label: 'Open Local Source', icon: 'folder_open', disabled: !localOrigin.hasResolvedBinding || busy, onClick: () => { void localOrigin.openLocalSource(); } },
+        { label: 'Open Local Source', icon: 'folder_open', dividerBefore: treeItems.length > 0, disabled: !localOrigin.hasResolvedBinding || busy, onClick: () => { void localOrigin.openLocalSource(); } },
         { label: 'Update from Local Source', icon: 'upload', disabled: busy, onClick: () => { void handleReuploadFromLocal(); } },
       ] : []),
-      { label: linked ? 'Relink Local Source' : 'Link Local Source', icon: 'link', disabled: busy, onClick: () => { void localOrigin.relinkLocalSource(); } },
+      { label: linked ? 'Relink Local Source' : 'Link Local Source', icon: 'link', dividerBefore: !linked && treeItems.length > 0, disabled: busy, onClick: () => { void localOrigin.relinkLocalSource(); } },
       ...(linked ? [{ label: 'Clear Local Source', icon: 'link_off', disabled: busy, onClick: () => { void localOrigin.clearLocalSource(); } }] : []),
+      ...pageItems.filter((item) => item.destructive),
     ];
-  }, [documentType, handleSaveCodeCopy, hasHydrated, localOrigin, handleReuploadFromLocal, sharedDocuments, activeConfig.documentId, requestPageType, moveToPersonal]);
+  }, [documentType, handleSaveCodeCopy, hasHydrated, localOrigin, handleReuploadFromLocal, pageMenuItems]);
   const handleLexicalEditorReady = useCallback((editor: any) => {
     setLexicalEditor((prev: any) => (prev === editor ? prev : editor));
     lexicalEditorRef.current = editor ?? null;

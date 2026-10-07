@@ -18,6 +18,8 @@ export interface PageHeaderMenuItem {
   icon: string;
   onSelect: () => void;
   destructive?: boolean;
+  /** Starts a new group: a rule above it. */
+  dividerBefore?: boolean;
 }
 
 export interface PageHeaderBarProps {
@@ -123,9 +125,10 @@ export const PageHeaderBar: React.FC<PageHeaderBarProps> = ({
                     className="page-header-menu z-[1000] min-w-[200px] rounded-md border border-nim bg-nim py-1 shadow-[0_4px_12px_rgba(0,0,0,0.3)]"
                     {...menu.getFloatingProps()}
                   >
-                    {menuItems!.map((item) => (
+                    {menuItems!.map((item, index) => (
+                      <React.Fragment key={item.id}>
+                      {item.dividerBefore && index > 0 && <div className="page-header-menu-divider my-1 h-px bg-[var(--nim-border)]" />}
                       <button
-                        key={item.id}
                         type="button"
                         role="menuitem"
                         className={`page-header-menu-item flex w-full cursor-pointer items-center gap-2.5 border-none bg-transparent px-3 py-2 text-left text-[13px] hover:bg-nim-hover ${item.destructive ? 'text-[var(--nim-error)]' : 'text-nim'}`}
@@ -138,6 +141,7 @@ export const PageHeaderBar: React.FC<PageHeaderBarProps> = ({
                         <MaterialSymbol icon={item.icon} size={16} className="opacity-70" />
                         {item.label}
                       </button>
+                      </React.Fragment>
                     ))}
                   </div>
                 </FloatingPortal>

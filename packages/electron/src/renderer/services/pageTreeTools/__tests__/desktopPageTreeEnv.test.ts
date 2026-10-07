@@ -82,3 +82,25 @@ describe('agent Set type and the Pages tab strip', () => {
     expect(paths()).toEqual(['personal://other']);
   });
 });
+
+describe('agent createSharedDoc', () => {
+  it('seeds a structured type from its own default when given no content, and keeps Personal pages markdown', async () => {
+    const { createCollaborativeDocument } = await import('../../collaborativeDocumentCreationOrchestrator');
+    const { getCollaborativeDocumentTypeCatalog } = await import('../../CollaborativeDocumentTypeCatalog');
+    vi.mocked(getCollaborativeDocumentTypeCatalog).mockReturnValue({
+      inferFileExtension: () => '.x',
+      resolveMetadata: (documentType: string) => ({ state: 'ready', descriptor: { documentType } }),
+    } as never);
+    vi.mocked(createCollaborativeDocument).mockResolvedValue({ documentId: 'new' } as never);
+    const env = createDesktopPageTreeEnv(WS);
+    const input = { title: 'Diagram', parentId: null, parentKind: 'page' as const, content: '' };
+
+    await env.createPage('team', session, { ...input, documentType: 'excalidraw' });
+    expect(vi.mocked(createCollaborativeDocument).mock.calls[0]![0].sourceContent).toBeUndefined();
+    await env.createPage('team', session, { ...input, documentType: 'markdown' });
+    expect(vi.mocked(createCollaborativeDocument).mock.calls[1]![0].sourceContent).toBe('');
+
+    await expect(env.createPage('personal', session, { ...input, documentType: 'excalidraw' })).rejects.toThrow(/markdown only/);
+    expect(createCollaborativeDocument).toHaveBeenCalledTimes(2);
+  });
+});

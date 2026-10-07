@@ -20,4 +20,12 @@ describe('composePagesCreateMenu', () => {
     expect(ids(true, true)).toEqual(['personal-page']);
     expect(composePagesCreateMenu(null, menu(true))?.items).toEqual([]);
   });
+
+  it('adds Add from Files last, opening on Team when there is one and on Personal otherwise', () => {
+    const add = vi.fn();
+    const items = (team: CollabSidebarCreateMenu | null) => composePagesCreateMenu(team, menu(true), add)!.items;
+    items(menu(true)).at(-1)!.onSelect();
+    items(null).at(-1)!.onSelect();
+    expect(add.mock.calls).toEqual([['team'], ['personal']]);
+  });
 });

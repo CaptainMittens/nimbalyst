@@ -1180,10 +1180,10 @@ async function promoteLocalFileAndAssertRoundTrip(
   await pageA
     .locator('.file-tree-name', { hasText: sourceName })
     .click({ button: 'right' });
-  await pageA.getByText('Share to Team', { exact: true }).last().click();
-  const shareDialog = pageA.getByRole('dialog', { name: 'Share to Team' });
+  await pageA.getByText('Copy to Pages...', { exact: true }).last().click();
+  const shareDialog = pageA.getByRole('dialog', { name: 'Copy to Pages' });
   await expect(shareDialog).toBeVisible({ timeout: 10_000 });
-  await shareDialog.getByRole('button', { name: /Share to Team$/ }).click();
+  await shareDialog.getByRole('button', { name: /Copy to Team$/ }).click();
   await expect(shareDialog).toBeHidden({ timeout: 20_000 });
 
   const pageB = await harness.openSharedMode('B');

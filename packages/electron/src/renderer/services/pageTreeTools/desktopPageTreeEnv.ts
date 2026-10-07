@@ -89,7 +89,11 @@ export function createDesktopPageTreeEnv(payloadWorkspacePath: string | undefine
       return { itemId: record.id, typeId: record.primaryType, ...(record.issueKey ? { issueKey: record.issueKey } : {}) };
     },
 
-    createPage: async (_section, session: CollabDocsSession, input) => {
+    createPage: async (section, session: CollabDocsSession, input) => {
+      // A Personal page's body is markdown in the local database; any other type would open as raw text.
+      if (section === 'personal' && input.documentType !== 'markdown') {
+        throw new Error(`Personal pages are markdown only; create a "${input.documentType}" page in the team section.`);
+      }
       const catalog = getCollaborativeDocumentTypeCatalog();
       const resolution = catalog.resolveMetadata(input.documentType, catalog.inferFileExtension(input.documentType, input.title));
       if (resolution.state !== 'ready') throw new Error(resolution.reason);
@@ -99,7 +103,8 @@ export function createDesktopPageTreeEnv(payloadWorkspacePath: string | undefine
         requestedName: input.title,
         parentFolderId: input.parentId,
         ...(input.parentId && input.parentKind === 'item' ? { parentKind: 'item' as const } : {}),
-        sourceContent: input.content,
+        // No content for a drawing, sheet or other structured type means its own empty document, not ''.
+        sourceContent: input.content || input.documentType === 'markdown' ? input.content : undefined,
         // An agent filing dozens of pages must not open a tab for each.
         openAfterCreate: false,
         analyticsSource: 'agent_tool',

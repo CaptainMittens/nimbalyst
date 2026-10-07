@@ -1,6 +1,7 @@
 import React from 'react';
 import './collabSidebarTree.css';
 import { type SharedDocument, type CollabTypeTreeResolver } from '../docs/index';
+import { type CollabPageActionRequest } from './usePageActionRequest';
 export interface CollabSidebarProps {
     activeDocumentId?: string | null;
     /** The open typed page (item id) or type page (type id), highlighted like the open page. */
@@ -52,6 +53,9 @@ export interface CollabSidebarProps {
      * the menu's "Set type" entry is shown disabled.
      */
     onSetPageType?: (document: SharedDocument) => void;
+    /** A page action from outside the tree (the page's header menu); `onPageActionHandled` clears it. */
+    pageActionRequest?: CollabPageActionRequest | null;
+    onPageActionHandled?: () => void;
 }
 export interface CollabSidebarCreateMenu {
     items: Array<{

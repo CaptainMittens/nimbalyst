@@ -14,6 +14,8 @@ export interface PageHeaderMenuItem {
     icon: string;
     onSelect: () => void;
     destructive?: boolean;
+    /** Starts a new group: a rule above it. */
+    dividerBefore?: boolean;
 }
 export interface PageHeaderBarProps {
     /** A leading section name ("Personal") that is not itself a page. */

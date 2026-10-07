@@ -8,16 +8,8 @@
  * once a tree is a page tree) to keep it out of the docs-ui eager bundle.
  */
 import React from 'react';
-export declare const CollabMenuButton: React.FC<{
-    icon: string;
-    label: string;
-    trailing?: string;
-    disabled?: boolean;
-    danger?: boolean;
-    className?: string;
-    title?: string;
-    onClick: () => void;
-}>;
+import { CollabMenuButton } from './primitives/CollabMenuButton';
+export { CollabMenuButton };
 export declare const CollabPageMenuHead: React.FC<{
     onNewPageInside: () => void;
     /** Absent until the host can turn a page into a typed page in place. */

@@ -138,8 +138,9 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
           actions={headerBar.actions}
           onShowHistory={onShowHistory}
           menuItems={[
-            ...(confirmArchive && !item.archived ? [{ id: 'archive', label: 'Archive page', icon: 'archive', onSelect: confirmArchive }] : []),
             ...(headerBar.menuItems ?? []),
+            // Last, as Move to Trash is on a plain page.
+            ...(confirmArchive && !item.archived ? [{ id: 'archive', label: 'Archive page', icon: 'archive', onSelect: confirmArchive, dividerBefore: true }] : []),
           ]}
         />
       )}

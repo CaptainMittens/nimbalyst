@@ -21,6 +21,22 @@ import {
 } from '@nimbalyst/collab-client/docs/pageTreeToolCore';
 import type { PageSearchHit } from '@nimbalyst/collab-protocol';
 import { registerPageTreeToolHandlers } from '../pageTreeToolHandlers';
+import { importFileToPagesTool } from '../importFileToPagesTool';
+
+vi.mock('../../shareToTeamFlow', () => ({
+  resolveShareDescriptor: (name: string) => (name.endsWith('.excalidraw')
+    ? { ok: true, descriptor: { documentType: 'excalidraw', fileExtensions: ['.excalidraw'], defaultExtension: '.excalidraw' } }
+    : name.endsWith('.md')
+      ? { ok: true, descriptor: { documentType: 'markdown', fileExtensions: ['.md'], defaultExtension: '.md' } }
+      : { ok: false, reason: 'No collaborative document type is registered for this file.' }),
+  shareFileToTeam: vi.fn(),
+}));
+vi.mock('../../../components/ShareToTeamDialog/ShareToTeamDialog', () => ({
+  splitShareFileName: (fileName: string) => {
+    const dot = fileName.indexOf('.');
+    return { baseName: fileName.slice(0, dot), suffix: fileName.slice(dot) };
+  },
+}));
 
 const page = (documentId: string, title: string, parent: string | null = null, extra: Partial<SharedDocument> = {}): SharedDocument => ({
   documentId, title, teamProjectId: 'p1', documentType: 'markdown', createdBy: 'u', createdAt: 1, updatedAt: 1,
@@ -319,5 +335,27 @@ describe('page tree agent tools', () => {
     expect(send).toHaveBeenCalledWith('r2', expect.objectContaining({ success: false, error: expect.stringMatching(/collaboration scope/) }));
     unsubscribe.forEach((fn) => fn());
     expect(listeners.size).toBe(0);
+  });
+});
+
+describe('importFileToPages', () => {
+  it('copies a drawing under a page by title through the share flow, and refuses what Pages cannot hold', async () => {
+    const share = vi.fn(async () => ({ status: 'shared' as const, documentId: 'doc-arch', orgId: 'org1', title: 'architecture', warnings: [] }));
+    const env = envFor({ team: tree() });
+    const result = await importFileToPagesTool(env, { filePath: '/repo/docs/architecture.excalidraw', folderPath: 'Architecture' }, share);
+    expect(result).toMatchObject({ success: true, documentId: 'doc-arch', uri: 'collab://org:org1:doc:doc-arch' });
+    expect(share).toHaveBeenCalledWith(expect.objectContaining({
+      filePath: '/repo/docs/architecture.excalidraw',
+      openAfterCreate: false,
+      showNotifications: false,
+      answers: expect.objectContaining({ section: 'team', folderId: 'arch', sharedName: 'architecture.excalidraw' }),
+    }));
+
+    expect(await importFileToPagesTool(env, { filePath: '/repo/docs/architecture.excalidraw', section: 'personal' }, share))
+      .toMatchObject({ success: false, error: expect.stringMatching(/markdown only/) });
+    expect(await importFileToPagesTool(env, { filePath: 'docs/notes.md' }, share))
+      .toMatchObject({ success: false, error: expect.stringMatching(/absolute path/) });
+    expect(await importFileToPagesTool(env, { filePath: '/repo/model.stl' }, share)).toMatchObject({ success: false });
+    expect(share).toHaveBeenCalledTimes(1);
   });
 });

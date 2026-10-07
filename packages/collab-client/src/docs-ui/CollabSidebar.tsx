@@ -50,6 +50,7 @@ import { useFloatingMenu, FloatingPortal, virtualElement } from '../ui-primitive
 import { CollabSectionMenu, CollabTreeEmptyState } from './CollabSectionRoot';
 import { CollabSidebarTrashEntry } from './CollabTrash';
 import { revealKeysFor } from './collabTreeReveal';
+import { usePageActionRequest, type CollabPageActionRequest } from './usePageActionRequest';
 
 const CYCLE_WARNING = 'A page cannot move inside one of its own child pages.';
 
@@ -69,7 +70,7 @@ const CollabPageMenuHead = React.lazy(() => loadPageMenu().then((m) => ({ defaul
 const CollabPageDeleteEntry = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageDeleteEntry })));
 const CollabItemMenu = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabItemMenu })));
 const CollabPageHistoryEntry = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabPageHistoryEntry })));
-const CollabMenuButton = React.lazy(() => loadPageMenu().then((m) => ({ default: m.CollabMenuButton })));
+import { CollabMenuButton } from './primitives/CollabMenuButton';
 const CollabPageMoveDialog = React.lazy(() => import('./CollabPageMoveDialog'));
 import { DocUnreadDot } from './DocUnreadDot';
 import { bucketItemCount, trackDocumentAction } from './analytics';
@@ -174,6 +175,9 @@ export interface CollabSidebarProps {
    * the menu's "Set type" entry is shown disabled.
    */
   onSetPageType?: (document: SharedDocument) => void;
+  /** A page action from outside the tree (the page's header menu); `onPageActionHandled` clears it. */
+  pageActionRequest?: CollabPageActionRequest | null;
+  onPageActionHandled?: () => void;
 }
 
 export interface CollabSidebarCreateMenu {
@@ -205,6 +209,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   collapsed = false,
   onToggleCollapsed,
   onSetPageType,
+  pageActionRequest,
+  onPageActionHandled,
 }) => {
   const { scope, host, session, controller } = useCollabDocsUI();
   // Per session, not the active scope: a Personal section is never active.
@@ -688,39 +694,42 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     }
   }, [host, scope, teamOrgId]);
 
+  // Page tree: a page with children goes to Trash with its subtree; a leaf
+  // page goes to Trash like any document.
+  const trashDocument = useCallback((document: SharedDocument, name: string) => {
+    const childCount = pageTree ? planPageRemoval(allSharedDocuments, typePlacements, document.documentId).childCount : 0;
+    if (childCount > 0) {
+      if (!canMutateMetadata('move this page to Trash')) return;
+      const pages = `${childCount} child page${childCount === 1 ? '' : 's'}`;
+      // Counts the prose of types placed inside it, which goes too.
+      setContextMenu(null);
+      void confirmDestructive('Move page to Trash', `Move "${pageDisplayName(name, document.documentType)}" and its ${pages} to Trash? Types and typed pages inside show in their usual place until you restore it.`).then((accepted) => {
+        if (!accepted) return;
+        session.removePage(document.documentId);
+        host.trackEvent?.('collab_folder_deleted', {
+          actorType: 'user',
+          source: 'sidebar',
+          documentCountBucket: bucketItemCount(childCount),
+          subfolderCountBucket: bucketItemCount(0),
+        });
+      });
+      return;
+    }
+    if (!canMutateMetadata('move this document to Trash')) return;
+    session.trashDocument(document.documentId);
+    trackDocumentAction(host, {
+      action: 'trashed',
+      documentType: document.documentType,
+      entryPoint: 'context_menu',
+    });
+    setContextMenu(null);
+  }, [allSharedDocuments, canMutateMetadata, host, pageTree, session, typePlacements]);
+
   const handleDelete = useCallback(() => {
     if (!contextMenu) return;
 
     if (contextMenu.node.type === 'document') {
-      const { document } = contextMenu.node;
-      // Page tree: a page with children goes to Trash with its subtree; a
-      // leaf page goes to Trash like any document.
-      const childCount = pageTree ? planPageRemoval(allSharedDocuments, typePlacements, document.documentId).childCount : 0;
-      if (childCount > 0) {
-        if (!canMutateMetadata('move this page to Trash')) return;
-        const pages = `${childCount} child page${childCount === 1 ? '' : 's'}`;
-        // Counts the prose of types placed inside it, which goes too.
-        setContextMenu(null);
-        void confirmDestructive('Move page to Trash', `Move "${pageDisplayName(contextMenu.node.name, document.documentType)}" and its ${pages} to Trash? Types and typed pages inside show in their usual place until you restore it.`).then((accepted) => {
-          if (!accepted) return;
-          session.removePage(document.documentId);
-          host.trackEvent?.('collab_folder_deleted', {
-            actorType: 'user',
-            source: 'sidebar',
-            documentCountBucket: bucketItemCount(childCount),
-            subfolderCountBucket: bucketItemCount(0),
-          });
-        });
-        return;
-      }
-      if (!canMutateMetadata('move this document to Trash')) return;
-      session.trashDocument(document.documentId);
-      trackDocumentAction(host, {
-        action: 'trashed',
-        documentType: document.documentType,
-        entryPoint: 'context_menu',
-      });
-      setContextMenu(null);
+      trashDocument(contextMenu.node.document, contextMenu.node.name);
       return;
     }
 
@@ -757,7 +766,41 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         setSelectedFolderPath(null);
       }
     });
-  }, [allSharedDocuments, canMutateMetadata, contextMenu, host, pageTree, selectedFolderId, session, sharedFolders, typePlacements]);
+  }, [allSharedDocuments, canMutateMetadata, contextMenu, host, selectedFolderId, session, sharedFolders, trashDocument]);
+
+  // Removes the placement only; the type and its items stay.
+  const removeTypeFromTree = useCallback((typeId: string) => {
+    if (canMutateMetadata('remove this type from the tree')) session.removeTypePlacement(typeId).catch(reportTypePlacementError);
+  }, [canMutateMetadata, reportTypePlacementError, session]);
+
+  usePageActionRequest({
+    request: pageActionRequest,
+    tree,
+    onHandled: onPageActionHandled,
+    onMissing: () => showWarning('Page not found', 'This page is not in the sidebar, so the action did not run.'),
+    run: (target, action) => {
+      // A collapsed section renders its header row alone, without the dialogs
+      // (New page opens it itself).
+      if (collapsed && (action === 'rename' || action === 'moveTo')) onToggleCollapsed?.();
+      if (target.type === 'type') {
+        if (action === 'removeFromTree') removeTypeFromTree(target.typeId);
+        else if (action === 'moveTo' && nestedTypeIds.has(target.typeId)) showWarning('Cannot move this type', 'It is shown inside the type it extends.');
+        else if (action === 'moveTo') setMoveTarget({ kind: 'type', node: target });
+        return;
+      }
+      if (target.type === 'item') {
+        if (action === 'newPageInside') startNewPage(target.itemId, { itemId: target.itemId, name: target.name });
+        else if (action === 'moveTo') setMoveTarget({ kind: 'item', node: target });
+        else if (action === 'backUnderType') moveItemTo(target.itemId, { underType: true });
+        return;
+      }
+      const { document } = target;
+      if (action === 'newPageInside') startNewPage(document.documentId);
+      else if (action === 'rename') setDocumentToRename(document);
+      else if (action === 'moveTo') setMoveTarget({ kind: 'page', document });
+      else if (action === 'trash') trashDocument(document, target.name);
+    },
+  });
 
   const handleCopyFolderLink = useCallback(async (folderId: string) => {
     if (!teamOrgId) {
@@ -2033,10 +2076,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
               className="collab-remove-type-placement w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
               onClick={() => {
                 if (contextMenu.node.type !== 'type') return;
-                const { typeId } = contextMenu.node;
                 setContextMenu(null);
-                // Removes the placement only; the type and its items stay.
-                if (canMutateMetadata('remove this type from the tree')) session.removeTypePlacement(typeId).catch(reportTypePlacementError);
+                removeTypeFromTree(contextMenu.node.typeId);
               }}
             >
               <MaterialSymbol icon="playlist_remove" size={18} />
@@ -2118,63 +2159,37 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                   }}
                   copyLinkDisabled={!teamOrgId}
                 />
-              ) : <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
+              ) : <CollabMenuButton
+                icon="open_in_new"
+                label="Open"
                 onClick={() => {
                   if (!contextDocument) return;
-                  host.openArtifact({
-                    kind: 'document',
-                    scope,
-                    documentId: contextDocument.documentId,
-                    teamProjectId: contextDocument.teamProjectId,
-                  }, 'sidebar');
+                  host.openArtifact({ kind: 'document', scope, documentId: contextDocument.documentId, teamProjectId: contextDocument.teamProjectId }, 'sidebar');
                   setContextMenu(null);
                 }}
-              >
-                <MaterialSymbol icon="open_in_new" size={18} />
-                <span>Open</span>
-              </button>}
-              {personalStateAvailable && <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
+              />}
+              {personalStateAvailable && contextDocument && <CollabMenuButton
+                icon="star"
+                fill={favoriteSet.has(contextDocument.documentId)}
+                label={favoriteSet.has(contextDocument.documentId) ? 'Unfavorite' : 'Favorite'}
                 onClick={() => {
-                  if (!contextDocument) return;
                   handleToggleFavorite(contextDocument);
                   setContextMenu(null);
                 }}
-              >
-                <MaterialSymbol
-                  icon="star"
-                  size={18}
-                  fill={contextDocument ? favoriteSet.has(contextDocument.documentId) : false}
-                />
-                <span>
-                  {contextDocument && favoriteSet.has(contextDocument.documentId)
-                    ? 'Unfavorite'
-                    : 'Favorite'}
-                </span>
-              </button>}
-              {readReceiptsAvailable && <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={
-                  !teamOrgId ||
-                  !contextDocument ||
-                  !changedDocIds.has(contextDocument.documentId)
-                }
+              />}
+              {readReceiptsAvailable && <CollabMenuButton
+                icon="mark_email_read"
+                label="Mark as read"
+                disabled={!teamOrgId || !contextDocument || !changedDocIds.has(contextDocument.documentId)}
                 onClick={() => {
                   if (!contextDocument) return;
                   handleMarkDocRead(contextDocument);
                   setContextMenu(null);
                 }}
-              >
-                <MaterialSymbol icon="mark_email_read" size={18} />
-                <span>Mark as read</span>
-              </button>}
-              {!pageTree && <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              />}
+              {!pageTree && <CollabMenuButton
+                icon="link"
+                label="Copy Link"
                 disabled={!teamOrgId}
                 title={teamOrgId ? undefined : 'No team is connected to this workspace'}
                 onClick={() => {
@@ -2182,113 +2197,63 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                   setContextMenu(null);
                   void handleCopyLink(contextDocument);
                 }}
-              >
-                <MaterialSymbol icon="link" size={18} />
-                <span>Copy Link</span>
-              </button>}
-              <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
+              />}
+              <CollabMenuButton
+                icon="history"
+                label="View History"
                 disabled={!teamOrgId}
                 title={teamOrgId ? undefined : 'No team is connected to this workspace'}
                 onClick={() => {
                   if (!contextDocument || !teamOrgId) return;
                   setContextMenu(null);
-                  host.openArtifact(
-                    {
-                      kind: 'document',
-                      scope,
-                      documentId: contextDocument.documentId,
-                      teamProjectId: contextDocument.teamProjectId,
-                    },
-                    'history',
-                  );
+                  host.openArtifact({ kind: 'document', scope, documentId: contextDocument.documentId, teamProjectId: contextDocument.teamProjectId }, 'history');
                 }}
-              >
-                <MaterialSymbol icon="history" size={18} />
-                <span>View History</span>
-              </button>
+              />
               {/* Rename is a worker-backed metadata mutation, not a local-file
                   action. It lived inside the local-origin block because desktop
                   renames the mirrored file too, which silently removed Rename
                   from any host that omits the desktop-only controller. */}
-              {!pageTree && <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover"
+              {!pageTree && <CollabMenuButton
+                icon="edit"
+                label="Rename"
                 onClick={() => {
                   if (!contextDocument) return;
                   setDocumentToRename(contextDocument);
                   setContextMenu(null);
                 }}
-              >
-                <MaterialSymbol icon="edit" size={18} />
-                <span>Rename</span>
-              </button>}
+              />}
               {contextLocalOrigin.available ? <>
-              <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!contextLocalOrigin.hasResolvedBinding || contextLocalOrigin.busyAction !== null}
-                onClick={() => {
-                  setContextMenu(null);
-                  void contextLocalOrigin.openLocalSource();
-                }}
-              >
-                <MaterialSymbol icon="draft" size={18} />
-                <span>Open Local Source</span>
-              </button>
-              <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={!contextLocalOrigin.binding || contextLocalOrigin.busyAction !== null}
-                onClick={() => {
-                  setContextMenu(null);
-                  void contextLocalOrigin.reuploadFromLocalSource();
-                }}
-              >
-                <MaterialSymbol icon="upload" size={18} />
-                <span>Re-upload From Local</span>
-              </button>
-              <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
-                disabled={contextLocalOrigin.busyAction !== null}
-                onClick={() => {
-                  setContextMenu(null);
-                  void contextLocalOrigin.relinkLocalSource();
-                }}
-              >
-                <MaterialSymbol icon="link" size={18} />
-                <span>{contextLocalOrigin.binding ? 'Relink Local Source...' : 'Link Local Source...'}</span>
-              </button>
-              {contextLocalOrigin.binding && (
-                <button
-                  type="button"
-                  className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                <CollabMenuButton
+                  icon="draft"
+                  label="Open Local Source"
+                  disabled={!contextLocalOrigin.hasResolvedBinding || contextLocalOrigin.busyAction !== null}
+                  onClick={() => { setContextMenu(null); void contextLocalOrigin.openLocalSource(); }}
+                />
+                <CollabMenuButton
+                  icon="upload"
+                  label="Re-upload From Local"
+                  disabled={!contextLocalOrigin.binding || contextLocalOrigin.busyAction !== null}
+                  onClick={() => { setContextMenu(null); void contextLocalOrigin.reuploadFromLocalSource(); }}
+                />
+                <CollabMenuButton
+                  icon="link"
+                  label={contextLocalOrigin.binding ? 'Relink Local Source...' : 'Link Local Source...'}
                   disabled={contextLocalOrigin.busyAction !== null}
-                  onClick={() => {
-                    setContextMenu(null);
-                    void contextLocalOrigin.clearLocalSource();
-                  }}
-                >
-                  <MaterialSymbol icon="link_off" size={18} />
-                  <span>Clear Local Source</span>
-                </button>
-              )}
+                  onClick={() => { setContextMenu(null); void contextLocalOrigin.relinkLocalSource(); }}
+                />
+                {contextLocalOrigin.binding && <CollabMenuButton
+                  icon="link_off"
+                  label="Clear Local Source"
+                  disabled={contextLocalOrigin.busyAction !== null}
+                  onClick={() => { setContextMenu(null); void contextLocalOrigin.clearLocalSource(); }}
+                />}
               </> : null}
               {pageTree && contextDocument ? (
                 <CollabPageDeleteEntry
                   childCount={planPageRemoval(allSharedDocuments, typePlacements, contextDocument.documentId).childCount}
                   onDelete={handleDelete}
                 />
-              ) : <button
-                type="button"
-                className="w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left text-nim-error hover:bg-nim-hover"
-                onClick={handleDelete}
-              >
-                <MaterialSymbol icon="delete" size={18} />
-                <span>Move to Trash</span>
-              </button>}
+              ) : <CollabMenuButton icon="delete" danger label="Move to Trash" onClick={handleDelete} />}
             </>
           )}
           </React.Suspense>

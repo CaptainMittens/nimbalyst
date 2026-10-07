@@ -3,6 +3,7 @@ import { PAGE_TOOL_DESKTOP_PROJECT_ARG } from "@nimbalyst/collab-protocol";
 import { findWindowIdForWorkspacePath } from "../mcpWorkspaceResolver";
 import { getMostRecentlyFocusedWorkspaceWindow } from "../../window/WindowManager";
 import { requestFromRenderer } from "../rendererRequest";
+import { teamPageLocalLinkWarning } from "./teamPageLocalLinks";
 import { refuseOtherProjectWrite, routePageRead } from "./pageProjectReads";
 
 type McpToolResult = {
@@ -71,15 +72,41 @@ export function getCollabIndexToolSchemas() {
         properties: {
           section: SECTION,
           title: { type: "string", description: "The page title, a bare name (no parent path, no '.md')." },
-          documentType: { type: "string", description: "Logical document type for editor routing. Defaults to 'markdown'." },
+          documentType: {
+            type: "string",
+            description:
+              "The page's editor. Defaults to 'markdown'. Team pages can also be 'excalidraw' (a drawing), 'mindmap', 'datamodel' (Prisma schema), 'mockup.html', 'canvas', 'csv', 'calc.md', 'slides.md', 'ipynb', 'namenym' or 'code', when that editor's extension is installed. Personal pages are markdown only.",
+          },
           parentFolderId: { type: "string", description: "Parent page id, or typed page id / issue key. Omit for the top of the section." },
           parentKind: PARENT_KIND,
           folderPath: { type: "string", description: "Parent by titles ('Architecture/Overview'); missing pages are created empty. Takes precedence over parentFolderId." },
-          initialContent: { type: "string", description: "Markdown body the page is created with." },
+          initialContent: {
+            type: "string",
+            description:
+              "The page's content in its editor's file format: markdown for a markdown page, the .excalidraw JSON for a drawing, the .prisma text for a data model, and so on. To bring in an existing file, use importFileToPages instead.",
+          },
           before: { type: "string", description: `Place the new page just before this sibling. ${BESIDE}` },
           after: { type: "string", description: `Place the new page just after this sibling. ${BESIDE}` },
         },
         required: ["title"],
+      },
+    },
+    {
+      name: "importFileToPages",
+      description:
+        "Copy a file from this computer into Pages as a page: a drawing, mind map, data model, mockup, spreadsheet, slides, notebook or markdown file becomes a page of that type that teammates can open. Use it instead of linking a file path from a Team page, which teammates cannot open. Returns the documentId, the uri and the https link to it.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          filePath: { type: "string", description: "Absolute path of the file to copy. Its extension picks the page type." },
+          section: SECTION,
+          title: { type: "string", description: "The page title; the file name without its extension when omitted." },
+          parentFolderId: { type: "string", description: "Parent page id. Omit for the top of the section. Not a typed page." },
+          folderPath: { type: "string", description: "Parent by titles ('Architecture/Overview'); missing pages are created empty. Takes precedence over parentFolderId." },
+          before: { type: "string", description: `Place the new page just before this sibling. ${BESIDE}` },
+          after: { type: "string", description: `Place the new page just after this sibling. ${BESIDE}` },
+        },
+        required: ["filePath"],
       },
     },
     {
@@ -242,6 +269,8 @@ function invalidArguments(tool: string, args: any): string | null {
       return nonEmpty(args?.title) ? null : "createSharedDoc requires a non-empty title.";
     case "createSharedFolder":
       return nonEmpty(args?.name) ? null : "createSharedFolder requires a non-empty name.";
+    case "importFileToPages":
+      return nonEmpty(args?.filePath) ? null : "importFileToPages requires a filePath.";
     case "moveSharedItem":
       if (!nonEmpty(args?.itemId)) return "moveSharedItem requires an itemId.";
       return PAGE_KINDS.has(args?.kind) || args?.kind === "item" || args?.kind === "type"
@@ -273,8 +302,12 @@ function describeSuccess(tool: string, args: any, result: RendererResult): strin
   switch (tool) {
     case "listPages":
       return JSON.stringify(rest);
-    case "createSharedDoc":
-      return `Created page "${args.title}" (documentId: ${result.documentId}${result.uri ? `, uri: ${result.uri}` : ""}${result.link ? `, link: ${result.link}` : ""}).${note}`;
+    case "createSharedDoc": {
+      const localLinks = typeof result.uri === "string" ? teamPageLocalLinkWarning(result.uri, [args.initialContent]) : null;
+      return `Created page "${args.title}" (documentId: ${result.documentId}${result.uri ? `, uri: ${result.uri}` : ""}${result.link ? `, link: ${result.link}` : ""}).${note}${localLinks ? `\n\n${localLinks}` : ""}`;
+    }
+    case "importFileToPages":
+      return `Imported ${args.filePath} as a page (documentId: ${result.documentId}${result.uri ? `, uri: ${result.uri}` : ""}${result.link ? `, link: ${result.link}` : ""}).${note}`;
     case "createSharedFolder":
       return `Created page "${args.name}" (folderId: ${result.documentId}${result.uri ? `, uri: ${result.uri}` : ""}${result.link ? `, link: ${result.link}` : ""}).${note}`;
     case "moveSharedItem":
@@ -299,6 +332,7 @@ const TOOL_NAMES = new Set([
   "searchPages",
   "createSharedDoc",
   "createSharedFolder",
+  "importFileToPages",
   "moveSharedItem",
   "renameSharedItem",
   "deleteSharedItem",
@@ -318,7 +352,7 @@ async function runInRenderer(
 
   const payload = { ...(args ?? {}), ...(workspacePath ? { workspacePath } : {}) };
   delete (payload as { resultChannel?: unknown }).resultChannel;
-  const timeout = tool === "setPageType" || tool === "createSharedDoc" ? SLOW_ROUND_TRIP_TIMEOUT_MS : ROUND_TRIP_TIMEOUT_MS;
+  const timeout = tool === "setPageType" || tool === "createSharedDoc" || tool === "importFileToPages" ? SLOW_ROUND_TRIP_TIMEOUT_MS : ROUND_TRIP_TIMEOUT_MS;
   const result = await roundTripToRenderer(window, `mcp:${tool}`, payload, timeout);
   if (!result.success) return errorResult(`${tool} failed: ${result.error || "Unknown error"}`);
   return textResult(describeSuccess(tool, args, { ...result, ...extra }));
@@ -348,6 +382,7 @@ export function handleCollabIndexTool(
 export const handleListPages = (args: any, workspacePath: string | undefined) => runPageTreeTool("listPages", args, workspacePath);
 export const handleSearchPages = (args: any, workspacePath: string | undefined) => runPageTreeTool("searchPages", args, workspacePath);
 export const handleCreateSharedDoc = (args: any, workspacePath: string | undefined) => runPageTreeTool("createSharedDoc", args, workspacePath);
+export const handleImportFileToPages = (args: any, workspacePath: string | undefined) => runPageTreeTool("importFileToPages", args, workspacePath);
 export const handleCreateSharedFolder = (args: any, workspacePath: string | undefined) => runPageTreeTool("createSharedFolder", args, workspacePath);
 export const handleMoveSharedItem = (args: any, workspacePath: string | undefined) => runPageTreeTool("moveSharedItem", args, workspacePath);
 export const handleRenameSharedItem = (args: any, workspacePath: string | undefined) => runPageTreeTool("renameSharedItem", args, workspacePath);

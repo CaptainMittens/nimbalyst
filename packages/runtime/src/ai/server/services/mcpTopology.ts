@@ -222,6 +222,7 @@ export const SITUATIONAL_TOOLS: readonly string[] = [
   // Pages: the Team and Personal page trees
   'createSharedDoc',
   'createSharedFolder',
+  'importFileToPages',
   'moveSharedItem',
   'renameSharedItem',
   'deleteSharedItem',

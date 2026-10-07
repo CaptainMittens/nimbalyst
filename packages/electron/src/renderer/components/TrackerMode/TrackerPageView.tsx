@@ -42,6 +42,8 @@ import { TrackerSavedDescription } from './TrackerSavedDescription';
 import { createCollectionItem } from './createCollectionItem';
 import { archiveTrackerItem } from '../../services/archiveTrackerItem';
 import { errorNotificationService } from '../../services/ErrorNotificationService';
+import { useTypedPageMenuItems } from '../CollabMode/usePageMenuItems';
+import { editorExportMenuItems } from '../TabEditor/editorExport';
 import { openPageAncestor } from '../CollabMode/pageHeaderNavigation';
 import { TrackerCollabAvatars, TrackerCollabSyncDot } from './trackerCollabChrome';
 import { HeaderTableOfContents } from '../TabEditor/HeaderTableOfContents';
@@ -185,6 +187,9 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
   const { teamScope } = crumb;
   const personal = body.sharing === 'personal';
   const collaborative = body.contentMode === 'collaborative';
+  const menuSession = personal ? getPersonalCollabDocsSession(workspacePath) : teamScope ? getElectronCollabDocsSession(teamScope) : null;
+  const exportItems = useMemo(() => editorExportMenuItems(body.recoveryEditor, localTitle || 'Untitled'), [body.recoveryEditor, localTitle]);
+  const typedPageMenuItems = useTypedPageMenuItems(personal ? 'personal' : 'team', itemId, menuSession, exportItems);
   const headerBar = useMemo(() => ({
     onOpenAncestor: (ancestor: PageTreeAncestor) => {
       if (personal) openPageAncestor(ancestor, { personal: true, workspacePath });
@@ -198,7 +203,8 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
       </span>
     ) : undefined,
     actions: body.recoveryEditor ? <HeaderTableOfContents editor={body.recoveryEditor} /> : undefined,
-  }), [personal, teamScope, workspacePath, collaborative, itemId, body.recoveryEditor]);
+    menuItems: typedPageMenuItems,
+  }), [personal, teamScope, workspacePath, collaborative, itemId, body.recoveryEditor, typedPageMenuItems]);
 
   const handleCreateCollection = useCallback(
     (title: string, type: string) => createCollectionItem({ workspacePath, title, type }),

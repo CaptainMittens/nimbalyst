@@ -45,6 +45,7 @@ import { PagesSwipeNavigation } from './PagesSwipeNavigation';
 import { useCollabTabPersistence } from './useCollabTabPersistence';
 import { usePublishPagesTabStrip } from '../../services/pageTreeTools/pagesTabStrip';
 import { PagesSidebarSections, useSectionHomeId } from './PagesSidebarSections';
+import { pageHeaderRequestPendingAtom } from './pageTypeRequest';
 import type { PagesSectionLane, PagesSectionView } from './pagesSectionTabs';
 import {
   initSharedDocuments,
@@ -270,10 +271,12 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
     personal: CollabSidebarCreateMenu | null;
   }>({ team: null, personal: null });
   const publishCreateMenu = useCallback(() => {
-    const menu = composePagesCreateMenu(createMenusRef.current.team, createMenusRef.current.personal);
+    const menu = composePagesCreateMenu(createMenusRef.current.team, createMenusRef.current.personal, (section) => {
+      void import('../../services/addFileToPages').then(({ addFileToPages }) => addFileToPages({ section, parentId: null, workspacePath }));
+    });
     createPrimaryRef.current = menu?.onPrimary ?? null;
     setTitleBarCreateMenu('collab', menu);
-  }, [setTitleBarCreateMenu]);
+  }, [setTitleBarCreateMenu, workspacePath]);
   const registerTeamCreateMenu = useCallback((menu: CollabSidebarCreateMenu | null) => {
     createMenusRef.current.team = menu;
     publishCreateMenu();
@@ -449,6 +452,12 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
       return next;
     });
   }, [workspacePath, sidebarWidth, chatWidth, sidebarCollapsed]);
+
+  // A page header's Set type, Move, Rename or Trash is answered by the sidebar, so it opens to run them.
+  const headerRequestPending = useAtomValue(pageHeaderRequestPendingAtom);
+  useEffect(() => {
+    if (headerRequestPending && sidebarCollapsed) toggleSidebarCollapsed();
+  }, [headerRequestPending, sidebarCollapsed, toggleSidebarCollapsed]);
 
   // Double-click a tab to maximize the editor (collapse doc list + AI chat).
   // Second double-click restores the exact prior collapse state.

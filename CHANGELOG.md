@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sessions now form nested trees on desktop and mobile, with drag-to-reassign, Undo, subtree activity summaries, and an optional compact one-line view.
 - Pages: plain pages have a status, owner, summary and tags, and can move between Personal and Team.
 - Pages: swipe two fingers on the trackpad to go Back and Forward.
+- Pages: copy a file from disk into Team or Personal pages with Copy to Pages... in Files or Add from Files... in Pages; agents can import files the same way.
 
 ### Changed
 <!-- Changes to existing functionality go here -->
@@ -20,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Knowledge setup asks about your goals and creates a Home page with linked starter pages.
 - Pages: save named views, configure them with compact tracker-style controls, open them full-size, create items, find typed-page decisions, and recover failed edits; Home stays user-authored and the type map supports pan and zoom.
 - Removed vendor branding from embedded tracker tables in Pages.
-- Pages and shared documents use one header layout, with a clickable path and history in the same place.
+- Pages and shared documents use one header layout, with a clickable path, history, and a ⋯ menu that has the page's sidebar actions (rename, move, new page inside, favorite, trash, copy as Markdown, export to PDF).
 
 ### Fixed
 <!-- Bug fixes go here -->

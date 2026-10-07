@@ -83,6 +83,10 @@ The Excalidraw extension provides these MCP tools for diagram manipulation:
 3. **Verify visually (once)** - Use `mcp__nimbalyst__capture_editor_screenshot` a single time to confirm the diagram rendered
 4. **Stop** - Report what you made and hand control back. Do not iterate on polish unless the user asks for changes. See "STOP AFTER ONE PASS" above.
 
+## Diagrams for Pages
+
+When the diagram is for a page in Pages (a wiki page, a Team page), the diagram must be a page too: teammates cannot open a file on this computer, so never link an `.excalidraw` path from a page. Either create it directly with `createSharedDoc` (`documentType: 'excalidraw'`, the drawing's JSON as `initialContent`, under the page it explains), or build it in a scratch `.excalidraw` file with the tools above and copy it in with `importFileToPages`. Link the page it returns. Personal pages are markdown only; use a `mermaid` code block there.
+
 ## Best Practices
 
 - Use frames to group related elements

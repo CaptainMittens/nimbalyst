@@ -53,6 +53,7 @@ import {
 } from "./tools/canvasWorkingSetToolHandlers";
 import {
   handleCreateSharedDoc,
+  handleImportFileToPages,
   handleCreateSharedFolder,
   handleMoveSharedItem,
   handleRenameSharedItem,
@@ -564,6 +565,9 @@ function createSharedMcpServer(
 
         case "createSharedFolder":
           return handleCreateSharedFolder(args, workspacePath);
+
+        case "importFileToPages":
+          return handleImportFileToPages(args, workspacePath);
 
         case "moveSharedItem":
           return handleMoveSharedItem(args, workspacePath);

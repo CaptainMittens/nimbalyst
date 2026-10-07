@@ -8,14 +8,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { PageHeaderBar } from '@nimbalyst/collab-client/trackers-ui/page';
-import { getPersonalCollabHost, personalPagesDocumentsAtomFamily } from '../../store/atoms/collabDocuments';
+import { getPersonalCollabDocsSession, getPersonalCollabHost, personalPagesDocumentsAtomFamily } from '../../store/atoms/collabDocuments';
 import { historyDialogFileAtom } from '../../store/atoms/historyDialog';
 import { getSharedDocumentDisplayName } from './collabTree';
 import { PersonalPageBodyEditor, personalPageDocumentPath } from './PersonalPageBodyEditor';
 import { CollabPlainPageHeader } from './CollabPlainPageHeader';
 import { openPageAncestor } from './pageHeaderNavigation';
 import { useSharedPagePath } from './useSharedPagePath';
-import { pageMoveRequestAtom } from './pageTypeRequest';
+import { usePageMenuItems } from './usePageMenuItems';
+import { editorExportMenuItems } from '../TabEditor/editorExport';
 import { resolveDesktopCollabScope } from '../../store/atoms/collabDocuments';
 import type { CollabScope } from '@nimbalyst/collab-client/core';
 import { HeaderTableOfContents } from '../TabEditor/HeaderTableOfContents';
@@ -66,7 +67,6 @@ export const PersonalPageTab: React.FC<PersonalPageTabProps> = ({ documentId, wo
   const page = useSharedPagePath(scope, documentId);
   const openHistory = useSetAtom(historyDialogFileAtom);
   const [editor, setEditor] = useState<LexicalEditor | null>(null);
-  const requestMove = useSetAtom(pageMoveRequestAtom);
   // "Move to Team" shows once this project has a team to move to.
   const [teamScope, setTeamScope] = useState<CollabScope | null>(null);
   useEffect(() => {
@@ -78,12 +78,16 @@ export const PersonalPageTab: React.FC<PersonalPageTabProps> = ({ documentId, wo
       cancelled = true;
     };
   }, [workspacePath]);
-  const menuItems = useMemo(() => (teamScope ? [{
-    id: 'move-to-team',
-    label: 'Move to Team...',
-    icon: 'group',
-    onSelect: () => requestMove({ from: 'personal', pageId: documentId }),
-  }] : []), [teamScope, documentId, requestMove]);
+  const session = getPersonalCollabDocsSession(workspacePath);
+  const documents = useAtomValue(personalPagesDocumentsAtomFamily(workspacePath));
+  const exportItems = useMemo(() => editorExportMenuItems(editor, page.title ?? title), [editor, page.title, title]);
+  const menuItems = usePageMenuItems({
+    lane: 'personal',
+    session,
+    page: documents.find((d) => d.documentId === documentId) ?? null,
+    canMoveAcross: teamScope !== null,
+    exportItems,
+  });
   // The same header strip and title block a team page has.
   const documentHeader = useMemo(
     () => <CollabPlainPageHeader scope={scope} documentId={documentId} lane="personal" />,

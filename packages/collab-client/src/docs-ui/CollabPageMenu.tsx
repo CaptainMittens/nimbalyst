@@ -8,30 +8,9 @@
  * once a tree is a page tree) to keep it out of the docs-ui eager bundle.
  */
 import React from 'react';
-import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
+import { CollabMenuButton } from './primitives/CollabMenuButton';
 
-export const CollabMenuButton: React.FC<{
-  icon: string;
-  label: string;
-  trailing?: string;
-  disabled?: boolean;
-  danger?: boolean;
-  className?: string;
-  title?: string;
-  onClick: () => void;
-}> = ({ icon, label, trailing, disabled, danger, className, title, onClick }) => (
-  <button
-    type="button"
-    className={`${className ?? ''} w-full flex items-center gap-2.5 px-3 py-1.5 rounded border-none bg-transparent cursor-pointer transition-colors text-left hover:bg-nim-hover disabled:opacity-50 disabled:cursor-not-allowed ${danger ? 'text-[var(--nim-error)]' : 'text-nim'}`}
-    disabled={disabled}
-    title={title}
-    onClick={onClick}
-  >
-    <MaterialSymbol icon={icon} size={18} />
-    <span className="flex-1">{label}</span>
-    {trailing && <span className="ml-3 text-[11px] text-[var(--nim-text-faint)]">{trailing}</span>}
-  </button>
-);
+export { CollabMenuButton };
 
 const Separator = () => <div className="my-1 border-t border-[var(--nim-border)]" />;
 

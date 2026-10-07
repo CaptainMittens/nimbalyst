@@ -102,6 +102,19 @@ Links in page content are https console links; the app opens them in place and t
 - Write the relation in a sentence that says why ("Built on Durable Objects and KV"), because the Links section shows that sentence when expanded.
 - Only link keys and pages you created or looked up.
 
+## Diagrams and files
+
+Teammates read a Team page on their own machines, so whatever the page shows has to be a page too. A link to a file path (`docs/architecture.excalidraw`, `/Users/...`) opens nothing for them.
+
+<!-- desktop-only -->
+- A diagram, mind map, data model, mockup or spreadsheet is its own Team page, placed under the page it explains, and linked from it with the `link` the tool returns. Create it with `createSharedDoc` (for a drawing, `documentType: 'excalidraw'` with the drawing's JSON as `initialContent`), or draw it in a scratch file with the editor's tools and copy it in with `importFileToPages`.
+- A file the page needs that already exists (a design drawing, a schema) is copied in with `importFileToPages` the same way; never link its path.
+- Personal pages are markdown only. Put a drawing for a Personal page in the page as a fenced `mermaid` code block.
+<!-- /desktop-only -->
+<!-- remote-only -->
+- Draw a diagram as a fenced `mermaid` code block in the page; it renders as a diagram. Other file types cannot be created from here: tell the person to copy the file in with Copy to Pages... in Nimbalyst.
+<!-- /remote-only -->
+
 ## Placed views
 
 A view is a table of one type, placed in a page on purpose. It is a link on its own line, with the type's `viewLink` from `listPages` as the target and the definition in the title: `[Modules](https://console.nimbalyst.com/org/<orgId>/project/<projectId>/view/type/module "cols=title,status,owner sort=title")`, with optional `filter=`. A view can also be a 2x2 of a type by two number fields (`mode=2x2 x=<field> y=<field>`). A list of open marks across pages uses the `openMarksViewLink` from `listPages` (`.../view/marks?kind=open`; `kind=decided` for decisions). Editing a cell edits the page the row points at. Place a view only where a person reading the page needs the whole set; never as an automatic rollup of every relation. If a view link does not render as a table in this version, leave it as a link and tell the person.

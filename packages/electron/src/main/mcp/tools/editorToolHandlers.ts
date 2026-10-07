@@ -16,6 +16,7 @@ import {
   personalTypedPageError,
   typedPageItemId,
 } from "./agentPageTargets";
+import { teamPageLocalLinkWarning } from "./teamPageLocalLinks";
 import { PAGE_TOOL_DESKTOP_PROJECT_ARG } from "@nimbalyst/collab-protocol";
 import { routePageRead } from "./pageProjectReads";
 
@@ -364,6 +365,8 @@ export async function handleApplyDiff(
       const title = outcome.response?.title
         ?? (typedItemId ? (await describeTypedPage(typedItemId, workspacePath).catch(() => null))?.title : undefined);
       successText = pageUpdatedText(targetFilePath, title);
+      const warning = teamPageLocalLinkWarning(targetFilePath, (typedArgs?.replacements ?? []).map((r: { newText?: unknown }) => r?.newText));
+      if (warning) successText += `\n\n${warning}`;
     }
     return {
       content: [

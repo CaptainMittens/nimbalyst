@@ -54,6 +54,23 @@ describe('page tree MCP tools', () => {
     expect(result?.content[0].text).toContain('"title":"Ideas"');
   });
 
+  it('warns when a created Team page links a file on this computer, and not for a Personal page or a web link', async () => {
+    const body = 'See [diagram](/Users/me/repo/docs/architecture.excalidraw), ![chart](docs/chart.png) and [the spec](https://console.nimbalyst.com/app/page/abc).';
+    requestFromRenderer.mockResolvedValue({ status: 'responded', response: { success: true, documentId: 'd1', uri: 'collab://org:o:doc:d1' } });
+    const team = await handleCollabIndexTool('createSharedDoc', { title: 'Architecture', initialContent: body }, '/ws');
+    expect(team?.isError).toBe(false);
+    expect(team?.content[0].text).toMatch(/Teammates cannot open it/);
+    expect(team?.content[0].text).toContain('/Users/me/repo/docs/architecture.excalidraw, docs/chart.png)');
+
+    requestFromRenderer.mockResolvedValue({ status: 'responded', response: { success: true, documentId: 'd2', uri: 'personal://d2' } });
+    const personal = await handleCollabIndexTool('createSharedDoc', { title: 'Notes', section: 'personal', initialContent: body }, '/ws');
+    expect(personal?.content[0].text).not.toMatch(/Teammates/);
+
+    requestFromRenderer.mockResolvedValue({ status: 'responded', response: { success: true, documentId: 'd3', uri: 'collab://org:o:doc:d3' } });
+    const web = await handleCollabIndexTool('createSharedDoc', { title: 'Links', initialContent: '[a](https://x.test/a.png) [b](#top) [c](mailto:a@b.test)' }, '/ws');
+    expect(web?.content[0].text).not.toMatch(/Teammates/);
+  });
+
   it('moves typed pages and types, and turns a renderer refusal into a tool error', async () => {
     requestFromRenderer.mockResolvedValue({ status: 'responded', response: { success: false, error: 'Refused: that would put it inside itself.' } });
     const result = await handleCollabIndexTool('moveSharedItem', { itemId: 'MOD-1', kind: 'item', newParentFolderId: 'p' }, '/ws');

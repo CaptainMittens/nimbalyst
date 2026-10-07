@@ -129,7 +129,7 @@ function renderActions(fileName: string) {
   );
 }
 
-describe('CommonFileActions Share to Team catalog eligibility', () => {
+describe('CommonFileActions Copy to Pages catalog eligibility', () => {
   it('uses the platform-aware system file browser label', () => {
     mocks.resolveShareability.mockReturnValue({ state: 'unsupported', reason: 'Unsupported' });
     renderActions('index.ts');
@@ -189,7 +189,7 @@ describe('CommonFileActions Share to Team catalog eligibility', () => {
     });
 
     renderActions('notes.md');
-    fireEvent.click(screen.getByRole('button', { name: 'Share to Team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to Pages...' }));
 
     await vi.waitFor(() => expect(mocks.openDialog).toHaveBeenCalledWith(
       'share-to-team',
@@ -207,11 +207,11 @@ describe('CommonFileActions Share to Team catalog eligibility', () => {
     ));
   });
 
-  it('shows Share to Team for a ready first-wave non-markdown type', () => {
+  it('shows Copy to Pages for a ready first-wave non-markdown type', () => {
     mocks.resolveShareability.mockReturnValue({ state: 'ready', descriptor: spreadsheetDescriptor });
     renderActions('people.tsv');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Share to Team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to Pages...' }));
     expect(mocks.openDialog).toHaveBeenCalledWith('share-to-team', expect.objectContaining({
       fileName: 'people.tsv',
       descriptor: spreadsheetDescriptor,
@@ -241,7 +241,7 @@ describe('CommonFileActions Share to Team catalog eligibility', () => {
     });
 
     renderActions('people.csv');
-    fireEvent.click(screen.getByRole('button', { name: 'Share to Team' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy to Pages...' }));
     const dialogData = mocks.openDialog.mock.calls[0]?.[1];
     await dialogData.onConfirm({
       folderId: null,
@@ -269,12 +269,25 @@ describe('CommonFileActions Share to Team catalog eligibility', () => {
     );
   });
 
+  it('offers a markdown file Copy to Pages with no team (for Personal), and nothing else', async () => {
+    const { useAtomValue } = await import('jotai');
+    vi.mocked(useAtomValue).mockReturnValue(false);
+    mocks.resolveShareability.mockReturnValue({ state: 'ready', descriptor: { ...spreadsheetDescriptor, documentType: 'markdown' } });
+    const { unmount } = renderActions('notes.md');
+    screen.getByRole('button', { name: 'Copy to Pages...' });
+    unmount();
+    mocks.resolveShareability.mockReturnValue({ state: 'ready', descriptor: spreadsheetDescriptor });
+    renderActions('people.csv');
+    expect(screen.queryByRole('button', { name: 'Copy to Pages...' })).toBeNull();
+    vi.mocked(useAtomValue).mockReturnValue(true);
+  });
+
   it('keeps Monaco files visible but disabled with the catalog reason', () => {
     const reason = 'The built-in Monaco editor does not yet provide a collaborative binding for ".ts".';
     mocks.resolveShareability.mockReturnValue({ state: 'unsupported', reason });
     renderActions('index.ts');
 
-    const action = screen.getByRole('button', { name: /Share to Team/ });
+    const action = screen.getByRole('button', { name: /Copy to Pages/ });
     expect(action.getAttribute('aria-disabled')).toBe('true');
     expect(action.textContent).toContain(reason);
     fireEvent.click(action);
@@ -316,7 +329,7 @@ describe('CommonFileActions Share to Team catalog eligibility', () => {
     expect(mocks.openDialog).not.toHaveBeenCalled();
   });
 
-  it('does not offer Share to Team for an already-shared collaborative document', () => {
+  it('does not offer Copy to Pages for an already-shared collaborative document', () => {
     mocks.resolveShareability.mockReturnValue({ state: 'ready', descriptor: spreadsheetDescriptor });
     render(
       <CommonFileActions
@@ -329,7 +342,7 @@ describe('CommonFileActions Share to Team catalog eligibility', () => {
       />,
     );
 
-    expect(screen.queryByRole('button', { name: 'Share to Team' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy to Pages...' })).toBeNull();
   });
 
   it('omits Copy Path for collaborative documents while keeping it for local files', () => {

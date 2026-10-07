@@ -10,9 +10,14 @@ import type { TitleBarCreateMenu } from '../../store/atoms/titleBarCreate';
 export function composePagesCreateMenu(
   team: CollabSidebarCreateMenu | null,
   personal: CollabSidebarCreateMenu | null,
+  /** Copy a file from disk in; the dialog it opens offers both sections. */
+  onAddFromFiles?: (section: 'team' | 'personal') => void,
 ): TitleBarCreateMenu | null {
   const primary = team ?? personal;
   if (!primary) return null;
+  const addFromFiles = onAddFromFiles
+    ? [{ id: 'add-from-files', label: 'Add from Files...', icon: 'upload_file', separatorBefore: true, onSelect: () => onAddFromFiles(team ? 'team' : 'personal') }]
+    : [];
   const folderItem = (menu: CollabSidebarCreateMenu, id: string, label: string) => ({
     id,
     label,
@@ -32,7 +37,7 @@ export function composePagesCreateMenu(
       heading: { label: 'Personal', icon: 'person' },
       onPrimary: primary.onPrimary,
       primaryTrailing: primary.primaryTrailing,
-      items: [...primary.items, ...folderItems(primary, 'folder', 'New folder')],
+      items: [...primary.items, ...folderItems(primary, 'folder', 'New folder'), ...addFromFiles],
     };
   }
 
@@ -59,6 +64,7 @@ export function composePagesCreateMenu(
             .map((item) => ({ ...item, separatorBefore: false })),
         ]
         : []),
+      ...addFromFiles,
     ],
   };
 }

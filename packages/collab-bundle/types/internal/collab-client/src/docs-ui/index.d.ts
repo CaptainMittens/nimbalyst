@@ -3,6 +3,7 @@ export * from './CollabDocsUIProvider';
 export * from './useCollabPagesState';
 export * from './CollabNewDocumentMenu';
 export * from './CollabSidebar';
+export type { CollabPageAction, CollabPageActionRequest } from './usePageActionRequest';
 export * from './DocUnreadDot';
 export * from './documentDrag';
 export * from './documentPresentation';

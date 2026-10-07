@@ -63,6 +63,7 @@ const DESKTOP_TOOLS = [
   'getResourceSharingStatus',
   'declareCanvasWorkingSet',
   'releaseCanvasWorkingSet',
+  'importFileToPages',
   'capture_editor_screenshot',
   'developer_git_commit_proposal',
   'get_session_edited_files',

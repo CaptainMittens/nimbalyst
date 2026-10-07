@@ -23,7 +23,7 @@ import { ElectronCollabDocsUIRoot } from './ElectronCollabDocsUIProvider';
 import { useCollabTypeResolver } from './useCollabTypeResolver';
 import { useDefineTrackerType } from './useDefineTrackerType';
 import { useSetPageType } from './useSetPageType';
-import { pageMoveRequestAtom, pageTypeRequestAtom } from './pageTypeRequest';
+import { pageActionRequestAtom, pageMoveRequestAtom, pageTypeRequestAtom } from './pageTypeRequest';
 import { movePageAcrossSections } from './moveAcrossSectionsDesktop';
 import { useTabsActions } from '../../contexts/TabsContext';
 import { errorNotificationService } from '../../services/ErrorNotificationService';
@@ -95,6 +95,9 @@ export function PagesSidebarSections({
       if (result && !result.ok) errorNotificationService.showError('Could not move this page', result.error);
     });
   }, [moveRequest, setMoveRequest, teamScope, workspacePath, tabsActions]);
+  // Rename, Move to..., New page inside and Trash from a page header: its section's tree runs them.
+  const [actionRequest, setActionRequest] = useAtom(pageActionRequestAtom);
+  const clearActionRequest = () => setActionRequest(null);
   const [creatingType, setCreatingType] = useState(false);
   const defineType = useDefineTrackerType(workspacePath);
   const { collapsed, toggle } = usePagesSidebarCollapse(workspacePath, teamScope !== null);
@@ -143,6 +146,8 @@ export function PagesSidebarSections({
               collapsed={collapsed.team}
               onToggleCollapsed={() => toggle('team')}
               onSetPageType={(page) => setTypingPage({ lane: 'team', page })}
+              pageActionRequest={actionRequest?.lane === 'team' ? actionRequest : null}
+              onPageActionHandled={clearActionRequest}
             />
           </ElectronCollabDocsUIRoot>
         </div>
@@ -168,6 +173,8 @@ export function PagesSidebarSections({
             collapsed={collapsed.personal}
             onToggleCollapsed={() => toggle('personal')}
             onSetPageType={(page) => setTypingPage({ lane: 'personal', page })}
+            pageActionRequest={actionRequest?.lane === 'personal' ? actionRequest : null}
+            onPageActionHandled={clearActionRequest}
           />
         </ElectronCollabDocsUIRoot>
       </div>

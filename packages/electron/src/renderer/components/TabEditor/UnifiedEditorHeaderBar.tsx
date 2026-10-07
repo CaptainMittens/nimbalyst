@@ -15,7 +15,6 @@ import {
   $convertToEnhancedMarkdownString,
   $convertFromEnhancedMarkdownString,
   getEditorTransformers,
-  wrapWithPrintStyles,
   applyTrackerTypeToMarkdown,
   getDefaultFrontmatterForType,
   getModelDefaults,
@@ -23,8 +22,6 @@ import {
   removeTrackerTypeFromMarkdown,
   type TrackerTypeInfo,
 } from '@nimbalyst/runtime';
-import { $generateHtmlFromNodes } from '@lexical/html';
-import { copyToClipboard } from '@nimbalyst/runtime';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { historyDialogFileAtom } from '../../store';
 import { useFloatingMenu, FloatingPortal } from '../../hooks/useFloatingMenu';
@@ -40,6 +37,8 @@ import { FilePathBreadcrumb } from '../common/FilePathBreadcrumb';
 // header row.
 import { EditorHeaderBar, HeaderIconButton } from '@nimbalyst/collab-client/docs-ui/EditorHeaderBar';
 import { HeaderTableOfContents, type TableOfContentsEditor } from './HeaderTableOfContents';
+import { copyEditorAsMarkdown, exportEditorToPdf } from './editorExport';
+import type { LexicalEditor } from 'lexical';
 import { dialogRef, DIALOG_IDS } from '../../dialogs';
 import type { ShareDialogData } from '../../dialogs';
 import { useLocalFileSharedDocLink } from '../../hooks/useCollabLocalOrigin';
@@ -72,6 +71,10 @@ interface ExtensionMenuItem {
   icon?: string;
   onClick: () => void;
   disabled?: boolean;
+  /** Drawn in the error color (Move to Trash). */
+  destructive?: boolean;
+  /** Starts a new group: a rule above it. */
+  dividerBefore?: boolean;
 }
 
 interface UnifiedEditorHeaderBarProps {
@@ -294,21 +297,7 @@ export const UnifiedEditorHeaderBar: React.FC<UnifiedEditorHeaderBarProps> = ({
   // Handle copy as markdown
   const handleCopyAsMarkdown = useCallback(() => {
     if (!lexicalEditor || typeof lexicalEditor.getEditorState !== 'function') return;
-
-    try {
-      lexicalEditor.getEditorState().read(() => {
-        const transformers = getEditorTransformers();
-        const markdown = $convertToEnhancedMarkdownString(transformers);
-
-        copyToClipboard(markdown).then(() => {
-          console.log('[UnifiedHeaderBar] Markdown copied to clipboard');
-        }).catch((err) => {
-          console.error('[UnifiedHeaderBar] Failed to copy markdown:', err);
-        });
-      });
-    } catch (error) {
-      console.error('[UnifiedHeaderBar] Failed to convert to markdown:', error);
-    }
+    copyEditorAsMarkdown(lexicalEditor as unknown as LexicalEditor);
     setShowActionsMenu(false);
   }, [lexicalEditor]);
 
@@ -326,46 +315,7 @@ export const UnifiedEditorHeaderBar: React.FC<UnifiedEditorHeaderBarProps> = ({
   // Handle export to PDF
   const handleExportToPdf = useCallback(async () => {
     if (!lexicalEditor || typeof lexicalEditor.getEditorState !== 'function') return;
-    const electronAPI = (window as any).electronAPI;
-    if (!electronAPI) return;
-
-    try {
-      // Show save dialog first
-      const defaultPath = fileName.replace(/\.(md|markdown|txt)$/i, '.pdf');
-      const outputPath = await electronAPI.showSaveDialogPdf({ defaultPath });
-
-      if (!outputPath) {
-        // User cancelled
-        return;
-      }
-
-      // Generate HTML from Lexical editor
-      let html = '';
-      lexicalEditor.getEditorState().read(() => {
-        // Cast to LexicalEditor for $generateHtmlFromNodes
-        const editorAsLexical = lexicalEditor as unknown as import('lexical').LexicalEditor;
-        const content = $generateHtmlFromNodes(editorAsLexical);
-        html = wrapWithPrintStyles(content, fileName);
-      });
-
-      // Export to PDF via main process
-      const result = await electronAPI.exportHtmlToPdf({
-        html,
-        outputPath,
-        pageSize: 'Letter',
-        generateDocumentOutline: true,
-        generateTaggedPDF: true,
-      });
-
-      if (result.success) {
-        console.log('[UnifiedHeaderBar] PDF exported successfully:', outputPath);
-      } else {
-        console.error('[UnifiedHeaderBar] PDF export failed:', result.error);
-        electronAPI.showErrorDialog('Export Failed', `Failed to export PDF: ${result.error}`);
-      }
-    } catch (error) {
-      console.error('[UnifiedHeaderBar] Failed to export to PDF:', error);
-    }
+    await exportEditorToPdf(lexicalEditor as unknown as LexicalEditor, fileName);
     setShowActionsMenu(false);
   }, [lexicalEditor, fileName]);
 
@@ -804,9 +754,10 @@ export const UnifiedEditorHeaderBar: React.FC<UnifiedEditorHeaderBarProps> = ({
                 <>
                   <div className="dropdown-divider h-px my-1 bg-[var(--nim-border)]" />
                   {extraActionItems.map((item, index) => (
+                    <React.Fragment key={`extra-action-${index}-${item.label}`}>
+                    {item.dividerBefore && index > 0 && <div className="dropdown-divider h-px my-1 bg-[var(--nim-border)]" />}
                     <button
-                      key={`extra-action-${index}-${item.label}`}
-                      className="dropdown-item w-full py-2 px-3 border-none bg-transparent text-[13px] text-left cursor-pointer flex items-center gap-2.5 transition-colors duration-150 text-[var(--nim-text)] hover:bg-[var(--nim-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+                      className={`dropdown-item w-full py-2 px-3 border-none bg-transparent text-[13px] text-left cursor-pointer flex items-center gap-2.5 transition-colors duration-150 hover:bg-[var(--nim-bg-hover)] disabled:opacity-50 disabled:cursor-not-allowed ${item.destructive ? 'text-[var(--nim-error)]' : 'text-[var(--nim-text)]'}`}
                       disabled={item.disabled}
                       onClick={() => {
                         item.onClick();
@@ -818,6 +769,7 @@ export const UnifiedEditorHeaderBar: React.FC<UnifiedEditorHeaderBarProps> = ({
                       )}
                       {item.label}
                     </button>
+                    </React.Fragment>
                   ))}
                 </>
               )}
