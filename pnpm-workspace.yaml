@@ -70,6 +70,12 @@ allowBuilds:
   utf-8-validate: true
   workerd: true
 
+# y-websocket lists y-leveldb as optional; only its server utils use it. Its
+# native leveldown cannot build on Windows ARM64, and a missing optional
+# production dependency makes electron-builder fail the pack step there.
+ignoredOptionalDependencies:
+  - y-leveldb
+
 overrides:
   '@anthropic-ai/claude-agent-sdk': 0.3.293
   prismjs: ^1.30.0
