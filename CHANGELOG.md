@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pages: `@` in a Personal page links your Personal pages and embeds Personal drawings and other editor pages; `@` in a local file also lists Team and Personal pages.
 - Agents can edit drawings, mind maps, data models and other editor pages in Pages with those editors' tools, without the page open.
 - Custom Claude models defined under `modelPicker` in Claude's settings now appear in the Claude Code model picker and are sent to your gateway by name.
+- Claude Haiku 5.5 is available in Claude Agent and Claude Chat; Haiku 4.5 stays selectable.
 
 ### Changed
 <!-- Changes to existing functionality go here -->

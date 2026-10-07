@@ -14,6 +14,7 @@ describe('supportsEffortLevel', () => {
     'claude-code-cli:opus-4-7-1m',
     'claude-code:sonnet-4-6',
     'claude-code-cli:sonnet-4-6-1m',
+    'claude-code:haiku',
   ])('supports current Claude Code effort-capable variants: %s', (modelId) => {
     expect(supportsEffortLevel(modelId)).toBe(true);
   });
@@ -27,7 +28,7 @@ describe('supportsEffortLevel', () => {
 
   it.each([
     undefined,
-    'claude-code:haiku',
+    'claude-code:haiku-4-5',
     'claude-code:unknown',
     'claude:claude-fable-5',
   ])('does not expose effort for unsupported models: %s', (modelId) => {

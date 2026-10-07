@@ -476,7 +476,8 @@ describe('resolveClaudeCliModelArg', () => {
   it('strips the provider prefix and translates -1m to the CLI `[1m]` form (NIM-809)', () => {
     expect(resolveClaudeCliModelArg('claude-code-cli:opus-1m')).toBe('claude-opus-5-5[1m]');
     expect(resolveClaudeCliModelArg('claude-code-cli:sonnet')).toBe('claude-sonnet-5-5');
-    expect(resolveClaudeCliModelArg('claude-code:haiku')).toBe('haiku');
+    expect(resolveClaudeCliModelArg('claude-code:haiku')).toBe('claude-haiku-5-5');
+    expect(resolveClaudeCliModelArg('claude-code:haiku-4-5')).toBe('claude-haiku-4-5-20251001');
   });
 
   it('preserves pinned opus versions without requesting extended context', () => {

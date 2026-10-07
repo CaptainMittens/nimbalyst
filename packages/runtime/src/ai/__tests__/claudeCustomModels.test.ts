@@ -50,7 +50,8 @@ describe('withClaudeCustomModels', () => {
 
   it('maps behavesAs ids to built-in variants', () => {
     expect(variantForBehavesAs('claude-sonnet-5-5')).toBe('sonnet');
-    expect(variantForBehavesAs('claude-haiku-4-5-20251001')).toBe('haiku');
+    expect(variantForBehavesAs('claude-haiku-5-5')).toBe('haiku');
+    expect(variantForBehavesAs('claude-haiku-4-5-20251001')).toBe('haiku-4-5');
     expect(variantForBehavesAs('gpt-5')).toBeUndefined();
   });
 });

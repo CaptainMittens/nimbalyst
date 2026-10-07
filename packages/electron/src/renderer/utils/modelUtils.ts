@@ -281,7 +281,7 @@ export function getModelShortName(provider: string, modelId: string): string {
 
 /**
  * Check if a model supports effort level configuration.
- * Supported: Claude Code Fable, Opus, and Sonnet variants, including retained
+ * Supported: Claude Code Fable, Opus, Sonnet, and Haiku 5.5 variants, including retained
  * pinned versions, plus OpenAI Codex models.
  */
 export function supportsEffortLevel(modelId?: string): boolean {
@@ -297,7 +297,8 @@ export function supportsEffortLevel(modelId?: string): boolean {
     variant === 'opus-4-6' ||
     variant === 'sonnet' ||
     variant === 'sonnet-5' ||
-    variant === 'sonnet-4-6'
+    variant === 'sonnet-4-6' ||
+    variant === 'haiku'
   ) return true;
   // OpenAI Codex models support reasoning effort (both SDK and ACP transports)
   const parsed = ModelIdentifier.tryParse(modelId);
