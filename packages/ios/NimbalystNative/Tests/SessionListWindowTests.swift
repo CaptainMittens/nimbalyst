@@ -750,4 +750,17 @@ final class SessionListWindowTests: XCTestCase {
             "the window query must reach sessions through a project index, not a full table scan:\n\(plan)"
         )
     }
+
+    /// The group key walks each row's ancestors. A step that searches the project
+    /// index instead of the parent's primary key makes every group key O(project),
+    /// and the live list O(n^2): 2.5s at 2,000 sessions on a host Mac.
+    func testAncestorWalkLooksUpParentsByPrimaryKey() throws {
+        let db = try makeDatabase()
+        try seed(db, count: 200)
+        let lines = try db.sessionListQueryPlan(filter: filter(), limit: 100).components(separatedBy: "\n")
+        for (index, line) in lines.enumerated() where line == "RECURSIVE STEP" && index + 1 < lines.count {
+            XCTAssertFalse(lines[index + 1].contains("USING INDEX idx_sessions_project"),
+                           "a recursive step scans the project:\n\(lines.joined(separator: "\n"))")
+        }
+    }
 }

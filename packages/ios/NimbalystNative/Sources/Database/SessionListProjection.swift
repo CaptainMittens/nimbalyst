@@ -39,7 +39,7 @@ enum SessionListProjection {
     /// `IF NOT EXISTS`, so an install that ran an earlier shape would otherwise keep
     /// its old triggers forever with nothing to detect it. Release builds have no
     /// erase-on-change rescue.
-    static let schemaVersion = 2
+    static let schemaVersion = 3
 
     /// Registered from `DatabaseManager.migrate` and run again on every open. Creates
     /// the projection objects, or drops and recreates them when the recorded shape

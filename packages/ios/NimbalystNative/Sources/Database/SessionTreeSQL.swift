@@ -11,7 +11,9 @@ enum SessionTreeSQL {
                 SELECT b.id, b.parentSessionId, b.sessionType
                 UNION
                 SELECT p.id, p.parentSessionId, p.sessionType
-                FROM sessions p JOIN ancestors a ON p.id = a.parentSessionId
+                -- CROSS JOIN pins the order: left to the planner, each step scanned
+                -- the project index, making every group key O(project).
+                FROM ancestors a CROSS JOIN sessions p ON p.id = a.parentSessionId
                 WHERE \(visible("p")) AND p.worktreeId IS b.worktreeId
                   AND COALESCE(a.sessionType, '') NOT IN ('workstream', 'blitz')
             )
@@ -84,8 +86,8 @@ enum SessionTreeSQL {
             WITH RECURSIVE ancestors(id, projectId, parentSessionId) AS (
                 SELECT id, projectId, parentSessionId FROM sessions WHERE id = \(id)
                 UNION
-                SELECT p.id, p.projectId, p.parentSessionId FROM sessions p
-                JOIN ancestors a ON p.id = a.parentSessionId AND p.projectId = a.projectId
+                SELECT p.id, p.projectId, p.parentSessionId FROM ancestors a
+                CROSS JOIN sessions p ON p.id = a.parentSessionId AND p.projectId = a.projectId
             ) SELECT id, projectId FROM ancestors
         );
         """
@@ -98,8 +100,8 @@ enum SessionTreeSQL {
             WITH RECURSIVE descendants(id, projectId) AS (
                 SELECT id, projectId FROM sessions WHERE parentSessionId = \(id)
                 UNION
-                SELECT c.id, c.projectId FROM sessions c
-                JOIN descendants p ON c.parentSessionId = p.id AND c.projectId = p.projectId
+                SELECT c.id, c.projectId FROM descendants p
+                CROSS JOIN sessions c ON c.parentSessionId = p.id AND c.projectId = p.projectId
             ) SELECT id, projectId FROM descendants
         );
         """
