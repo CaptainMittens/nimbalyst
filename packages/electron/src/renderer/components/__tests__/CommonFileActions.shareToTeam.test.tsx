@@ -269,17 +269,20 @@ describe('CommonFileActions Copy to Pages catalog eligibility', () => {
     );
   });
 
-  it('offers a markdown file Copy to Pages with no team (for Personal), and nothing else', async () => {
+  it('offers Copy to Pages with no team (for Personal) for any type but code', async () => {
     const { useAtomValue } = await import('jotai');
     vi.mocked(useAtomValue).mockReturnValue(false);
-    mocks.resolveShareability.mockReturnValue({ state: 'ready', descriptor: { ...spreadsheetDescriptor, documentType: 'markdown' } });
-    const { unmount } = renderActions('notes.md');
-    screen.getByRole('button', { name: 'Copy to Pages...' });
-    unmount();
-    mocks.resolveShareability.mockReturnValue({ state: 'ready', descriptor: spreadsheetDescriptor });
-    renderActions('people.csv');
-    expect(screen.queryByRole('button', { name: 'Copy to Pages...' })).toBeNull();
-    vi.mocked(useAtomValue).mockReturnValue(true);
+    try {
+      mocks.resolveShareability.mockReturnValue({ state: 'ready', descriptor: spreadsheetDescriptor });
+      const { unmount } = renderActions('people.csv');
+      screen.getByRole('button', { name: 'Copy to Pages...' });
+      unmount();
+      mocks.resolveShareability.mockReturnValue({ state: 'ready', descriptor: { ...spreadsheetDescriptor, documentType: 'code' } });
+      renderActions('index.ts');
+      expect(screen.queryByRole('button', { name: 'Copy to Pages...' })).toBeNull();
+    } finally {
+      vi.mocked(useAtomValue).mockReturnValue(true);
+    }
   });
 
   it('keeps Monaco files visible but disabled with the catalog reason', () => {

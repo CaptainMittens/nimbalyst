@@ -64,13 +64,15 @@ export function usePageMenuItems({ lane, session, page, canMoveAcross, exportIte
     if (!inPages || !page) return exportItems;
     const pageId = page.documentId;
     const favorited = favorites.includes(pageId);
+    const markdown = page.documentType === 'markdown';
     return grouped(exportItems, [
       { id: 'new-page-inside', label: 'New Page Inside', icon: 'note_add', onSelect: () => requestAction(pageId, 'newPageInside') },
       { id: 'add-from-files', label: 'Add from Files...', icon: 'upload_file', onSelect: () => addFromFiles(lane, pageId) },
-      { id: 'set-type', label: 'Set Type...', icon: 'category', onSelect: () => requestType({ lane, page }) },
+      // A drawing or other editor page keeps its editor: no page type, no move across sections (it copies markdown).
+      ...(markdown ? [{ id: 'set-type', label: 'Set Type...', icon: 'category', onSelect: () => requestType({ lane, page }) }] : []),
       { id: 'rename', label: 'Rename...', icon: 'edit', onSelect: () => requestAction(pageId, 'rename') },
       { id: 'move-to', label: 'Move to...', icon: 'drive_file_move', onSelect: () => requestAction(pageId, 'moveTo') },
-      ...(canMoveAcross ? [{
+      ...(canMoveAcross && markdown ? [{
         id: 'move-across',
         label: lane === 'team' ? 'Move to Personal...' : 'Move to Team...',
         icon: lane === 'team' ? 'person' : 'group',

@@ -74,7 +74,7 @@ Teammates read a Team page on their own machines, so whatever the page shows has
 
 - A diagram, mind map, data model, mockup or spreadsheet is its own Team page, placed under the page it explains, and linked from it with the `link` the tool returns. Create it empty with `createSharedDoc` (`documentType: 'excalidraw'` for a drawing), then build it with that editor's tools (`excalidraw_add_elements` and the rest), passing the page's `uri` as their `filePath`.
 - A file the page needs that already exists (a design drawing, a schema) is copied in with `importFileToPages` the same way; never link its path.
-- Personal pages are markdown only. Put a drawing for a Personal page in the page as a fenced `mermaid` code block.
+- A Personal page can be a drawing or another editor type too, but the editors' tools reach Team pages only: build a Personal drawing in a file and copy it in with `importFileToPages` (`section: 'personal'`), or use a fenced `mermaid` code block in the page.
 
 ## Placed views
 

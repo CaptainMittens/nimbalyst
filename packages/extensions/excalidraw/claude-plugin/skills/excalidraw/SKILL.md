@@ -85,7 +85,7 @@ The Excalidraw extension provides these MCP tools for diagram manipulation:
 
 ## Diagrams for Pages
 
-When the diagram is for a page in Pages (a wiki page, a Team page), the diagram must be a page too: teammates cannot open a file on this computer, so never link an `.excalidraw` path from a page. Create the page with `createSharedDoc` (`documentType: 'excalidraw'`, under the page it explains), then pass its `uri` (`collab://...`) as `filePath` to the tools above; they edit the shared page directly. An existing `.excalidraw` file is copied in with `importFileToPages`. Link the page by the `link` the tool returns. Personal pages are markdown only; use a `mermaid` code block there.
+When the diagram is for a page in Pages (a wiki page, a Team page), the diagram must be a page too: teammates cannot open a file on this computer, so never link an `.excalidraw` path from a page. Create the page with `createSharedDoc` (`documentType: 'excalidraw'`, under the page it explains), then pass its `uri` (`collab://...`) as `filePath` to the tools above; they edit the shared page directly. An existing `.excalidraw` file is copied in with `importFileToPages`. Link the page by the `link` the tool returns. A drawing for yourself can be a Personal page (`section: 'personal'`); the drawing tools edit Team pages only, so build it in a file and copy it in with `importFileToPages`.
 
 ## Best Practices
 

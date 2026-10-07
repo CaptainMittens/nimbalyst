@@ -26,6 +26,8 @@ import { importFileToPagesTool } from '../importFileToPagesTool';
 vi.mock('../../shareToTeamFlow', () => ({
   resolveShareDescriptor: (name: string) => (name.endsWith('.excalidraw')
     ? { ok: true, descriptor: { documentType: 'excalidraw', fileExtensions: ['.excalidraw'], defaultExtension: '.excalidraw' } }
+    : name.endsWith('.ts')
+      ? { ok: true, descriptor: { documentType: 'code', fileExtensions: ['.ts'], defaultExtension: '.ts' } }
     : name.endsWith('.md')
       ? { ok: true, descriptor: { documentType: 'markdown', fileExtensions: ['.md'], defaultExtension: '.md' } }
       : { ok: false, reason: 'No collaborative document type is registered for this file.' }),
@@ -351,8 +353,8 @@ describe('importFileToPages', () => {
       answers: expect.objectContaining({ section: 'team', folderId: 'arch', sharedName: 'architecture.excalidraw' }),
     }));
 
-    expect(await importFileToPagesTool(env, { filePath: '/repo/docs/architecture.excalidraw', section: 'personal' }, share))
-      .toMatchObject({ success: false, error: expect.stringMatching(/markdown only/) });
+    expect(await importFileToPagesTool(env, { filePath: '/repo/src/index.ts', section: 'personal' }, share))
+      .toMatchObject({ success: false, error: expect.stringMatching(/cannot hold index\.ts/) });
     expect(await importFileToPagesTool(env, { filePath: 'docs/notes.md' }, share))
       .toMatchObject({ success: false, error: expect.stringMatching(/absolute path/) });
     expect(await importFileToPagesTool(env, { filePath: '/repo/model.stl' }, share)).toMatchObject({ success: false });

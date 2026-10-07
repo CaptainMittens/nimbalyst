@@ -49,6 +49,7 @@ import {
   type CollaborativeDocumentTypeDescriptor,
 } from "./CollaborativeDocumentTypeCatalog";
 import { readShareToTeamSourceContent } from "./shareToTeamSourceContent";
+import { personalPageSupportsType } from "./personalPageTypes";
 import {
   CollaborativeDocumentCreationError,
   createCollaborativeDocument,
@@ -206,17 +207,14 @@ export function resolveShareDescriptor(
     : { ok: false, reason: shareability.reason };
 }
 
-/**
- * Where a copy of this type can go. Personal pages are markdown in the local
- * database, so only a markdown file can land there; Team needs a team.
- */
+/** Where a copy of this type can go: Team needs a team; Personal holds any type but code. */
 export function shareSectionsFor(
   descriptor: CollaborativeDocumentTypeDescriptor,
   hasTeam: boolean
 ): PagesSection[] {
   return [
     ...(hasTeam ? (["team"] as const) : []),
-    ...(descriptor.documentType === "markdown" ? (["personal"] as const) : []),
+    ...(personalPageSupportsType(descriptor.documentType) ? (["personal"] as const) : []),
   ];
 }
 

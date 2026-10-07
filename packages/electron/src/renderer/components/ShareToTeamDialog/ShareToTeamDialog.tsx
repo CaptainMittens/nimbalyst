@@ -19,7 +19,7 @@ export interface ShareToTeamDialogProps {
    * already asked the author where this is going.
    */
   initialFolderId?: string | null;
-  /** The Pages sections the copy may go to, first is the default. Personal holds markdown only. */
+  /** The Pages sections the copy may go to, first is the default. */
   sections?: readonly SharedFolderSection[];
   initialSection?: SharedFolderSection;
   /**

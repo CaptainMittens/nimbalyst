@@ -75,7 +75,7 @@ export function getCollabIndexToolSchemas() {
           documentType: {
             type: "string",
             description:
-              "The page's editor. Defaults to 'markdown'. Team pages can also be 'excalidraw' (a drawing), 'mindmap', 'datamodel' (Prisma schema), 'mockup.html', 'canvas', 'csv', 'calc.md', 'slides.md', 'ipynb', 'namenym' or 'code', when that editor's extension is installed. Personal pages are markdown only.",
+              "The page's editor. Defaults to 'markdown'. Team pages can also be 'excalidraw' (a drawing), 'mindmap', 'datamodel' (Prisma schema), 'mockup.html', 'canvas', 'csv', 'calc.md', 'slides.md', 'ipynb', 'namenym' or 'code', when that editor's extension is installed. Personal pages can be any of these but 'code'.",
           },
           parentFolderId: { type: "string", description: "Parent page id, or typed page id / issue key. Omit for the top of the section." },
           parentKind: PARENT_KIND,

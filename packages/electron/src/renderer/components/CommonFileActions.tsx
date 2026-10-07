@@ -18,6 +18,7 @@ import {
 import { useAtomValue } from 'jotai';
 import { useFileActions } from '../hooks/useFileActions';
 import { workspaceHasTeamAtom } from '../store/atoms/collabDocuments';
+import { personalPageSupportsType } from '../services/personalPageTypes';
 import { isCollabUri } from '@nimbalyst/collab-protocol';
 import { getCollaborativeDocumentTypeCatalog } from '../services/CollaborativeDocumentTypeCatalog';
 import { askShareToTeam, shareFileToTeam } from '../services/shareToTeamFlow';
@@ -72,10 +73,10 @@ export function CommonFileActions({
       : documentTypeCatalog.resolveShareability(fileName)),
     [catalogRevision, documentTypeCatalog, fileName, isDirectory],
   );
-  // A folder copies to Team only; a markdown file can always go to Personal.
+  // A folder copies to Team only; a file of any type but code can always go to Personal.
   const canCopyToPersonal = !isDirectory
     && shareability.state === 'ready'
-    && shareability.descriptor?.documentType === 'markdown';
+    && personalPageSupportsType(shareability.descriptor?.documentType ?? 'markdown');
   /**
    * Ask, then share. Both halves live in `shareToTeamFlow` so the feedback-request
    * compose path drives the same dialog and the same publish rather than a

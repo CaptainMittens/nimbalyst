@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sessions now form nested trees on desktop and mobile, with drag-to-reassign, Undo, subtree activity summaries, and an optional compact one-line view.
 - Pages: plain pages have a status, owner, summary and tags, and can move between Personal and Team.
 - Pages: swipe two fingers on the trackpad to go Back and Forward.
-- Pages: copy a file from disk into Team or Personal pages with Copy to Pages... in Files or Add from Files... in Pages; agents can import files the same way.
+- Pages: copy a file from disk, including drawings, mind maps and other editor files, into Team or Personal pages with Copy to Pages... in Files or Add from Files... in Pages; agents can import files the same way.
+- Pages: `@` in a Personal page links your Personal pages and embeds Personal drawings and other editor pages; `@` in a local file also lists Team and Personal pages.
 - Agents can edit drawings, mind maps, data models and other editor pages in Pages with those editors' tools, without the page open.
 
 ### Changed

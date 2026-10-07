@@ -84,7 +84,7 @@ describe('agent Set type and the Pages tab strip', () => {
 });
 
 describe('agent createSharedDoc', () => {
-  it('seeds a structured type from its own default when given no content, and keeps Personal pages markdown', async () => {
+  it('seeds a structured type from its own default when given no content, and keeps code out of Personal', async () => {
     const { createCollaborativeDocument } = await import('../../collaborativeDocumentCreationOrchestrator');
     const { getCollaborativeDocumentTypeCatalog } = await import('../../CollaborativeDocumentTypeCatalog');
     vi.mocked(getCollaborativeDocumentTypeCatalog).mockReturnValue({
@@ -100,7 +100,8 @@ describe('agent createSharedDoc', () => {
     await env.createPage('team', session, { ...input, documentType: 'markdown' });
     expect(vi.mocked(createCollaborativeDocument).mock.calls[1]![0].sourceContent).toBe('');
 
-    await expect(env.createPage('personal', session, { ...input, documentType: 'excalidraw' })).rejects.toThrow(/markdown only/);
-    expect(createCollaborativeDocument).toHaveBeenCalledTimes(2);
+    await env.createPage('personal', session, { ...input, documentType: 'excalidraw' });
+    await expect(env.createPage('personal', session, { ...input, documentType: 'code' })).rejects.toThrow(/cannot be a "code" page/);
+    expect(createCollaborativeDocument).toHaveBeenCalledTimes(3);
   });
 });

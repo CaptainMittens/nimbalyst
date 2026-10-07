@@ -13,6 +13,7 @@ import { createPageTool, type PageTreeToolEnv, type PageTreeToolResult } from '@
 import { getFileName } from '../../utils/pathUtils';
 import { splitShareFileName } from '../../components/ShareToTeamDialog/ShareToTeamDialog';
 import { resolveShareDescriptor, shareFileToTeam } from '../shareToTeamFlow';
+import { personalPageSupportsType } from '../personalPageTypes';
 
 export async function importFileToPagesTool(
   env: PageTreeToolEnv,
@@ -28,8 +29,8 @@ export async function importFileToPagesTool(
   if (!resolved.ok) return { success: false, error: resolved.reason };
   const { descriptor } = resolved;
   const section = args.section === 'personal' ? 'personal' : 'team';
-  if (section === 'personal' && descriptor.documentType !== 'markdown') {
-    return { success: false, error: `Personal pages are markdown only; import ${fileName} into the team section.` };
+  if (section === 'personal' && !personalPageSupportsType(descriptor.documentType)) {
+    return { success: false, error: `A Personal page cannot hold ${fileName}; import it into the team section.` };
   }
   const { baseName, suffix } = splitShareFileName(fileName, descriptor);
   const title = typeof args.title === 'string' && args.title.trim() ? args.title.trim() : baseName;

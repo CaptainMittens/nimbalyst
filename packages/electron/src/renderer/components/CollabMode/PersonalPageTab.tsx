@@ -13,6 +13,7 @@ import { historyDialogFileAtom } from '../../store/atoms/historyDialog';
 import { getSharedDocumentDisplayName } from './collabTree';
 import { PersonalPageBodyEditor, personalPageDocumentPath } from './PersonalPageBodyEditor';
 import { CollabPlainPageHeader } from './CollabPlainPageHeader';
+import { PersonalExtensionPageBody } from './PersonalExtensionPageBody';
 import { openPageAncestor } from './pageHeaderNavigation';
 import { useSharedPagePath } from './useSharedPagePath';
 import { usePageMenuItems } from './usePageMenuItems';
@@ -22,36 +23,45 @@ import type { CollabScope } from '@nimbalyst/collab-client/core';
 import { HeaderTableOfContents } from '../TabEditor/HeaderTableOfContents';
 import type { LexicalEditor } from 'lexical';
 
+interface PersonalPageInfo {
+  title: string;
+  /** Null until known: no editor mounts on a body whose type is not known yet. */
+  documentType: string | null;
+  fileExtension?: string | null;
+}
+
 /**
- * The page's live title from the personal pages list (refreshed on every
- * change push). While that list is still empty, a one-time snapshot read, then
- * the tab title, stand in.
+ * The page's live title and type from the personal pages list (refreshed on
+ * every change push). While the page is not in that list yet (still loading,
+ * or just created), a one-time snapshot read, then the tab title, stand in.
  */
-function usePersonalPageTitle(workspacePath: string, documentId: string, fallback: string): string {
+function usePersonalPage(workspacePath: string, documentId: string, fallback: string): PersonalPageInfo {
   const documents = useAtomValue(personalPagesDocumentsAtomFamily(workspacePath));
   const doc = documents.find((d) => d.documentId === documentId);
-  const [title, setTitle] = useState<string | null>(null);
-  const listLoaded = documents.length > 0;
+  const [read, setRead] = useState<{ title?: string; documentType: string; fileExtension?: string | null } | null>(null);
+  const inList = doc !== undefined;
   useEffect(() => {
-    if (listLoaded) return;
+    if (inList) return;
     let cancelled = false;
     (async () => {
       try {
         const snapshot = (await window.electronAPI.invoke('personal-pages:snapshot', workspacePath)) as
-          | { items?: Array<{ documentId: string; title: string }> }
+          | { items?: Array<{ documentId: string; title: string; documentType?: string; fileExtension?: string | null }> }
           | null;
-        const item = snapshot?.items?.find((doc) => doc.documentId === documentId);
-        if (!cancelled && item?.title) setTitle(item.title);
+        const item = snapshot?.items?.find((entry) => entry.documentId === documentId);
+        // A page not stored at all opens the markdown body, which says it is unavailable.
+        if (!cancelled) setRead({ title: item?.title, documentType: item?.documentType ?? 'markdown', fileExtension: item?.fileExtension });
       } catch (error) {
-        console.warn('[PersonalPageTab] Failed to load page title:', error);
+        console.warn('[PersonalPageTab] Failed to load the page:', error);
+        if (!cancelled) setRead({ documentType: 'markdown' });
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [workspacePath, documentId, listLoaded]);
-  if (doc) return getSharedDocumentDisplayName(doc.title, documentId);
-  return title ?? fallback;
+  }, [workspacePath, documentId, inList]);
+  if (doc) return { title: getSharedDocumentDisplayName(doc.title, documentId), documentType: doc.documentType, fileExtension: doc.fileExtension };
+  return { title: read?.title ?? fallback, documentType: read?.documentType ?? null, fileExtension: read?.fileExtension };
 }
 
 export interface PersonalPageTabProps {
@@ -62,7 +72,8 @@ export interface PersonalPageTabProps {
 }
 
 export const PersonalPageTab: React.FC<PersonalPageTabProps> = ({ documentId, workspacePath, fallbackTitle }) => {
-  const title = usePersonalPageTitle(workspacePath, documentId, fallbackTitle);
+  const info = usePersonalPage(workspacePath, documentId, fallbackTitle);
+  const { title } = info;
   const scope = useMemo(() => getPersonalCollabHost(workspacePath).scope, [workspacePath]);
   const page = useSharedPagePath(scope, documentId);
   const openHistory = useSetAtom(historyDialogFileAtom);
@@ -108,13 +119,23 @@ export const PersonalPageTab: React.FC<PersonalPageTabProps> = ({ documentId, wo
         menuItems={menuItems}
         onShowHistory={() => openHistory(personalPageDocumentPath(documentId))}
       />
-      <PersonalPageBodyEditor
-        documentId={documentId}
-        workspacePath={workspacePath}
-        className="flex min-h-0 flex-1 flex-col"
-        documentHeader={documentHeader}
-        onEditorReady={setEditor}
-      />
+      {info.documentType === null ? (
+        <div className="py-4 text-center text-sm text-nim-faint" role="status">Loading...</div>
+      ) : info.documentType === 'markdown' ? (
+        <PersonalPageBodyEditor
+          documentId={documentId}
+          workspacePath={workspacePath}
+          className="flex min-h-0 flex-1 flex-col"
+          documentHeader={documentHeader}
+          onEditorReady={setEditor}
+        />
+      ) : (
+        <PersonalExtensionPageBody
+          documentId={documentId}
+          workspacePath={workspacePath}
+          page={{ title: page.title ?? title, documentType: info.documentType, fileExtension: info.fileExtension }}
+        />
+      )}
     </div>
   );
 };

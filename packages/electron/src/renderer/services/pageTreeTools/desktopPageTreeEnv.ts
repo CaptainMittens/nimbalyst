@@ -24,6 +24,7 @@ import { setPageType } from '../../components/CollabMode/setPageType';
 import { buildSetPageTypeDependencies, type SetPageTypeContext } from '../../components/CollabMode/useSetPageType';
 import { PERSONAL_PAGE_TAB_PREFIX } from '../../contexts/TabsContext';
 import { createCollaborativeDocument } from '../collaborativeDocumentCreationOrchestrator';
+import { personalPageSupportsType } from '../personalPageTypes';
 import { getCollaborativeDocumentTypeCatalog } from '../CollaborativeDocumentTypeCatalog';
 import type { PageTreeSection, PageTreeToolEnv } from '@nimbalyst/collab-client/docs/pageTreeToolCore';
 import { pagesTabStrip, type PagesTabStrip } from './pagesTabStrip';
@@ -90,9 +91,8 @@ export function createDesktopPageTreeEnv(payloadWorkspacePath: string | undefine
     },
 
     createPage: async (section, session: CollabDocsSession, input) => {
-      // A Personal page's body is markdown in the local database; any other type would open as raw text.
-      if (section === 'personal' && input.documentType !== 'markdown') {
-        throw new Error(`Personal pages are markdown only; create a "${input.documentType}" page in the team section.`);
+      if (section === 'personal' && !personalPageSupportsType(input.documentType)) {
+        throw new Error(`A Personal page cannot be a "${input.documentType}" page; create it in the team section.`);
       }
       const catalog = getCollaborativeDocumentTypeCatalog();
       const resolution = catalog.resolveMetadata(input.documentType, catalog.inferFileExtension(input.documentType, input.title));
