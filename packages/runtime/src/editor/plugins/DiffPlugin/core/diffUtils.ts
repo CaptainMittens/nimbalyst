@@ -156,6 +156,7 @@ import {TableDiffHandler} from '../handlers/TableDiffHandler';
 import {CodeBlockDiffHandler} from '../handlers/CodeBlockDiffHandler';
 import {MermaidDiffHandler} from '../handlers/MermaidDiffHandler';
 import {DecisionDiffHandler} from '../handlers/DecisionDiffHandler';
+import {QuadrantDiffHandler} from '../handlers/QuadrantDiffHandler';
 import {preserveCommentMarks} from './preserveCommentMarks';
 import {NodeStructureValidator} from './NodeStructureValidator';
 import {applyParsedDiffToMarkdown} from './standardDiffFormat';
@@ -190,6 +191,7 @@ export function initializeHandlers() {
   diffHandlerRegistry.register(new CodeBlockDiffHandler());
   diffHandlerRegistry.register(new MermaidDiffHandler());
   diffHandlerRegistry.register(new DecisionDiffHandler());
+  diffHandlerRegistry.register(new QuadrantDiffHandler());
   diffHandlerRegistry.register(new ParagraphDiffHandler());
   diffHandlerRegistry.register(new QuoteDiffHandler());
   diffHandlerRegistry.register(new HeadingDiffHandler());

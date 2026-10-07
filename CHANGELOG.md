@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed a crash when stopping an active local database worker.
 - Kept transcript reading position stable when content above the viewport grows.
 - Restored edge styling in Mermaid flowcharts.
+- Agent edits to a 2x2 chart in a markdown file now show in the editor as a reviewable change instead of leaving the old chart in place.
 - Improved MCP connection reliability while tools await a response.
 - Improved reliability of repeated Anthropic chat requests by releasing completed-request listeners.
 - Fixed a tracker crash when a person has no display name.
