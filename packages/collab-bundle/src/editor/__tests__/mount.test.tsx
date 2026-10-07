@@ -310,6 +310,31 @@ describe('in-memory collaborative editor harness', () => {
     stopOpener();
   });
 
+  it('opens a link to another page through the host in this tab, and a Cmd+click in a new browser tab', async () => {
+    const href = 'https://console.nimbalyst.com/org/o1/project/p1/document/d2';
+    const yDocument = new Y.Doc();
+    MarkdownCollabContentAdapter.seedFromFile(yDocument, `See [Launch Plan](${href}).`);
+    const element = globalThis.document.createElement('div');
+    globalThis.document.body.append(element);
+    const opened: string[] = [];
+    const stopOpener = setConsoleLinkOpener((link) => { opened.push(link); return true; });
+    const windowOpen = vi.spyOn(window, 'open').mockReturnValue(null);
+    const handle = mountCollabEditor({ element, source: { kind: 'in-memory', document: yDocument }, user: { memberId: asTeamMemberId('member'), name: 'Member' } });
+    mountedHandles.push(handle);
+    await settle();
+
+    const anchor = element.querySelector<HTMLAnchorElement>(`a[href="${href}"]`)!;
+    fireEvent.click(anchor);
+    expect(opened).toEqual([href]);
+    expect(windowOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(anchor, { metaKey: true });
+    expect(opened).toEqual([href]);
+    expect(windowOpen).toHaveBeenCalledWith(href, '_blank', 'noopener,noreferrer');
+    windowOpen.mockRestore();
+    stopOpener();
+  });
+
   it('carries no formatting toolbar and applies the browser-host chrome', async () => {
     const yDocument = new Y.Doc();
     MarkdownCollabContentAdapter.seedFromFile(yDocument, 'Chrome marker');

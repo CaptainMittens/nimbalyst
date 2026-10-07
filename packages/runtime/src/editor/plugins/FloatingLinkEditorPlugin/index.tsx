@@ -48,6 +48,7 @@ import {getSelectedNode} from '../../utils/getSelectedNode';
 import {sanitizeUrl} from '../../utils/url';
 import {
   isWorkspaceFileHref,
+  openLinkWithHost,
   openWorkspaceFileLink,
 } from '../../utils/workspaceLinkNavigation';
 
@@ -151,12 +152,23 @@ export function isPointInHoverZone(
  * never reach `window.open`, which in Electron resolves them against the
  * renderer origin and spawns a blank window (NIM-1487).
  */
-export function openLinkUrl(url: string, documentPath: string | null): void {
+export function openLinkUrl(
+  url: string,
+  documentPath: string | null,
+  options: {newTab: boolean} = {newTab: false},
+): void {
   if (isWorkspaceFileHref(url)) {
     openWorkspaceFileLink(url, documentPath);
     return;
   }
+  if (openLinkWithHost(url, options)) {
+    return;
+  }
   window.open(sanitizeUrl(url), '_blank', 'noopener,noreferrer');
+}
+
+function isNewTabClick(event: MouseEvent | React.MouseEvent): boolean {
+  return event.button === 1 || event.metaKey || event.ctrlKey;
 }
 
 function preventDefault(event: React.MouseEvent<HTMLElement>): void {
@@ -366,7 +378,7 @@ export default function FloatingLinkEditorPlugin({
       }
       clearHoverTimers();
       setHoverKey(null);
-      openLinkUrl(url, documentPathRef.current);
+      openLinkUrl(url, documentPathRef.current, {newTab: isNewTabClick(event)});
     };
 
     return editor.registerRootListener((rootElement, prevRootElement) => {
@@ -677,7 +689,9 @@ export default function FloatingLinkEditorPlugin({
                 event.preventDefault();
                 clearHoverTimers();
                 setHoverKey(null);
-                openLinkUrl(activeUrl, documentPathRef.current);
+                openLinkUrl(activeUrl, documentPathRef.current, {
+                  newTab: isNewTabClick(event),
+                });
               }}>
               {activeUrl}
             </a>

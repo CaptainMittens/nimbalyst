@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restored edge styling in Mermaid flowcharts.
 - Agent edits to a 2x2 chart in a markdown file now show in the editor as a reviewable change instead of leaving the old chart in place.
 - Improved MCP connection reliability while tools await a response.
+- In the web console, clicking a link to another page in Pages opens it in the current tab; Cmd/Ctrl+click opens a new tab.
 - Improved reliability of repeated Anthropic chat requests by releasing completed-request listeners.
 - Fixed a tracker crash when a person has no display name.
 - Reduced startup time spent re-reading settings while scanning extensions and resolving teams.
