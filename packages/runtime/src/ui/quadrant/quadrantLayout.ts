@@ -28,6 +28,8 @@ export interface PlacedLabel {
   ty: number;
   anchor: 'start' | 'middle' | 'end';
   text: string;
+  /** A line from the dot to a label that had to sit away from it. */
+  leader?: { x1: number; y1: number; x2: number; y2: number };
 }
 
 export interface QuadrantLayout {
@@ -130,23 +132,25 @@ export function layoutQuadrant(
     const above = cy - 6 - LINE;
     const below = cy + 7;
     const level = cy - LINE / 2;
-    const raw: Rect[] = [
-      { x: cx + DOT_GAP, y: level, w, h: LINE },
-      { x: cx - DOT_GAP - w, y: level, w, h: LINE },
-      { x: cx - w / 2, y: above, w, h: LINE },
-      { x: cx - w / 2, y: below, w, h: LINE },
-      { x: cx + 2, y: above, w, h: LINE },
-      { x: cx - 2 - w, y: above, w, h: LINE },
-      { x: cx + 2, y: below, w, h: LINE },
-      { x: cx - 2 - w, y: below, w, h: LINE },
-      { x: cx - w / 2, y: above - LINE, w, h: LINE },
-      { x: cx - w / 2, y: below + LINE, w, h: LINE },
+    // Each spot aligns the text toward the dot, so a width estimate that is
+    // off (no font metrics headless) never opens a gap between dot and label.
+    const raw: Array<{ box: Rect; anchor: PlacedLabel['anchor'] }> = [
+      { box: { x: cx + DOT_GAP, y: level, w, h: LINE }, anchor: 'start' },
+      { box: { x: cx - DOT_GAP - w, y: level, w, h: LINE }, anchor: 'end' },
+      { box: { x: cx - w / 2, y: above, w, h: LINE }, anchor: 'middle' },
+      { box: { x: cx - w / 2, y: below, w, h: LINE }, anchor: 'middle' },
+      { box: { x: cx + 2, y: above, w, h: LINE }, anchor: 'start' },
+      { box: { x: cx - 2 - w, y: above, w, h: LINE }, anchor: 'end' },
+      { box: { x: cx + 2, y: below, w, h: LINE }, anchor: 'start' },
+      { box: { x: cx - 2 - w, y: below, w, h: LINE }, anchor: 'end' },
+      { box: { x: cx - w / 2, y: above - LINE, w, h: LINE }, anchor: 'middle' },
+      { box: { x: cx - w / 2, y: below + LINE, w, h: LINE }, anchor: 'middle' },
     ];
     // Judged where each label will really sit: pushed inside the chart.
     const options = raw.map((candidate, index) => {
-      const box = clampInto(candidate);
-      const drift = Math.abs(box.x - candidate.x) + Math.abs(box.y - candidate.y);
-      return { box, bias: drift * 2 + index * 2 };
+      const box = clampInto(candidate.box);
+      const drift = Math.abs(box.x - candidate.box.x) + Math.abs(box.y - candidate.box.y);
+      return { box, anchor: candidate.anchor, bias: drift * 2 + index * 2 };
     });
     return { point, cx, cy, text, options, choice: 0 };
   });
@@ -185,9 +189,17 @@ export function layoutQuadrant(
   }
   for (let pass = 0; pass < 4; pass += 1) for (const index of order) pick(index);
 
-  const placed = labelled.map(({ point, cx, cy, text, options, choice }) => {
-    const box = options[choice].box;
-    return { point, cx, cy, tx: box.x, ty: box.y + QUADRANT_BASELINE, anchor: 'start' as const, text };
+  const placed = labelled.map(({ point, cx, cy, text, options, choice }): PlacedLabel => {
+    const { box, anchor } = options[choice];
+    const tx = anchor === 'start' ? box.x : anchor === 'end' ? box.x + box.w : box.x + box.w / 2;
+    // Nearest point of the label box to the dot; far enough away earns a leader.
+    const nx = Math.min(Math.max(cx, box.x), box.x + box.w);
+    const ny = Math.min(Math.max(cy, box.y), box.y + box.h);
+    const gap = Math.hypot(nx - cx, ny - cy);
+    const leader = gap > DOT_GAP + 6
+      ? { x1: cx + ((nx - cx) / gap) * 5, y1: cy + ((ny - cy) / gap) * 5, x2: nx, y2: ny }
+      : undefined;
+    return { point, cx, cy, tx, ty: box.y + QUADRANT_BASELINE, anchor, text, ...(leader ? { leader } : {}) };
   });
 
   return { plot, xLines, yLines, corners, points: placed };

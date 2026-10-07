@@ -379,7 +379,7 @@ Companion app; pairs with a desktop over encrypted sync. Voice mode is not inclu
 
 ## Shared Links
 
-- Share markdown files as E2E encrypted links
+- Share markdown files as E2E encrypted links; 2x2 charts and Mermaid diagrams render as images (other editor blocks show as their markdown)
 - Share AI sessions as encrypted links
 - Expiration options: 1/7/30 days
 - Account-attributed shared links management in Account settings, plus an explicit create-share account picker defaulted from the workspace binding

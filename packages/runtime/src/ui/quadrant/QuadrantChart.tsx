@@ -100,7 +100,7 @@ export function QuadrantChart({
             {corner.text}
           </text>
         ))}
-        {layout.points.map(({ point, cx, cy, tx, ty, anchor, text }) => {
+        {layout.points.map(({ point, cx, cy, tx, ty, anchor, text, leader }) => {
           const open = !point.pinned && onOpenPoint ? () => onOpenPoint(point.id) : undefined;
           const color = point.pinned ? 'var(--nim-primary)' : 'var(--nim-text-muted)';
           return (
@@ -111,6 +111,7 @@ export function QuadrantChart({
               onClick={open}
             >
               <title>{`${point.label} (${point.x}, ${point.y})`}</title>
+              {leader ? <line x1={leader.x1} y1={leader.y1} x2={leader.x2} y2={leader.y2} style={{ stroke: color, strokeWidth: 1, opacity: 0.5 }} /> : null}
               <circle cx={cx} cy={cy} r={point.pinned ? 5 : 3.5} style={{ fill: color }} />
               <text
                 x={tx}
