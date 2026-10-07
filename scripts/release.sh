@@ -24,7 +24,7 @@ CURRENT_VERSION=$(node -p "require('./package.json').version")
 echo "Current version: $CURRENT_VERSION"
 
 # Bump version
-pnpm version $RELEASE_TYPE --no-git-tag-version
+pnpm version $RELEASE_TYPE --no-git-tag-version --no-git-checks
 
 # Get new version
 NEW_VERSION=$(node -p "require('./package.json').version")
