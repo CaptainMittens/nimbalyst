@@ -1,113 +1,152 @@
 /**
  * The 2x2 drawing, shared by the static fenced block and the query view.
- * Scales with its container (viewBox); colors come from `--nim-*` variables so
- * it follows the theme.
+ * Drawn at its frame's real pixel size so text stays at a fixed size (a
+ * scaled viewBox blew labels up on wide pages). The frame fills its
+ * container's width and takes `height`. Label placement lives in
+ * `quadrantLayout.ts`. Colors come from `--nim-*` variables so it follows
+ * the theme.
  */
 
-import React, { useMemo, type JSX } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState, type JSX, type MutableRefObject } from 'react';
 
+import type { QuadrantLabels, QuadrantPoint } from '../../core/quadrantModel';
 import {
-  quadrantFraction,
-  quadrantRange,
-  type QuadrantLabels,
-  type QuadrantPoint,
-} from '../../core/quadrantModel';
+  estimateTextWidth,
+  layoutQuadrant,
+  QUADRANT_FONT,
+  QUADRANT_LINE as LINE,
+  QUADRANT_PINNED_FONT,
+  type MeasureText,
+} from './quadrantLayout';
 
-const WIDTH = 430;
-const HEIGHT = 250;
-const PAD = { left: 26, right: 10, top: 10, bottom: 26 };
+export const DEFAULT_QUADRANT_HEIGHT = 360;
+const FALLBACK_WIDTH = 640;
 /** Top-left, top-right, bottom-left, bottom-right, as in the mockup. */
 const QUADRANT_COLORS = ['var(--nim-purple)', 'var(--nim-success)', 'var(--nim-warning)', 'var(--nim-primary)'];
 
 export interface QuadrantChartProps extends QuadrantLabels {
   points: readonly QuadrantPoint[];
+  /** Drawing height in px; the width follows the container. */
+  height?: number;
+  /** The sized frame, for a container that measures it. */
+  frameRef?: MutableRefObject<HTMLDivElement | null>;
   /** Opens an item's page when a query point is clicked. */
   onOpenPoint?: (id: string) => void;
 }
 
-export function QuadrantChart({ points, xLabel, yLabel, quadrants, onOpenPoint }: QuadrantChartProps): JSX.Element {
-  const plot = { x: PAD.left, y: PAD.top, w: WIDTH - PAD.left - PAD.right, h: HEIGHT - PAD.top - PAD.bottom };
-  const placed = useMemo(() => {
-    const xRange = quadrantRange(points.map((point) => point.x));
-    const yRange = quadrantRange(points.map((point) => point.y));
-    return points.map((point) => {
-      const fx = quadrantFraction(point.x, xRange);
-      return {
-        point,
-        cx: plot.x + fx * plot.w,
-        cy: plot.y + (1 - quadrantFraction(point.y, yRange)) * plot.h,
-        // Labels flip to the left of points in the right fifth so they stay inside.
-        anchorEnd: fx > 0.8,
-      };
-    });
-    // plot is derived from constants.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points]);
-  const corners = [
-    { x: plot.x + 4, y: plot.y + 12, anchor: 'start' },
-    { x: plot.x + plot.w - 4, y: plot.y + 12, anchor: 'end' },
-    { x: plot.x + 4, y: plot.y + plot.h - 5, anchor: 'start' },
-    { x: plot.x + plot.w - 4, y: plot.y + plot.h - 5, anchor: 'end' },
-  ] as const;
+let canvasContext: CanvasRenderingContext2D | null | undefined;
+const measureText: MeasureText = (text, fontSize, bold) => {
+  if (canvasContext === undefined) {
+    try {
+      canvasContext = typeof document === 'undefined' ? null : document.createElement('canvas').getContext('2d');
+    } catch {
+      canvasContext = null;
+    }
+  }
+  if (!canvasContext) return estimateTextWidth(text, fontSize, bold);
+  const family = typeof document === 'undefined' ? 'sans-serif' : getComputedStyle(document.body).fontFamily || 'sans-serif';
+  canvasContext.font = `${bold ? 600 : 400} ${fontSize}px ${family}`;
+  return canvasContext.measureText(text).width;
+};
+
+export function QuadrantChart({
+  points, xLabel, yLabel, quadrants, height: frameHeight = DEFAULT_QUADRANT_HEIGHT, frameRef, onOpenPoint,
+}: QuadrantChartProps): JSX.Element {
+  const ownRef = useRef<HTMLDivElement | null>(null);
+  const wrapRef = frameRef ?? ownRef;
+  const [{ width, height }, setSize] = useState({ width: FALLBACK_WIDTH, height: frameHeight });
+  useLayoutEffect(() => {
+    const element = wrapRef.current;
+    if (!element) return;
+    const read = () => {
+      const next = { width: element.clientWidth, height: element.clientHeight };
+      if (next.width <= 0 || next.height <= 0) return;
+      setSize((prev) => (prev.width === next.width && prev.height === next.height ? prev : next));
+    };
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [wrapRef]);
+
+  const layout = useMemo(
+    () => layoutQuadrant(width, height, points, { xLabel, yLabel, quadrants }, measureText),
+    [width, height, points, xLabel, yLabel, quadrants],
+  );
+  const { plot } = layout;
+  const yCenter = plot.y + plot.h / 2;
 
   return (
-    <svg
-      className="quadrant-chart block h-auto w-full select-none"
-      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-      role="img"
-      aria-label={[yLabel, xLabel].filter(Boolean).join(' by ') || '2x2 chart'}
-      data-testid="quadrant-chart"
+    <div
+      ref={wrapRef}
+      className="quadrant-chart-frame w-full overflow-hidden"
+      style={{ height: `${frameHeight}px` }}
     >
-      <line x1={plot.x + plot.w / 2} y1={plot.y} x2={plot.x + plot.w / 2} y2={plot.y + plot.h} style={{ stroke: 'var(--nim-border)' }} />
-      <line x1={plot.x} y1={plot.y + plot.h / 2} x2={plot.x + plot.w} y2={plot.y + plot.h / 2} style={{ stroke: 'var(--nim-border)' }} />
-      <rect x={plot.x} y={plot.y} width={plot.w} height={plot.h} fill="none" style={{ stroke: 'var(--nim-border)' }} />
-      {(quadrants ?? []).slice(0, 4).map((text, index) => text ? (
-        <text key={index} x={corners[index].x} y={corners[index].y} fontSize={10} textAnchor={corners[index].anchor} style={{ fill: QUADRANT_COLORS[index] }}>
-          {text}
-        </text>
-      ) : null)}
-      {placed.map(({ point, cx, cy, anchorEnd }) => {
-        const open = !point.pinned && onOpenPoint ? () => onOpenPoint(point.id) : undefined;
-        const color = point.pinned ? 'var(--nim-primary)' : 'var(--nim-text-muted)';
-        return (
-          <g
-            key={point.id}
-            className={open ? 'quadrant-chart-point cursor-pointer' : 'quadrant-chart-point'}
-            data-pinned={point.pinned ? 'true' : undefined}
-            onClick={open}
-          >
-            <title>{`${point.label} (${point.x}, ${point.y})`}</title>
-            <circle cx={cx} cy={cy} r={point.pinned ? 5 : 3.5} style={{ fill: color }} />
-            <text
-              x={anchorEnd ? cx - 7 : cx + 7}
-              y={cy + 4}
-              fontSize={point.pinned ? 11 : 10}
-              fontWeight={point.pinned ? 600 : undefined}
-              textAnchor={anchorEnd ? 'end' : 'start'}
-              style={{ fill: color }}
+      <svg
+        className="quadrant-chart block select-none"
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={[yLabel, xLabel].filter(Boolean).join(' by ') || '2x2 chart'}
+        data-testid="quadrant-chart"
+      >
+        <line x1={plot.x + plot.w / 2} y1={plot.y} x2={plot.x + plot.w / 2} y2={plot.y + plot.h} style={{ stroke: 'var(--nim-border)' }} />
+        <line x1={plot.x} y1={yCenter} x2={plot.x + plot.w} y2={yCenter} style={{ stroke: 'var(--nim-border)' }} />
+        <rect x={plot.x} y={plot.y} width={plot.w} height={plot.h} fill="none" style={{ stroke: 'var(--nim-border)' }} />
+        {layout.corners.map((corner, index) => (
+          <text key={index} x={corner.x} y={corner.y} fontSize={QUADRANT_FONT} textAnchor={corner.anchor} style={{ fill: QUADRANT_COLORS[index] }}>
+            {corner.text}
+          </text>
+        ))}
+        {layout.points.map(({ point, cx, cy, tx, ty, anchor, text }) => {
+          const open = !point.pinned && onOpenPoint ? () => onOpenPoint(point.id) : undefined;
+          const color = point.pinned ? 'var(--nim-primary)' : 'var(--nim-text-muted)';
+          return (
+            <g
+              key={point.id}
+              className={open ? 'quadrant-chart-point cursor-pointer' : 'quadrant-chart-point'}
+              data-pinned={point.pinned ? 'true' : undefined}
+              onClick={open}
             >
-              {point.label}
-            </text>
-          </g>
-        );
-      })}
-      {xLabel ? (
-        <text x={plot.x + plot.w / 2} y={HEIGHT - 8} fontSize={10} textAnchor="middle" style={{ fill: 'var(--nim-text-faint)' }}>
-          {xLabel}
-        </text>
-      ) : null}
-      {yLabel ? (
-        <text
-          x={10}
-          y={plot.y + plot.h / 2}
-          fontSize={10}
-          textAnchor="middle"
-          transform={`rotate(-90 10 ${plot.y + plot.h / 2})`}
-          style={{ fill: 'var(--nim-text-faint)' }}
-        >
-          {yLabel}
-        </text>
-      ) : null}
-    </svg>
+              <title>{`${point.label} (${point.x}, ${point.y})`}</title>
+              <circle cx={cx} cy={cy} r={point.pinned ? 5 : 3.5} style={{ fill: color }} />
+              <text
+                x={tx}
+                y={ty}
+                fontSize={point.pinned ? QUADRANT_PINNED_FONT : QUADRANT_FONT}
+                fontWeight={point.pinned ? 600 : undefined}
+                textAnchor={anchor}
+                style={{ fill: color }}
+              >
+                {text}
+              </text>
+            </g>
+          );
+        })}
+        {layout.xLines.length ? (
+          <text x={plot.x + plot.w / 2} y={plot.y + plot.h + LINE + 5} fontSize={QUADRANT_FONT} textAnchor="middle" style={{ fill: 'var(--nim-text-faint)' }}>
+            {layout.xLines.map((line, index) => (
+              <tspan key={index} x={plot.x + plot.w / 2} dy={index === 0 ? 0 : LINE}>{line}</tspan>
+            ))}
+          </text>
+        ) : null}
+        {layout.yLines.length ? (
+          <text
+            x={plot.x - 8 - (layout.yLines.length - 1) * LINE}
+            y={yCenter}
+            fontSize={QUADRANT_FONT}
+            textAnchor="middle"
+            transform={`rotate(-90 ${plot.x - 8 - (layout.yLines.length - 1) * LINE} ${yCenter})`}
+            style={{ fill: 'var(--nim-text-faint)' }}
+          >
+            {layout.yLines.map((line, index) => (
+              <tspan key={index} x={plot.x - 8 - (layout.yLines.length - 1) * LINE} dy={index === 0 ? 0 : LINE}>{line}</tspan>
+            ))}
+          </text>
+        ) : null}
+      </svg>
+    </div>
   );
 }

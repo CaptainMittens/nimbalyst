@@ -1050,7 +1050,11 @@ i.page-break,
   background-color: color-mix(in srgb, var(--nim-primary) 10%, transparent);
 }
 
-.editor-shell .editor-image .image-resizer {
+.block-resizer-wrapper--resizing {
+  touch-action: none;
+}
+
+.editor-shell .block-resizer {
   display: block;
   width: 7px;
   height: 7px;
@@ -1059,49 +1063,49 @@ i.page-break,
   border: 1px solid var(--nim-bg);
 }
 
-.editor-shell .editor-image .image-resizer.image-resizer-n {
+.editor-shell .block-resizer.block-resizer-n {
   top: -6px;
   left: 48%;
   cursor: n-resize;
 }
 
-.editor-shell .editor-image .image-resizer.image-resizer-ne {
+.editor-shell .block-resizer.block-resizer-ne {
   top: -6px;
   right: -6px;
   cursor: ne-resize;
 }
 
-.editor-shell .editor-image .image-resizer.image-resizer-e {
+.editor-shell .block-resizer.block-resizer-e {
   bottom: 48%;
   right: -6px;
   cursor: e-resize;
 }
 
-.editor-shell .editor-image .image-resizer.image-resizer-se {
+.editor-shell .block-resizer.block-resizer-se {
   bottom: -2px;
   right: -6px;
   cursor: nwse-resize;
 }
 
-.editor-shell .editor-image .image-resizer.image-resizer-s {
+.editor-shell .block-resizer.block-resizer-s {
   bottom: -2px;
   left: 48%;
   cursor: s-resize;
 }
 
-.editor-shell .editor-image .image-resizer.image-resizer-sw {
+.editor-shell .block-resizer.block-resizer-sw {
   bottom: -2px;
   left: -6px;
   cursor: sw-resize;
 }
 
-.editor-shell .editor-image .image-resizer.image-resizer-w {
+.editor-shell .block-resizer.block-resizer-w {
   bottom: 48%;
   left: -6px;
   cursor: w-resize;
 }
 
-.editor-shell .editor-image .image-resizer.image-resizer-nw {
+.editor-shell .block-resizer.block-resizer-nw {
   top: -6px;
   left: -6px;
   cursor: nw-resize;

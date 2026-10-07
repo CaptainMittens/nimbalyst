@@ -4,7 +4,7 @@ import { $convertFromMarkdownString, $convertToMarkdownString } from '@lexical/m
 import { $getRoot } from 'lexical';
 import { describe, expect, it } from 'vitest';
 
-import { parseQuadrantFence } from '../quadrantFence';
+import { parseQuadrantFence, setQuadrantFenceSize } from '../quadrantFence';
 import { $isQuadrantNode, QuadrantNode } from '../QuadrantNodeCore';
 import { QUADRANT_TRANSFORMER } from '../QuadrantTransformer';
 import HeadlessBodyNodes from '../../../nodes/headlessBodyNodes';
@@ -36,6 +36,15 @@ describe('2x2 fence', () => {
       ],
       skipped: 1,
     });
+  });
+
+  it('keeps a dragged size as `width:`/`height:` lines; no width means fill the column', () => {
+    const body = 'x: Low -> High\n- A: 0.1, 0.2';
+    const sized = setQuadrantFenceSize(body, { width: 520.4, height: 433.6 });
+    expect(sized).toBe('x: Low -> High\nwidth: 520\nheight: 434\n- A: 0.1, 0.2');
+    expect(parseQuadrantFence(sized)).toMatchObject({ width: 520, height: 434 });
+    expect(setQuadrantFenceSize(sized, { width: null, height: 300 })).toBe('x: Low -> High\nheight: 300\n- A: 0.1, 0.2');
+    expect(parseQuadrantFence('height: 5').height).toBe(200);
   });
 
   it('round-trips its markdown exactly through the node', () => {
