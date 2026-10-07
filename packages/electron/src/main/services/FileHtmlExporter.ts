@@ -16,7 +16,7 @@ import { Marked, type Tokens } from 'marked';
 import hljs from 'highlight.js';
 import * as fs from 'fs';
 import * as path from 'path';
-import { parseQuadrantFence } from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/quadrantFence';
+import { parseQuadrantFence } from '@nimbalyst/runtime/core/quadrantFence';
 import { quadrantSvgMarkup } from '@nimbalyst/runtime/ui/quadrant/quadrantSvg';
 
 // ---------------------------------------------------------------------------
