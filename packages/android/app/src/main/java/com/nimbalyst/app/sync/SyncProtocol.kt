@@ -294,10 +294,12 @@ data class ServerSessionEntry(
     val encryptedClientMetadata: String? = null,
     val clientMetadataIv: String? = null,
     val lastReadAt: Long? = null,
-    // Local decode metadata, never serialized as wire fields.
-    @Transient var parentSessionIdPresent: Boolean = false,
-    @Transient var createdBySessionIdPresent: Boolean = false,
-)
+) {
+    // Local decode metadata, never serialized as wire fields. Declared in the
+    // body so it stays out of equals/hashCode/copy.
+    @Transient var parentSessionIdPresent: Boolean = false
+    @Transient var createdBySessionIdPresent: Boolean = false
+}
 
 data class ClientMetadata(
     val currentContext: ContextInfo? = null,

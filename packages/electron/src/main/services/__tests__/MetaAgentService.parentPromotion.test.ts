@@ -107,6 +107,9 @@ describe('MetaAgentService parent agent_role promotion (NIM-858)', () => {
     vi.mocked(AISessionsRepository.create).mockReset();
     vi.mocked(AISessionsRepository.get).mockReset();
     vi.mocked(AISessionsRepository.updateMetadata).mockReset();
+    // These tests assert on the real queue path; vitest sets NODE_ENV=test
+    // (unless the shell already set it), which would take the synthetic bypass.
+    vi.spyOn(MetaAgentService.prototype as any, 'shouldBypassChildAgentExecutionForTests').mockReturnValue(false);
   });
 
   it('does NOT promote a standard parent to meta-agent when it spawns a child', async () => {
