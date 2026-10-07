@@ -143,7 +143,7 @@ Env: `NIM_SERVER` (default `https://sync.nimbalyst.com`; `http://` only for loca
 ## Develop
 
 ```
-npm run build       # tsc -> dist/
-npm run typecheck
-npm test            # vitest (DirectGateway fixture tests)
+pnpm run build       # tsc -> dist/
+pnpm run typecheck
+pnpm test            # vitest (DirectGateway fixture tests)
 ```

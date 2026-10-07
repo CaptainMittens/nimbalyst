@@ -6,8 +6,8 @@ The initial Android package scaffold supports these checks:
 
 ```bash
 cd packages/android
-npm run build:transcript
-npm run sync:transcript-assets
+pnpm run build:transcript
+pnpm run sync:transcript-assets
 ./gradlew :app:assembleDebug
 ./gradlew :app:testDebugUnitTest
 ```

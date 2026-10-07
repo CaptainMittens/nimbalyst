@@ -1,26 +1,50 @@
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { minimatch } from 'minimatch';
 import { ElectronFileSystemService } from '../ElectronFileSystemService';
 import { buildExtensionFindFilesPlan } from '../../ipc/extensionFindFilesPlan';
 
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { resolve, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 
 vi.mock('../../utils/logger', () => ({ logger: { ai: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } } }));
 vi.mock('../ripgrepPath', () => ({ getRipgrepPath: () => '/unused-in-file-list-test' }));
 
-// Exercise the real installed leaf behind every distinct minimatch parent line.
+// Every installed copy of an unscoped package, found by walking the installed
+// trees so the list follows the package manager's layout instead of hardcoding it.
+function installedCopies(name: string): string[] {
+  const found = new Map<string, string>();
+  const visit = (nodeModules: string, depth: number) => {
+    if (depth > 8 || !existsSync(nodeModules)) return;
+    for (const entry of readdirSync(nodeModules, { withFileTypes: true })) {
+      if (entry.name.startsWith('.') || !(entry.isDirectory() || entry.isSymbolicLink())) continue;
+      const dirs = entry.name.startsWith('@')
+        ? readdirSync(join(nodeModules, entry.name)).map(child => join(nodeModules, entry.name, child))
+        : [join(nodeModules, entry.name)];
+      for (const dir of dirs) {
+        if (entry.name === name && existsSync(join(dir, 'package.json'))) {
+          found.set(realpathSync(dir), relative(process.cwd(), dir));
+        }
+        if (!entry.isSymbolicLink()) visit(join(dir, 'node_modules'), depth + 1);
+      }
+    }
+  };
+  const owners = ['.', ...['packages', 'packages/extensions'].flatMap(parent =>
+    readdirSync(resolve(parent)).map(child => join(parent, child)))];
+  for (const owner of owners) visit(resolve(owner, 'node_modules'), 0);
+  return [...found.values()].sort();
+}
+
+// Exercise the real installed leaf behind every distinct minimatch copy.
 // Hostile patterns run only in disposable, heap/time/output-bounded Node children.
-const callers = [
-  'node_modules/dir-compare/node_modules/minimatch',
-  'node_modules/filelist/node_modules/minimatch',
-  'node_modules/@electron/universal/node_modules/minimatch',
-  'node_modules/@vue/language-core/node_modules/minimatch',
-  'node_modules/minimatch',
-];
+const callers = installedCopies('minimatch');
+
+it('finds the installed minimatch copies', () => {
+  expect(callers.length).toBeGreaterThan(1);
+});
 const fixtures = [
   ['comma groups', "'{' + '{a},'.repeat(8000) + 'b}'"],
   ['array append', "'{{x},' + 'a,'.repeat(130000) + 'b}'"],

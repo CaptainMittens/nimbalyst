@@ -123,6 +123,18 @@ const trackerCoreSrcDir = resolve(__dirname, '../tracker-core/src');
 const collabProtocolSrcDir = resolve(__dirname, '../collab-protocol/src');
 const runtimeSrcDir = resolve(__dirname, '../runtime/src');
 const configRequire = createRequire(resolve(__dirname, 'package.json'));
+
+// Locates a file inside an installed package the way Node would from this
+// package, bypassing the package's `exports` map (several of these do not
+// export the asset we copy). Throws so a missing asset fails the build instead
+// of shipping an app without it.
+function installedPackageFile(pkg: string, file: string): string {
+  for (const dir of configRequire.resolve.paths(pkg) ?? []) {
+    const candidate = resolve(dir, pkg, file);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  throw new Error(`[electron.vite.config] ${pkg}/${file} is not installed`);
+}
 const browserPath = configRequire.resolve('path-browserify/index.js');
 const browserProcess = configRequire.resolve('process/browser.js');
 const runtimeDistDir = resolve(__dirname, '../runtime/dist');
@@ -488,15 +500,11 @@ const config = {
           targets.push({ src: toPosix(resolve(onboardingDir, '*')), dest: 'onboarding', overwrite: true });
         }
         // Copy es-module-shims for extension loading (enables dynamic import maps)
-        const esModuleShims = resolve(__dirname, '../../node_modules/es-module-shims/dist/es-module-shims.js');
-        if (fs.existsSync(esModuleShims)) {
-          targets.push({ src: toPosix(esModuleShims), dest: '', overwrite: true });
-        }
+        const esModuleShims = installedPackageFile('es-module-shims', 'dist/es-module-shims.js');
+        targets.push({ src: toPosix(esModuleShims), dest: '', overwrite: true });
         // Copy ghostty-web WASM file for terminal emulation
-        const ghosttyWasm = resolve(__dirname, '../../node_modules/ghostty-web/ghostty-vt.wasm');
-        if (fs.existsSync(ghosttyWasm)) {
-          targets.push({ src: toPosix(ghosttyWasm), dest: '', overwrite: true });
-        }
+        const ghosttyWasm = installedPackageFile('ghostty-web', 'ghostty-vt.wasm');
+        targets.push({ src: toPosix(ghosttyWasm), dest: '', overwrite: true });
         // Copy prismjs core so index.html can load it as a classic <script>
         // BEFORE any ESM module evaluates. Vite/esbuild's prebundling of
         // @lexical/code (which transitively imports @lexical/code-prism) ends
@@ -504,10 +512,8 @@ const config = {
         // before prismjs main, which the language files need to have set
         // `window.Prism`. Loading prismjs as a classic script in the HTML
         // sidesteps the reorder.
-        const prismCore = resolve(__dirname, '../../node_modules/prismjs/prism.js');
-        if (fs.existsSync(prismCore)) {
-          targets.push({ src: toPosix(prismCore), dest: '', overwrite: true });
-        }
+        const prismCore = installedPackageFile('prismjs', 'prism.js');
+        targets.push({ src: toPosix(prismCore), dest: '', overwrite: true });
         return viteStaticCopy({ targets });
       })()
     ].filter(Boolean),

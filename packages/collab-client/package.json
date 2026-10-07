@@ -98,11 +98,11 @@
   },
   "dependencies": {
     "@floating-ui/react": "^0.27.19",
-    "@nimbalyst/collab-protocol": "*",
-    "@nimbalyst/tracker-schema": "0.1.0",
-    "@nimbalyst/tracker-engine": "0.1.0",
-    "@nimbalyst/runtime": "*",
-    "@nimbalyst/tracker-core": "*",
+    "@nimbalyst/collab-protocol": "workspace:*",
+    "@nimbalyst/tracker-schema": "workspace:*",
+    "@nimbalyst/tracker-engine": "workspace:*",
+    "@nimbalyst/runtime": "workspace:*",
+    "@nimbalyst/tracker-core": "workspace:*",
     "jotai": "^2.16.1",
     "jotai-family": "^1.1.0"
   },

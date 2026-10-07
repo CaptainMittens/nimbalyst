@@ -57,7 +57,7 @@ This command will:
 
 After approving the release notes, the command will run `./scripts/release.sh` which:
 1. Bumps version in `package.json`
-2. Updates `package-lock.json`
+2. Updates `pnpm-lock.yaml`
 3. Moves [Unreleased] notes to new version section in CHANGELOG.md
 4. Creates a commit with release notes
 5. Creates an annotated git tag with release notes

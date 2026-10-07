@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, lstatSync, readlinkSync, writeFileSync, rmSy
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { npmSpawnConfig } from './run-workspace-script.mjs';
+import { shimSpawnConfig } from './package-manager.mjs';
 
 const markerName = '.nimbalyst-install.json';
 const hash = (value) => createHash('sha256').update(value).digest('hex');
@@ -32,7 +32,9 @@ export function installedDigest(directory) {
 }
 
 export function ensureSandboxDependencies(directory, install = () => {
-  const { command, argsPrefix } = npmSpawnConfig();
+  // The sandbox package is outside the pnpm workspace and keeps its own
+  // package-lock.json, so it installs with npm.
+  const { command, argsPrefix } = shimSpawnConfig('npm');
   const result = spawnSync(command, [...argsPrefix, 'ci', '--workspaces=false', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: directory, stdio: 'inherit' });
   if (result.error || result.status !== 0) throw result.error ?? new Error(`Sandbox npm ci exited ${result.status}`);
 }) {

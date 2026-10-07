@@ -32,7 +32,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@nimbalyst/runtime": "*",
+    "@nimbalyst/runtime": "workspace:*",
     "better-sqlite3": "13.0.3",
     "uuid": "^14.0.0"
   },

@@ -42,13 +42,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "pnpm run build"
   },
   "dependencies": {
     "better-sqlite3": "13.0.3"
   },
   "devDependencies": {
-    "@nimbalyst/tracker-core": "0.1.0",
+    "@nimbalyst/tracker-core": "workspace:*",
     "@types/better-sqlite3": "^7.6.12",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^20.0.0",

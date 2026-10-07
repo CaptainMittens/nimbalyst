@@ -76,7 +76,7 @@
     "build:clean": "node -e \"fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\" && tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build:clean"
+    "prepublishOnly": "pnpm run build:clean"
   },
   "dependencies": {},
   "peerDependencies": {

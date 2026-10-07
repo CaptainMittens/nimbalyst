@@ -1,9 +1,9 @@
 #!/bin/bash
-# Dev loop script that watches for restart requests and relaunches npm run dev
+# Dev loop script that watches for restart requests and relaunches pnpm run dev
 # Usage: ./scripts/dev-loop.sh
 #
-# This script runs npm run dev in a loop. When the app exits, it checks for
-# a .restart-requested file. If present, it restarts npm run dev.
+# This script runs pnpm run dev in a loop. When the app exits, it checks for
+# a .restart-requested file. If present, it restarts pnpm run dev.
 # If not present, it exits (user manually closed the app).
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

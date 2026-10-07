@@ -5,11 +5,11 @@ Play Store screenshot and screencast capture for the Android app, using an emula
 ## Quick start
 
 ```bash
-npm run android:screenshots                                    # all six listing screens
-npm run android:screenshots -- --screens=sessions,detail        # a subset
-npm run android:screenshots -- --device=emulator-5554           # use a device that's already up
-npm run android:walkthrough                                     # scripted demo video
-npm run android:walkthrough -- --manual --duration=120           # record a real device you drive
+pnpm run android:screenshots                                    # all six listing screens
+pnpm run android:screenshots --screens=sessions,detail        # a subset
+pnpm run android:screenshots --device=emulator-5554           # use a device that's already up
+pnpm run android:walkthrough                                     # scripted demo video
+pnpm run android:walkthrough --manual --duration=120           # record a real device you drive
 ```
 
 Output lands in `packages/android/screenshots/` (gitignored — these are build artifacts, upload them to Play Console rather than committing them).

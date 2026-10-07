@@ -21,7 +21,7 @@
     "use-undoable": "^5.0.0"
   },
   "devDependencies": {
-    "@nimbalyst/extension-sdk": "*",
+    "@nimbalyst/extension-sdk": "workspace:*",
     "@revolist/react-datagrid": "4.21.4",
     "@revolist/revogrid": "4.21.4",
     "@types/papaparse": "^5.3.14",

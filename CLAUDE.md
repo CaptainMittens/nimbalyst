@@ -32,9 +32,9 @@ Before launching parallel work, list the files each slice will touch and confirm
 
 ### Write and Run Tests for Behavioral Changes
 
-**Any change to runtime behavior ships with a unit test** — a new test, or an extension of an existing one. Pure refactors already covered by tests, formatting, docs, and config-only changes are exempt. Before pushing, run the gate locally: `npm run typecheck && npm run test:prepush`.
+**Any change to runtime behavior ships with a unit test** — a new test, or an extension of an existing one. Pure refactors already covered by tests, formatting, docs, and config-only changes are exempt. Before pushing, run the gate locally: `pnpm typecheck && pnpm test:prepush`.
 
-**Never run the suite twice to find out what failed.** It takes minutes. Every run records its failures — names, files, messages, diffs, and a command to rerun only those files — to `.vitest/last-run.log`. Read it with `npm run test:last`, which states up front whether the tree has changed since; on `CURRENT`, re-running cannot tell you anything you do not already have. Never pipe a test run through `tail -n`: it truncates exactly the failure block you need and costs another full run. Capture to a file, then read the file. When handing failures to another session, paste the failure list into its prompt. The repo's pre-push hook runs this automatically; it installs on `npm install` (or `npm run hooks:install`). Never push to `main` with a red suite — CI on `main` is a backstop, not the gate. For high-risk areas (sync/collab, main-process init, IPC, restart-to-verify bugs) the test comes **first** and must fail before the fix — see [end-to-end-verification.md](./.claude/rules/end-to-end-verification.md).
+**Never run the suite twice to find out what failed.** It takes minutes. Every run records its failures — names, files, messages, diffs, and a command to rerun only those files — to `.vitest/last-run.log`. Read it with `pnpm run test:last`, which states up front whether the tree has changed since; on `CURRENT`, re-running cannot tell you anything you do not already have. Never pipe a test run through `tail -n`: it truncates exactly the failure block you need and costs another full run. Capture to a file, then read the file. When handing failures to another session, paste the failure list into its prompt. The repo's pre-push hook runs this automatically; it installs on `pnpm install` (or `pnpm run hooks:install`). Never push to `main` with a red suite — CI on `main` is a backstop, not the gate. For high-risk areas (sync/collab, main-process init, IPC, restart-to-verify bugs) the test comes **first** and must fail before the fix — see [end-to-end-verification.md](./.claude/rules/end-to-end-verification.md).
 
 **A test's job is to catch a regression a reader cannot see.** The test corpus is ~2M tokens, and every future session pays to read the tests next to the code it touches. A test that only re-states what is obvious on screen is pure cost. Write fewer, denser tests:
 
@@ -141,28 +141,31 @@ packages/
   extensions/     # Built-in extensions
 ```
 
-- **Install**: `npm install` at repository root
-- **npm workspaces** (not pnpm); packages reference each other via workspace protocol
-- **Preserve `peer: true` flags in package-lock.json** — Some `npm install` configurations strip these flags, breaking CI for optional native dependencies (e.g., esbuild platform binaries). Investigate before committing if you see them disappearing.
+- **Install**: `corepack enable` once (Node 24 ships corepack; `packageManager` pins pnpm), then `pnpm install` at the repository root. CI uses `pnpm install --frozen-lockfile`
+- **pnpm workspaces**; internal deps use `workspace:*`. Lockfile is `pnpm-lock.yaml` (there is no `package-lock.json`). Run a script in one package with `pnpm --filter <pkg> run <script>` or `pnpm --dir <dir> run <script>`; add a dependency with `pnpm --filter <pkg> add <dep>` (root dev dep: `pnpm add -Dw <dep>`)
+- **All pnpm settings live in the root `pnpm-workspace.yaml`** (`nodeLinker: hoisted`, `overrides`, `patchedDependencies`, `allowBuilds`, `minimumReleaseAge`); `.npmrc` is registry/auth only
+- **`allowBuilds` is an allowlist for install scripts.** A new dependency with a build script fails `pnpm install` until you add it as `true` or `false` there
+- **`minimumReleaseAge: 4320` (72h cooldown).** Versions published less than 3 days ago do not resolve; wait, or add a scoped `minimumReleaseAgeExclude` entry with a reason
+- **Patching a dependency**: `pnpm patch <pkg>@<ver>`, edit, then `pnpm patch-commit <dir>`. Patches live in `patches/` and are registered in `pnpm-workspace.yaml` (patch-package is gone)
 
 Package-specific docs: `/packages/electron/CLAUDE.md`, `/packages/runtime/CLAUDE.md`, `/packages/ios/CLAUDE.md`, `/packages/collabv3/CLAUDE.md`.
 
 ## Development Commands
 
 **Electron app:**
-- Start dev: `cd packages/electron && npm run dev` (user runs this — don't do it yourself)
-- Build for Mac: `npm run build:mac:local` or `npm run build:mac:notarized`
+- Start dev: `cd packages/electron && pnpm run dev` (user runs this — don't do it yourself)
+- Build for Mac: `pnpm run build:mac:local` or `pnpm run build:mac:notarized`
 - Main process log: `~/Library/Application Support/@nimbalyst/electron/logs/main.log`
 
 **Testing:**
-- Unit: `npm run test:unit` (vitest), or `npm run test:unit:ui`
+- Unit: `pnpm run test:unit` (vitest), or `pnpm run test:unit:ui`
 - E2E: see [E2E_TESTING.md](./docs/E2E_TESTING.md)
 
-**Marketing screenshots & videos:** See [MARKETING_SCREENSHOTS.md](./docs/MARKETING_SCREENSHOTS.md). Quick: `cd packages/electron && npm run marketing:screenshots` (requires dev server on port 5273).
+**Marketing screenshots & videos:** See [MARKETING_SCREENSHOTS.md](./docs/MARKETING_SCREENSHOTS.md). Quick: `cd packages/electron && pnpm run marketing:screenshots` (requires dev server on port 5273).
 
-**Multiple dev instances** (for collab/sync testing): `cd packages/electron && npm run dev:user2` uses an isolated `NIMBALYST_USER_DATA_DIR`, `VITE_PORT=5274`, and `--outDir=out2` to prevent file-watcher cross-talk. Worktrees auto-derive a per-worktree userData dir via `crystal-run.sh`.
+**Multiple dev instances** (for collab/sync testing): `cd packages/electron && pnpm run dev:user2` uses an isolated `NIMBALYST_USER_DATA_DIR`, `VITE_PORT=5274`, and `--outDir=out2` to prevent file-watcher cross-talk. Worktrees auto-derive a per-worktree userData dir via `crystal-run.sh`.
 
-**Other packages:** iOS — `npm run ios:test:swift`, `npm run ios:build:transcript`. Collab server — `npm run collabv2:dev`, `npm run collabv2:deploy`.
+**Other packages:** iOS — `pnpm run ios:test:swift`, `pnpm run ios:build:transcript`. Collab server — `pnpm run collabv2:dev`, `pnpm run collabv2:deploy`.
 
 ## Releases
 
@@ -277,7 +280,7 @@ See the Critical Rules block above ("Always Run Your Own Observation Commands").
 - **Never commit files under `nimbalyst-local/`** — gitignored, local-only working files
 - **Never provide time or effort estimates**
 - **Don't disable tests without asking first**
-- **Don't run `npm run dev` yourself** — user does that
+- **Don't run `pnpm run dev` yourself** — user does that
 - **Never release without being explicitly instructed**
 - **Don't `git reset` or `git add -A` without asking**
 - **Don't add `Co-Authored-By` lines to commit messages**

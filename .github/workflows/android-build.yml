@@ -55,13 +55,13 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Make npm resilient to transient registry socket drops (ECONNRESET) on the
-  # cache-miss path. On a cache hit npm ci is skipped entirely, so these only
-  # matter when the lockfile changed and packages must be fetched.
-  npm_config_fetch_retries: '5'
-  npm_config_fetch_retry_mintimeout: '20000'
-  npm_config_fetch_retry_maxtimeout: '120000'
-  npm_config_fetch_timeout: '300000'
+  # Make pnpm resilient to transient registry socket drops (ECONNRESET) on the
+  # cache-miss path. On a cache hit the install is skipped entirely, so these
+  # only matter when the lockfile changed and packages must be fetched.
+  pnpm_config_fetch_retries: '5'
+  pnpm_config_fetch_retry_mintimeout: '20000'
+  pnpm_config_fetch_retry_maxtimeout: '120000'
+  pnpm_config_fetch_timeout: '300000'
 
 jobs:
   # Unsigned validation. No `environment:`, and no `secrets.*` reference

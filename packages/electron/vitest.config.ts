@@ -85,7 +85,7 @@ const nodeOnlyInclude = nodeOnly.map((entry) =>
   entry.endsWith('/**') ? `${entry}/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}` : entry,
 );
 
-const baseExclude = ['node_modules', 'dist', 'out', 'release', '**/temptests/**'];
+const baseExclude = ['**/node_modules/**', 'dist', 'out', 'release', '**/temptests/**'];
 
 const TEST_TIMEOUT_MS = 10000;
 const HOOK_TIMEOUT_MS = 10000;

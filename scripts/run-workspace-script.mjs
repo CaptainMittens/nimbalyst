@@ -1,8 +1,8 @@
 /**
- * Runs one npm script across every workspace that defines it, with a bounded
- * job pool.
+ * Runs one package script across every workspace that defines it, with a
+ * bounded job pool.
  *
- * `npm run <script> -ws` is strictly serial. For typecheck that means 24 cold
+ * A serial run across workspaces is slow. For typecheck that means 24 cold
  * `tsc --noEmit` processes queued end to end on a 12-core machine, where two
  * packages own most of the wall clock and the other 22 wait behind them
  * (measured 2026-08-05: 66s serial, 29s at 8-way, floor set by the slowest
@@ -18,17 +18,11 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-
-/** npm's Windows shim is a .cmd file, which Node must launch through cmd.exe. */
-export function npmSpawnConfig(platform = process.platform, env = process.env) {
-  return platform === 'win32'
-    ? { command: env.ComSpec || 'cmd.exe', argsPrefix: ['/d', '/s', '/c', 'npm.cmd'] }
-    : { command: 'npm', argsPrefix: [] };
-}
+import { packageManagerSpawnConfig, readWorkspaceConfig } from './package-manager.mjs';
 
 /**
- * Expand the `workspaces` patterns from a root package.json into directories.
- * Only the trailing `/*` form npm uses here is supported; anything fancier
+ * Expand the `packages` patterns from pnpm-workspace.yaml into directories.
+ * Only the trailing `/*` form used here is supported; anything fancier
  * should fail loudly rather than silently match nothing.
  */
 export function expandWorkspacePatterns(patterns, readDir) {
@@ -66,7 +60,7 @@ export async function runPool(items, limit, run) {
 
 export function runScriptIn(dir, script, rootDir) {
   return new Promise(resolve => {
-    const { command, argsPrefix } = npmSpawnConfig();
+    const { command, argsPrefix } = packageManagerSpawnConfig();
     const child = spawn(command, [...argsPrefix, 'run', script], {
       cwd: path.join(rootDir, dir),
       env: process.env,
@@ -98,8 +92,7 @@ async function main() {
       return null;
     }
   };
-  const root = JSON.parse(readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
-  const dirs = expandWorkspacePatterns(root.workspaces ?? [], parent =>
+  const dirs = expandWorkspacePatterns(readWorkspaceConfig(rootDir).packages ?? [], parent =>
     readdirSync(path.join(rootDir, parent), { withFileTypes: true })
       .filter(entry => entry.isDirectory())
       .map(entry => entry.name),

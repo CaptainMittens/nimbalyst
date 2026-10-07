@@ -1,7 +1,7 @@
-diff --git a/node_modules/@revolist/revogrid/dist/collection/components/data/column.service.js b/node_modules/@revolist/revogrid/dist/collection/components/data/column.service.js
+diff --git a/dist/collection/components/data/column.service.js b/dist/collection/components/data/column.service.js
 index fdd8af9..33d6db8 100644
---- a/node_modules/@revolist/revogrid/dist/collection/components/data/column.service.js
-+++ b/node_modules/@revolist/revogrid/dist/collection/components/data/column.service.js
+--- a/dist/collection/components/data/column.service.js
++++ b/dist/collection/components/data/column.service.js
 @@ -4,7 +4,7 @@
  import { getSourceItem, getVisibleSourceItem } from "../../store/index";
  import { CELL_CLASS, DISABLED_CLASS, getCellRaw, getCellData, } from "../../utils";
@@ -32,10 +32,10 @@ index fdd8af9..33d6db8 100644
          }
          const range = getRange(start, {
              y: rowIndex - 1,
-diff --git a/node_modules/@revolist/revogrid/dist/esm/column.service-8pPNyrKn.js b/node_modules/@revolist/revogrid/dist/esm/column.service-8pPNyrKn.js
+diff --git a/dist/esm/column.service-8pPNyrKn.js b/dist/esm/column.service-8pPNyrKn.js
 index 659d9f4..56e6d1b 100644
---- a/node_modules/@revolist/revogrid/dist/esm/column.service-8pPNyrKn.js
-+++ b/node_modules/@revolist/revogrid/dist/esm/column.service-8pPNyrKn.js
+--- a/dist/esm/column.service-8pPNyrKn.js
++++ b/dist/esm/column.service-8pPNyrKn.js
 @@ -816,7 +816,11 @@ class ColumnService {
          // rows
          let rowIndex = start.y;
