@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed a tracker crash when a person has no display name.
 - Reduced startup time spent re-reading settings while scanning extensions and resolving teams.
 - Sessions launched from an action now get a descriptive name instead of keeping the action's label.
+- On iOS and Android, the session list no longer briefly shows only phone- and automation-created sessions when the app returns to the foreground.
 
 ### Removed
 <!-- Removed features go here -->
