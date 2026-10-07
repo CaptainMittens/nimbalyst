@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved reliability of repeated Anthropic chat requests by releasing completed-request listeners.
 - Fixed a tracker crash when a person has no display name.
 - Reduced startup time spent re-reading settings while scanning extensions and resolving teams.
+- Sessions launched from an action now get a descriptive name instead of keeping the action's label.
 
 ### Removed
 <!-- Removed features go here -->

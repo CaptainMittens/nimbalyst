@@ -396,7 +396,10 @@ export class MetaAgentService {
     // queues + triggers only when a prompt is supplied. For prefill mode we
     // omit it so nothing runs until the user hits Send in the new session.
     const childResult = await this.createChildSessionInternal(parentSessionId, workspaceKey, {
+      // The title is the action's label ("Continue in New Session"), which says
+      // nothing about the work. Show it until the agent names the session.
       title: args.title,
+      provisionalTitle: true,
       prompt: args.autoSubmit ? args.prompt : undefined,
       useWorktree: !!args.useWorktree,
       worktreeId: inheritedWorktreeId,
@@ -457,6 +460,8 @@ export class MetaAgentService {
       parentSessionIdOverride?: string | null;
       /** false = fire-and-forget; written on the row before the first prompt is queued. */
       notifyParent?: boolean;
+      /** Show `title` until the session names itself, instead of locking it in. */
+      provisionalTitle?: boolean;
     }
   ): Promise<{
     sessionId: string;
@@ -563,7 +568,7 @@ export class MetaAgentService {
       || (parentModel && parentModelProvider === provider ? parentModel : null)
       || ModelIdentifier.getDefaultModelId(provider);
 
-    const callerProvidedTitle = !!args.title?.trim();
+    const callerProvidedTitle = !!args.title?.trim() && !args.provisionalTitle;
     const title = (args.title || this.deriveTitleFromPrompt(args.prompt) || 'Meta Task').trim();
 
     const sessionId = randomUUID();

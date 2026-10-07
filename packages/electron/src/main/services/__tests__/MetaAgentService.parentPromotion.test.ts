@@ -124,6 +124,23 @@ describe('MetaAgentService parent agent_role promotion (NIM-858)', () => {
     expect(promotedToMetaAgent('standard-parent')).toBe(false);
   });
 
+  it('shows the action label on an action launch but leaves the session free to name itself', async () => {
+    const service = MetaAgentService.getInstance();
+    (service as any).aiService = { queuePromptForSession: vi.fn(), triggerQueuedPromptProcessingForSession: vi.fn() };
+    vi.mocked(AISessionsRepository.get).mockResolvedValue(STANDARD_PARENT as any);
+
+    await service.launchActionSession('standard-parent', '/workspace/path', {
+      prompt: 'continue the work',
+      title: 'Continue in New Session',
+      autoSubmit: false,
+    });
+    await (service as any).createChildSessionInternal('standard-parent', '/workspace/path', { title: 'Chosen by orchestrator' });
+
+    const [[action], [spawned]] = vi.mocked(AISessionsRepository.create).mock.calls as any[];
+    expect(action).toMatchObject({ title: 'Continue in New Session', hasBeenNamed: false });
+    expect(spawned).toMatchObject({ title: 'Chosen by orchestrator', hasBeenNamed: true });
+  });
+
   it('parents create_session and spawn_session from a nested caller directly to that caller without creating wrappers', async () => {
     const service = MetaAgentService.getInstance();
     (service as any).aiService = { queuePromptForSession: vi.fn(), triggerQueuedPromptProcessingForSession: vi.fn() };
