@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pages: copy a file from disk, including drawings, mind maps and other editor files, into Team or Personal pages with Copy to Pages... in Files or Add from Files... in Pages; agents can import files the same way.
 - Pages: `@` in a Personal page links your Personal pages and embeds Personal drawings and other editor pages; `@` in a local file also lists Team and Personal pages.
 - Agents can edit drawings, mind maps, data models and other editor pages in Pages with those editors' tools, without the page open.
+- Custom Claude models defined under `modelPicker` in Claude's settings now appear in the Claude Code model picker and are sent to your gateway by name.
 
 ### Changed
 <!-- Changes to existing functionality go here -->

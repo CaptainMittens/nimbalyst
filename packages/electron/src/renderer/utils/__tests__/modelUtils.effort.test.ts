@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { supportsEffortLevel } from '../modelUtils';
+import { getClaudeCodeModelLabel, getClaudeCodeModelShortLabel, supportsEffortLevel } from '../modelUtils';
+import { registerClaudeCustomModelsFromCatalog } from '@nimbalyst/runtime/ai/claudeCustomModels';
 
 describe('supportsEffortLevel', () => {
   it.each([
@@ -31,5 +32,19 @@ describe('supportsEffortLevel', () => {
     'claude:claude-fable-5',
   ])('does not expose effort for unsupported models: %s', (modelId) => {
     expect(supportsEffortLevel(modelId)).toBe(false);
+  });
+});
+
+describe('custom Claude gateway models', () => {
+  it('take their label from the catalog and their capabilities from behavesAs', () => {
+    registerClaudeCustomModelsFromCatalog([
+      { id: 'claude-code:custom/Fast', name: 'Claude Agent · Fast Combo', provider: 'claude-code', behavesAs: 'claude-opus-4-8' },
+      { id: 'claude-code:custom/Plain', name: 'Claude Agent · Plain', provider: 'claude-code' },
+    ]);
+    expect(getClaudeCodeModelLabel('claude-code:custom/Fast')).toBe('Claude Agent · Fast Combo');
+    expect(getClaudeCodeModelShortLabel('claude-code:custom/Fast')).toBe('Fast Combo');
+    expect(supportsEffortLevel('claude-code:custom/Fast')).toBe(true);
+    expect(supportsEffortLevel('claude-code:custom/Plain')).toBe(false);
+    expect(getClaudeCodeModelShortLabel('claude-code:custom/Unknown')).toBe('Unknown');
   });
 });

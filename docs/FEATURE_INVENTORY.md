@@ -51,6 +51,7 @@ Twelve built-in provider lanes, plus any agent an extension contributes. Every l
 
 - Claude Code (Agent SDK with MCP, file access, plan mode, sub-agents)
 - Claude Code CLI (off by default; the genuine CLI driven in a terminal, with a raw-terminal drawer for its native pickers and mid-session `/model` switching)
+- Custom Claude models: models listed under `modelPicker` in Claude's user, project, or local settings appear in the Claude Code and Claude Code CLI pickers and are sent to the user's gateway by name (`behavesAs` sets context window and effort/thinking support; `replaceBuiltInOptions` hides the built-in models). CLI sessions follow a loopback `ANTHROPIC_BASE_URL` from Claude settings; non-loopback URLs are not followed
 - OpenAI Codex (SDK / app-server transport with MCP support)
 - OpenAI Codex over ACP
 - GitHub Copilot CLI (ACP)

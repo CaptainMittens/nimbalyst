@@ -23,6 +23,11 @@ import {
   type ClaudeCodeVariant,
 } from '@nimbalyst/runtime/ai/modelConstants';
 import { CLAUDE_CODE_VARIANTS, ModelIdentifier, isClaudeCodeFamily } from '@nimbalyst/runtime/ai/server/types';
+import {
+  behavesAsVariantForModelId,
+  claudeCustomModelNameFromId,
+  getClaudeCustomModelOption,
+} from '@nimbalyst/runtime/ai/claudeCustomModels';
 
 export {
   type EffortLevel,
@@ -97,7 +102,15 @@ function getClaudeCodeFamilyPrefix(modelId?: string): string {
   return parsed?.provider === 'claude-code-cli' ? 'Claude Code CLI' : 'Claude Agent';
 }
 
+/** Label from Claude settings `modelPicker` for a custom gateway model id. */
+function customClaudeModelLabel(modelId?: string): string | null {
+  const name = claudeCustomModelNameFromId(modelId);
+  return name ? getClaudeCustomModelOption(name)?.label ?? name : null;
+}
+
 export function getClaudeCodeModelLabel(modelId?: string): string {
+  const custom = customClaudeModelLabel(modelId);
+  if (custom) return `${getClaudeCodeFamilyPrefix(modelId)} · ${custom}`;
   const variant = extractClaudeCodeVariant(modelId) ?? 'sonnet';
   const parsed = modelId ? ModelIdentifier.tryParse(modelId) : null;
   const version = CLAUDE_CODE_VARIANT_VERSIONS[variant];
@@ -106,6 +119,8 @@ export function getClaudeCodeModelLabel(modelId?: string): string {
 }
 
 export function getClaudeCodeModelShortLabel(modelId?: string): string {
+  const custom = customClaudeModelLabel(modelId);
+  if (custom) return custom;
   const variant = extractClaudeCodeVariant(modelId) ?? 'sonnet';
   const parsed = modelId ? ModelIdentifier.tryParse(modelId) : null;
   const version = CLAUDE_CODE_VARIANT_VERSIONS[variant];
@@ -271,7 +286,7 @@ export function getModelShortName(provider: string, modelId: string): string {
  */
 export function supportsEffortLevel(modelId?: string): boolean {
   if (!modelId) return false;
-  const variant = extractClaudeCodeVariant(modelId);
+  const variant = extractClaudeCodeVariant(modelId) ?? behavesAsVariantForModelId(modelId);
   if (
     variant === 'fable' ||
     variant === 'fable-5' ||
@@ -294,7 +309,7 @@ export function supportsEffortLevel(modelId?: string): boolean {
 /** Whether this agent model allows users to turn adaptive thinking off. */
 export function supportsThinkingToggle(modelId?: string): boolean {
   if (!modelId) return false;
-  const variant = extractClaudeCodeVariant(modelId);
+  const variant = extractClaudeCodeVariant(modelId) ?? behavesAsVariantForModelId(modelId);
   if (!variant) return false;
   return canDisableClaudeThinking(variant);
 }

@@ -461,6 +461,12 @@ describe('buildClaudeCliSpawnConfig', () => {
 });
 
 describe('resolveClaudeCliModelArg', () => {
+  it('passes custom gateway models verbatim and never leaks a provider prefix', () => {
+    expect(resolveClaudeCliModelArg('claude-code-cli:custom/Fast')).toBe('Fast');
+    expect(resolveClaudeCliModelArg('claude-code:custom/Smart')).toBe('Smart');
+    expect(resolveClaudeCliModelArg('claude-code-cli:NotAVariant')).toBeUndefined();
+  });
+
   it('resolves explicit 5.5 versions while preserving pinned 5 versions', () => {
     expect(resolveClaudeCliModelArg('claude-code-cli:opus-5-5')).toBe('claude-opus-5-5');
     expect(resolveClaudeCliModelArg('claude-code-cli:opus-5')).toBe('claude-opus-5');

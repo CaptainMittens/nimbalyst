@@ -11,6 +11,7 @@ import type { EditorContextItem } from '@nimbalyst/extension-sdk/types/editor';
 import type { EffortLevel, ThinkingMode } from './effortLevels';
 import type { ToolResult } from './protocols/ProtocolInterface';
 import { ModelIdentifier } from './ModelIdentifier';
+import { claudeCustomModelName } from '../claudeCustomModels';
 import {
   CLAUDE_CODE_ACCEPTED_VARIANT_INPUTS,
   CLAUDE_CODE_PINNED_SDK_MODELS,
@@ -314,6 +315,10 @@ export function resolveClaudeCodeModelVariant(configuredModel: string | undefine
 
   // Try parsing with ModelIdentifier
   const parsed = ModelIdentifier.tryParse(configured);
+  // Custom gateway models go to the SDK verbatim (no pinning, no [1m]); the
+  // user's router decides what they mean.
+  const customModel = parsed?.customClaudeModel ?? claudeCustomModelName(configured);
+  if (customModel) return customModel;
   if (parsed && isClaudeCodeFamily(parsed.provider)) {
     // baseVariant strips suffixes like -1m
     const variant = parsed.baseVariant as ClaudeCodeVariant;
@@ -361,6 +366,11 @@ export interface AIModel {
    * so a revoked credential never silently erases a selection (#916).
    */
   unavailable?: boolean;
+  /**
+   * Custom Claude gateway models only: the Anthropic model id whose
+   * capabilities this model shares (from Claude settings `modelPicker`).
+   */
+  behavesAs?: string;
 }
 
 export interface AIModelCost {
