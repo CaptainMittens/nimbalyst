@@ -15,7 +15,7 @@ import { createNamedPageViewsController } from '@nimbalyst/runtime/editor/plugin
 import { MarkdownCollabContentAdapter } from '@nimbalyst/runtime/sync/MarkdownCollabContentAdapter';
 import { buildTrackerReferenceHref } from '@nimbalyst/runtime/plugins/TrackerLinkPlugin/trackerReferenceHref';
 import { decisionMembersFromComments, mountCollabEditor } from '../mount';
-import { setConsoleLinkOpener } from '../consoleLinkOpener';
+import { setConsoleLinkOpener, setPageReferenceOpener } from '../consoleLinkOpener';
 import { CollabPresenceSurface } from '../presence';
 import {
   asTeamDocumentId,
@@ -332,6 +332,24 @@ describe('in-memory collaborative editor harness', () => {
     expect(opened).toEqual([href]);
     expect(windowOpen).toHaveBeenCalledWith(href, '_blank', 'noopener,noreferrer');
     windowOpen.mockRestore();
+    stopOpener();
+  });
+
+  it('opens an @ reference to a team page through the host, in a new tab on Cmd+click', async () => {
+    const yDocument = new Y.Doc();
+    MarkdownCollabContentAdapter.seedFromFile(yDocument, 'See [Launch Plan](nimbalyst://doc/d2?orgId=o1).');
+    const element = globalThis.document.createElement('div');
+    globalThis.document.body.append(element);
+    const opened: Array<[string, boolean]> = [];
+    const stopOpener = setPageReferenceOpener((documentId, { newTab }) => { opened.push([documentId, newTab]); });
+    const handle = mountCollabEditor({ element, source: { kind: 'in-memory', document: yDocument }, user: { memberId: asTeamMemberId('member'), name: 'Member' } });
+    mountedHandles.push(handle);
+    await settle();
+
+    const chip = element.querySelector<HTMLElement>('.document-reference')!;
+    fireEvent.click(chip);
+    fireEvent.click(chip, { metaKey: true });
+    expect(opened).toEqual([['d2', false], ['d2', true]]);
     stopOpener();
   });
 

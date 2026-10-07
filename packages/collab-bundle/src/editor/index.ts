@@ -10,7 +10,12 @@ export const loadPlacedViewEmbed = () => import('@nimbalyst/collab-client/tracke
 // is by, and what a citation can open on this host.
 export { setPageMarkAuthorProvider, type PageMarkAuthor } from '@nimbalyst/runtime/editor/plugins/PageMarkPlugin/pageMarkHost';
 export { setCitationHost, type CitationHost } from '@nimbalyst/runtime/editor/plugins/CitationPlugin/citationHost';
-export { setConsoleLinkOpener, type ConsoleLinkOpener } from './consoleLinkOpener';
+export {
+  setConsoleLinkOpener,
+  setPageReferenceOpener,
+  type ConsoleLinkOpener,
+  type PageReferenceOpener,
+} from './consoleLinkOpener';
 // trackers-ui must not load the editor graph, so the host builds the views controller from this entry.
 export { createNamedPageViewsController, type NamedPageViewsController } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/namedPageViewsController';
 // Page history: the markdown diff and revision projection. The dialog is in `./docs-ui`.

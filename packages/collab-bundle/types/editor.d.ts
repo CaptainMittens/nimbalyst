@@ -399,6 +399,13 @@ export type ConsoleLinkOpener = (href: string) => boolean;
  * Personal page): routed in its own tab. Returns the uninstall.
  */
 export declare function setConsoleLinkOpener(next: ConsoleLinkOpener): () => void;
+/** Opens a team page by id; `newTab` is true for a Cmd/Ctrl or middle click. */
+export type PageReferenceOpener = (documentId: string, options: { newTab: boolean }) => void;
+/**
+ * How this host opens an `@` reference chip to a team page
+ * (`nimbalyst://doc/<id>`). Returns the uninstall.
+ */
+export declare function setPageReferenceOpener(next: PageReferenceOpener): () => void;
 export { createNamedPageViewsController, type NamedPageViewsController } from './internal/runtime/src/editor/plugins/EmbedPlugin/namedPageViewsController';
 
 /** Page history: where the diff is in its change groups. */
