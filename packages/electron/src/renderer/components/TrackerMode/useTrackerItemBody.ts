@@ -42,6 +42,9 @@ export interface TrackerTeam {
   teamMembers: TeamMemberOption[];
 }
 
+/** Back-off between re-asks while main reports the team lookup as incomplete. */
+const INCOMPLETE_TEAM_LOOKUP_RETRY_MS = [500, 1000, 2000, 4000, 8000] as const;
+
 /**
  * Detect whether this workspace has a team. The team check feeds the content
  * editor mode (collab vs local); the member list feeds the assignee picker.
@@ -71,12 +74,24 @@ export function useTrackerTeam(workspacePath: string | undefined): TrackerTeam {
         // On timeout, degrade to local mode (null) -- the body still paints from
         // the cold cache instead of spinning indefinitely.
         const TEAM_LOOKUP_TIMEOUT_MS = 12_000;
-        const teamResult = await Promise.race([
+        const lookup = () => Promise.race([
           window.electronAPI.invoke('team:find-for-workspace', workspacePath),
           new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error('team:find-for-workspace timed out')), TEAM_LOOKUP_TIMEOUT_MS),
           ),
         ]);
+        let teamResult = await lookup();
+        // `complete: false` means main could not read the team directory yet
+        // (typically the first seconds after launch), so its null team is not
+        // "this workspace has no team". Answering null here opened a team item's
+        // body in local mode. Stay pending and ask again; give up to local mode
+        // only once the schedule runs out.
+        for (const delayMs of INCOMPLETE_TEAM_LOOKUP_RETRY_MS) {
+          if (cancelled || teamResult?.complete !== false) break;
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          if (cancelled) return;
+          teamResult = await lookup();
+        }
         if (cancelled) return;
         const orgId: string | null = teamResult?.success && teamResult.team?.orgId
           ? teamResult.team.orgId

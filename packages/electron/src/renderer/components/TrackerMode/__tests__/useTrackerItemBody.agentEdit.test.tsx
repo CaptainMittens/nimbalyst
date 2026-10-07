@@ -28,7 +28,7 @@ vi.mock('@nimbalyst/runtime/plugins/TrackerPlugin/models', () => ({
   globalRegistry: { get: () => ({ sharing: 'personal' }) },
 }));
 
-import { useTrackerItemBody } from '../useTrackerItemBody';
+import { useTrackerItemBody, useTrackerTeam } from '../useTrackerItemBody';
 import { applyPersonalPageAgentEdit, restorePersonalTypedPageBody } from '../../../services/personalAgentEdit';
 
 const STORED = '# Idea\n\nTables: undecided.\n';
@@ -122,5 +122,35 @@ describe('agent edit to an open Personal typed page', () => {
 
     unregisterDiff();
     unmount();
+  });
+});
+
+// In the first seconds after launch main cannot read the team directory yet and
+// says so with `complete: false`. Reading its null team as "no team" opened a
+// team item's body in local mode.
+describe('useTrackerTeam while the team lookup is incomplete', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (window as any).electronAPI;
+  });
+
+  it('stays pending and re-asks until main can answer', async () => {
+    const answers = [
+      { success: true, team: null, complete: false },
+      { success: true, team: { orgId: 'org-1' }, complete: true },
+    ];
+    const invoke = vi.fn(async (channel: string) => (
+      channel === 'team:find-for-workspace' ? answers.shift() : { success: true, members: [] }
+    ));
+    (window as any).electronAPI = { invoke };
+
+    const { result } = renderHook(() => useTrackerTeam('/ws'));
+    await act(async () => { await Promise.resolve(); });
+    expect(result.current.teamOrgId).toBeUndefined();
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(result.current.teamOrgId).toBe('org-1');
+    expect(invoke.mock.calls.filter((c) => c[0] === 'team:find-for-workspace')).toHaveLength(2);
   });
 });
