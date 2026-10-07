@@ -76,6 +76,7 @@ import {
   registerSettingsChangeListener,
 } from './store/atoms/settingAtomFamily';
 import { registerGutterCustomizationListener } from './store/listeners/gutterCustomizationListeners';
+import { registerDeveloperModeListener } from './store/listeners/developerModeListeners';
 import { waitForMaterialSymbols } from './utils/materialSymbolsReady';
 
 // console.log('[RENDERER] Imports complete at', new Date().toISOString());
@@ -206,6 +207,7 @@ await Promise.allSettled([
   }),
   initDeveloperFeatureSettings().then((settings) => {
     store.set(developerFeatureSettingsAtom, settings);
+    registerDeveloperModeListener();
   }),
   initExternalEditorSettings().then((settings) => {
     store.set(externalEditorSettingsAtom, settings);

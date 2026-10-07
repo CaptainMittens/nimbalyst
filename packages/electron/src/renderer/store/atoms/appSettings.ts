@@ -2045,6 +2045,11 @@ function scheduleDeveloperFeaturePersist(
   }, DEVELOPER_FEATURE_PERSIST_DEBOUNCE_MS);
 }
 
+/** True while a local developer-settings change has not reached main yet. */
+export function hasPendingDeveloperFeaturePersist(): boolean {
+  return developerFeaturePersistTimer !== null;
+}
+
 // === Derived read-only atoms (slices) ===
 
 /**
