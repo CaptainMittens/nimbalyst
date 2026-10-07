@@ -732,8 +732,8 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3
       ghostty-web:
-        specifier: ^0.4.0
-        version: 0.4.0
+        specifier: 0.4.0-next.20.g1858a59
+        version: 0.4.0-next.20.g1858a59
       gifwrap:
         specifier: ^0.10.1
         version: 0.10.1
@@ -6981,8 +6981,8 @@ packages:
     resolution: {integrity: sha512-nBF+F1rAZVCu/p7rjzgA+Yb4lfYXrpl7a6VmJrU8wF9I1CKvP/QwPNZHnOlwbTkY6dvtFIzFMSyQXbLoTQPRpA==}
     engines: {node: '>=8'}
 
-  ghostty-web@0.4.0:
-    resolution: {integrity: sha512-0puDBik2qapbD/QQBW9o5ZHfXnZBqZWx/ctBiVtKZ6ZLds4NYb+wZuw1cRLXZk9zYovIQ908z3rvFhexAvc5Hg==}
+  ghostty-web@0.4.0-next.20.g1858a59:
+    resolution: {integrity: sha512-NXA9H3IJlx+DGJukXbOPQWFkigYdAatTqkoIvM8tvhfbaYoDf3gGKxXLLyXtLYOBt5qzGdEZa294TU36gULjVg==}
 
   gifuct-js@2.1.2:
     resolution: {integrity: sha512-rI2asw77u0mGgwhV3qA+OEgYqaDn5UNqgs+Bx0FGwSpuqfYn+Ir6RQY5ENNQ8SbIiG/m5gVa7CD5RriO4f4Lsg==}
@@ -14846,7 +14846,7 @@ snapshots:
     dependencies:
       pump: 3.0.3
 
-  ghostty-web@0.4.0: {}
+  ghostty-web@0.4.0-next.20.g1858a59: {}
 
   gifuct-js@2.1.2:
     dependencies:

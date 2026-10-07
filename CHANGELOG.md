@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 <!-- Bug fixes go here -->
 - Git Output no longer jumps to the bottom while reading earlier output.
+- Fixed a terminal that could stop showing output after restoring its saved history.
 - Excalidraw drawings embedded in a document no longer show the menu and bottom toolbar until the embed is selected.
 - Team tracker items opened right after launch no longer open in local mode before your organization finishes loading.
 - Effort and Actions menus now support typeahead like the model picker.
