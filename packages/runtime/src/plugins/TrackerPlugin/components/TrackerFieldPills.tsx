@@ -36,6 +36,7 @@ import {
 import type { RelationshipCandidate } from './RelationshipFieldEditor';
 import type { CitationInspectorHost } from './CitationInspector';
 import { CollectionPickerPopover } from './CollectionPickerPopover';
+import { TrackerFieldChoiceList, teamMemberChoices, type TrackerFieldChoice } from './TrackerFieldChoiceList';
 import { isCollectionRelationshipField } from '../models/trackerCollections';
 import { UserAvatar } from './UserAvatar';
 import { isTrackerFieldEmpty, shouldLabelTrackerField, trackerFieldDisplayLabel } from './trackerFieldLayout';
@@ -319,25 +320,16 @@ export const TrackerFieldPill: React.FC<TrackerFieldPillProps> = ({
     void onSave(field.name, nextValue);
   }, [field.name, onSave]);
 
-  const directChoices = useMemo(() => {
+  const directChoices = useMemo((): TrackerFieldChoice[] => {
     if (field.type === 'select') {
       return (field.options ?? []).map((option) => ({
         value: option.value,
         label: option.label,
         icon: option.icon,
         color: option.color,
-        avatarIdentity: undefined as string | undefined,
       }));
     }
-    if (field.type === 'user') {
-      return members.map((member) => ({
-        value: member.email,
-        label: member.name ?? member.email,
-        icon: 'person',
-        color: undefined,
-        avatarIdentity: member.name ?? member.email,
-      }));
-    }
+    if (field.type === 'user') return teamMemberChoices(members);
     return [];
   }, [field.options, field.type, members]);
 
@@ -419,52 +411,13 @@ export const TrackerFieldPill: React.FC<TrackerFieldPillProps> = ({
                 testIdBase={`${testIdBase}-collection-picker`}
               />
             ) : directChoiceField ? (
-              <div
-                className="tracker-field-choice-list"
-                data-testid={`${testIdBase}-choices-${field.name}`}
-              >
-                {!field.required && (
-                  <button
-                    type="button"
-                    role="option"
-                    aria-selected={empty}
-                    className={empty
-                      ? 'tracker-field-choice tracker-field-choice-selected'
-                      : 'tracker-field-choice'}
-                    onClick={() => handleDirectChange('')}
-                  >
-                    <MaterialSymbol icon="remove" size={15} />
-                    <span className="tracker-field-choice-label">None</span>
-                  </button>
-                )}
-                {directChoices.map((choice) => {
-                  const selected = choice.value === localValue;
-                  return (
-                    <button
-                      key={choice.value}
-                      type="button"
-                      role="option"
-                      aria-selected={selected}
-                      className={selected
-                        ? 'tracker-field-choice tracker-field-choice-selected'
-                        : 'tracker-field-choice'}
-                      onClick={() => handleDirectChange(choice.value)}
-                    >
-                      {choice.avatarIdentity ? (
-                        <UserAvatar identity={choice.avatarIdentity} size={16} />
-                      ) : (
-                        <MaterialSymbol
-                          icon={choice.icon ?? 'circle'}
-                          size={15}
-                          style={choice.color ? { color: choice.color } : undefined}
-                        />
-                      )}
-                      <span className="tracker-field-choice-label">{choice.label}</span>
-                      {selected && <MaterialSymbol icon="check" size={15} />}
-                    </button>
-                  );
-                })}
-              </div>
+              <TrackerFieldChoiceList
+                choices={directChoices}
+                value={localValue}
+                allowNone={!field.required}
+                onPick={handleDirectChange}
+                testId={`${testIdBase}-choices-${field.name}`}
+              />
             ) : (
               <TrackerFieldEditor
                 field={field}

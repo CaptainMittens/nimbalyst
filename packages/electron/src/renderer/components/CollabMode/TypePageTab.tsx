@@ -32,6 +32,7 @@ import {
 } from '../../store/atoms/collabDocuments';
 import { createDesktopTrackerDataSource } from '../EmbedFrame/desktopTrackerDataSource';
 import { useDesktopTrackerIdentity } from '../EmbedFrame/useDesktopTrackerIdentity';
+import { useTrackerTeamMembers } from '../TrackerMode/useTrackerTeamMembers';
 import { isTeamTrackerSharing } from '../Settings/panels/trackerConfigUpgrade';
 import { typePageTitle } from './collabPageTabs';
 import { TypePageProse } from './TypePageProse';
@@ -93,6 +94,7 @@ export interface TypePageTabProps {
 export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath, onOpenItem }) => {
   const store = useStore();
   const identity = useDesktopTrackerIdentity(workspacePath);
+  const teamMembers = useTrackerTeamMembers(workspacePath);
   const writer = useMemo(() => new ElectronTrackerDataSource({ workspacePath }), [workspacePath]);
   useEffect(() => () => writer.dispose(), [writer]);
   const dataSource = useMemo(
@@ -198,7 +200,7 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
             parentFolderId={parentFolderId}
             documents={documents}
           />
-          <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
+          <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES} teamMembers={teamMembers}>
             <TypePageTable
               key={editorKey}
               viewsController={viewsController}

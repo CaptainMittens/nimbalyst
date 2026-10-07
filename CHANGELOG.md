@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 <!-- Bug fixes go here -->
 - Effort and Actions menus now support typeahead like the model picker.
+- Tracker table cells for people and select fields open the field chips' choice list with type-to-filter, instead of a plain text box for people or a native menu.
 - Pages with citations no longer fail to load with an editor update loop.
 - Fixed clicking a decided or open-question chip in Pages, and the Mark open question toolbar button.
 - Updated the desktop runtime with security fixes while preserving PDF export margins.

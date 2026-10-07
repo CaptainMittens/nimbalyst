@@ -21,6 +21,7 @@ import {
 } from '../../store/atoms/collabDocuments';
 import { createDesktopTrackerDataSource } from '../EmbedFrame/desktopTrackerDataSource';
 import { useDesktopTrackerIdentity } from '../EmbedFrame/useDesktopTrackerIdentity';
+import { useTrackerTeamMembers } from '../TrackerMode/useTrackerTeamMembers';
 import type { PagesSectionLane } from './pagesSectionTabs';
 
 export interface PagesSectionData {
@@ -53,6 +54,7 @@ export function usePagesSectionData(lane: PagesSectionLane, workspacePath: strin
   const store = useStore();
   const teamScope = useTeamScope(lane, workspacePath);
   const identity = useDesktopTrackerIdentity(workspacePath);
+  const teamMembers = useTrackerTeamMembers(workspacePath);
   const writer = useMemo(() => new ElectronTrackerDataSource({ workspacePath }), [workspacePath]);
   useEffect(() => () => writer.dispose(), [writer]);
   const dataSource = useMemo(() => createDesktopTrackerDataSource({ workspacePath, store, writer }), [workspacePath, store, writer]);
@@ -64,10 +66,10 @@ export function usePagesSectionData(lane: PagesSectionLane, workspacePath: strin
       session: getElectronCollabDocsSession(scope),
       host: lane === 'team' ? getElectronCollabHost(scope) : getPersonalCollabHost(workspacePath),
       // `TrackerIdentity.email` is nullable; the provider's "me" needs one to stamp edits.
-      provider: { dataSource, identity: identity?.email ? identity : null, capabilities: DESKTOP_TRACKER_UI_CAPABILITIES },
+      provider: { dataSource, identity: identity?.email ? identity : null, capabilities: DESKTOP_TRACKER_UI_CAPABILITIES, teamMembers },
       me: (lane === 'team' ? scope.indexConfig.userEmail : null) ?? identity?.email ?? null,
     };
-  }, [lane, teamScope, workspacePath, dataSource, identity]);
+  }, [lane, teamScope, workspacePath, dataSource, identity, teamMembers]);
 }
 
 /** The team directory, fetched and kept current (it arrives after the team room syncs). */

@@ -27,6 +27,7 @@ import { navigateToTrackerItem } from '../PullRequestMode/trackerNavigation';
 import { openAgentEditedPage } from '../../utils/agentEditedPage';
 import { createDesktopTrackerDataSource } from './desktopTrackerDataSource';
 import { useDesktopTrackerIdentity } from './useDesktopTrackerIdentity';
+import { useTrackerTeamMembers } from '../TrackerMode/useTrackerTeamMembers';
 import { temporaryTypeViewAtom, temporaryTypeViewKey } from '../CollabMode/temporaryTypeViews';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { isTeamTrackerSharing } from '../Settings/panels/trackerConfigUpgrade';
@@ -58,6 +59,7 @@ const WorkspacePlacedView: React.FC<PlacedViewEmbedFrameProps & { workspacePath:
 }) => {
   const store = useStore();
   const identity = useDesktopTrackerIdentity(workspacePath);
+  const teamMembers = useTrackerTeamMembers(workspacePath);
   const writer = useMemo(() => new ElectronTrackerDataSource({ workspacePath }), [workspacePath]);
   useEffect(() => () => writer.dispose(), [writer]);
   const dataSource = useMemo(
@@ -92,7 +94,7 @@ const WorkspacePlacedView: React.FC<PlacedViewEmbedFrameProps & { workspacePath:
   return (
     <div ref={anchorRef} className="placed-view-embed-frame">
       {reach ? (
-        <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
+        <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES} teamMembers={teamMembers}>
           <PlacedViewEmbed
             target={target}
             label={label}

@@ -58,6 +58,7 @@ import {
   type SortDirection,
 } from '@nimbalyst/collab-client/trackers';
 import { TrackerSurfaceMessage } from '../primitives/TrackerSurfaceMessage';
+import { useTrackersUITeamMembers } from '../TrackersUIProvider';
 import { buildDerivedGridColumn, buildGridActionsColumn, buildGridColumns } from './trackerGridColumns';
 import { LazyTrackerColumnFilterPopover } from './LazyTrackerColumnFilterPopover';
 import { useGridKeyOriginGuard } from './gridKeyOrigin';
@@ -220,6 +221,12 @@ export function TrackerGridSurface({
     [columnFilters]
   );
 
+  // Read when a cell opens, so the directory arriving late does not rebuild the columns.
+  const teamMembers = useTrackersUITeamMembers();
+  const teamMembersRef = useRef(teamMembers);
+  teamMembersRef.current = teamMembers;
+  const editorContext = useMemo(() => ({ teamMembers: () => teamMembersRef.current }), []);
+
   const gridColumns = useMemo(
     () => [
       ...placeDerivedColumns(buildGridColumns(visibleColumnDefs, {
@@ -227,6 +234,7 @@ export function TrackerGridSurface({
         sortingEnabled: !!onSortChange,
         columnWidths: effectiveConfig.columnWidths,
         isRowEditable,
+        editorContext,
         filteredColumnIds,
         onOpenFilter: onColumnFiltersChange
           ? (columnId, rect) => setFilterTarget({ columnId, rect })
@@ -245,6 +253,7 @@ export function TrackerGridSurface({
       schemaType,
       effectiveConfig.columnWidths,
       isRowEditable,
+      editorContext,
       filteredColumnIds,
       onColumnFiltersChange,
       onOpenItem,
@@ -477,7 +486,7 @@ export function TrackerGridSurface({
           (target) =>
             target instanceof HTMLElement &&
             (target.classList.contains('tracker-grid-editor-input') ||
-              target.classList.contains('tracker-grid-editor-select') ||
+              target.classList.contains('tracker-grid-choice-anchor') ||
               target.classList.contains('tracker-grid-editor-checkbox'))
         );
 
