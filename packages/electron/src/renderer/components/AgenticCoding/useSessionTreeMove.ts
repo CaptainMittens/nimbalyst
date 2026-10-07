@@ -4,7 +4,7 @@ import { atom, useAtomValue, useSetAtom, useStore } from 'jotai';
 import { sessionRegistryAtom } from '../../store/atoms/sessions';
 import { reparentSessionAtom } from '../../store';
 import { errorNotificationService } from '../../services/ErrorNotificationService';
-import { sessionMoveError } from './sessionTree';
+import { sessionMoveError } from './sessionTreeModel';
 
 const MIME = 'application/x-nimbalyst-session';
 // Drag payloads are protected during dragover; keep the local identity for validation.

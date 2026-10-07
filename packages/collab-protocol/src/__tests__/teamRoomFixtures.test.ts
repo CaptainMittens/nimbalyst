@@ -81,11 +81,12 @@ const decidedMark = {
   documentId: 'page-1', projectId: 'project-1', title: 'Specs', kind: 'decided',
   text: 'Storage lives in [Flagship](https://console.nimbalyst.com/x).', plainText: 'Storage lives in Flagship.',
   by: 'Greg Hinkle', email: 'greg@example.com', on: '2026-09-30', over: 'our own engine', line: 3, offset: 41,
-} satisfies Exhaustive<PageMarkEntry>;
+} satisfies Omit<Exhaustive<PageMarkEntry>, 'typedPage'>;
 const openMark = {
   documentId: 'tracker-content/NIM-42', projectId: null, title: null, kind: 'open',
+  typedPage: { itemId: 'NIM-42', typeId: 'bug', issueKey: 'NIM-42' },
   text: 'Pricing is unknown.', plainText: 'Pricing is unknown.', by: 'Spike 6', email: null, on: null, over: null, line: 1, offset: 0,
-} satisfies PageMarkEntry;
+} satisfies Exhaustive<PageMarkEntry>;
 
 // A typed page that underlies NIM-42 (incoming to it), and NIM-42's own link
 // out to a plain page.
@@ -128,10 +129,10 @@ const fixtures: Record<string, unknown> = {
   } satisfies Server<'pageLinksResponse'>,
   'pageLinksChanged.json': { type: 'pageLinksChanged' } satisfies Server<'pageLinksChanged'>,
   'pageMarksQuery.json': {
-    type: 'pageMarksQuery', requestId: 'marks-1', kind: 'decided', email: 'greg@example.com', documentIds: ['page-1'],
+    type: 'pageMarksQuery', requestId: 'marks-1', projectId: 'project-1', kind: 'decided', email: 'greg@example.com', documentIds: ['page-1'],
   } satisfies Client<'pageMarksQuery'>,
   'pageMarksResponse.json': {
-    type: 'pageMarksResponse', requestId: 'marks-1', marks: [decidedMark, openMark], status: 'ready',
+    type: 'pageMarksResponse', requestId: 'marks-1', marks: [decidedMark, openMark], status: 'ready', coverage: 'all-page-kinds',
   } satisfies Server<'pageMarksResponse'>,
   'itemPlacementIndexSync.json': { type: 'itemPlacementIndexSync' } satisfies Client<'itemPlacementIndexSync'>,
   'itemPlacementSet.json': {

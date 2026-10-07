@@ -1,4 +1,4 @@
-import type { TreeSession } from './sessionTree';
+import type { TreeSession } from './sessionTreeModel';
 
 /** Session rows archive subtrees; only explicit container selections archive worktrees. */
 export function resolveSessionArchiveSelection(

@@ -8,7 +8,7 @@ import {
   treeIndent,
   visibleSessionTreeIds,
   type TreeSession,
-} from '../sessionTree';
+} from '../sessionTreeModel';
 const row = (
   id: string,
   parentSessionId: string | null = null,

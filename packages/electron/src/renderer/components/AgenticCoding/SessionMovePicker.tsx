@@ -13,7 +13,7 @@ import {
   useRole,
 } from '@floating-ui/react';
 import { sessionRegistryAtom } from '../../store/atoms/sessions';
-import { sessionMoveError } from './sessionTree';
+import { sessionMoveError } from './sessionTreeModel';
 
 export function SessionMovePicker({
   sessionId,

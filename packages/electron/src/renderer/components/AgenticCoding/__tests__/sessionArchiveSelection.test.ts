@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
 import { resolveSessionArchiveSelection, sessionArchiveSubtreeIds } from '../sessionArchiveSelection';
-import type { TreeSession } from '../sessionTree';
+import type { TreeSession } from '../sessionTreeModel';
 const rows: TreeSession[] = [
   {id: 'root', createdAt: 1},
   {id: 'child', parentSessionId: 'root', createdAt: 1},

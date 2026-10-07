@@ -195,6 +195,8 @@ export const PAGE_TOOL_CONTRACT: readonly PageToolContract[] = [
       cursor: { type: 'string', description: 'nextCursor from the previous response. Keep the same query; restart if the tree changes.' },
       projection: { type: 'string', enum: ['full', 'compact'], description: 'Compact omits content links; full (default) preserves all navigation fields.' },
     } },
+    // Desktop returns its local tree without the remote pagination/filter controls.
+    remoteOnlyArgs: ['root', 'maxDepth', 'kinds', 'limit', 'cursor', 'projection'],
     remoteAcceptedValues: TEAM_SECTION_ONLY,
     desktopProjectArg: true,
   },

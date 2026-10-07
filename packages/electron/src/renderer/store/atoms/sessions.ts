@@ -1,4 +1,4 @@
-import { buildSessionTree, sessionTreeRootId } from '../../components/AgenticCoding/sessionTree';
+import { buildSessionTree, sessionTreeRootId } from '../../components/AgenticCoding/sessionTreeModel';
 import {selectedMachineAtom, machineSessionSelectionsAtom} from './remoteMachines';
 /**
  * AI Session Atoms

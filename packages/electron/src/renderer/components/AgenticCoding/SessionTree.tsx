@@ -12,7 +12,7 @@ import { workspaceSessionTurnActivityAtom } from '../../store/atoms/sessionActiv
 import { workstreamStateAtom } from '../../store/atoms/workstreamState';
 import { compactRowsAtom } from '../../store/atoms/agentMode';
 import { SessionListItem } from './SessionListItem';
-import { buildSessionTree, mergedTreeHeader, treeIndent, type SessionTreeNode } from './sessionTree';
+import { buildSessionTree, mergedTreeHeader, treeIndent, type SessionTreeNode } from './sessionTreeModel';
 
 export interface SessionTreeProps {
   sessions: SessionMeta[];

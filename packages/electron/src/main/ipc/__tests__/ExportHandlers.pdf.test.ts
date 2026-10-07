@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 type PdfRequest = {
   html: string;
   outputPath: string;
-  margins?: Electron.PrintToPDFMargins;
+  margins?: Electron.PrintToPDFOptions['margins'];
 };
 const mocks = vi.hoisted(() => ({
   handlers: new Map<string, (event: unknown, options: PdfRequest) => Promise<unknown>>(),
@@ -43,7 +43,7 @@ import { registerExportHandlers } from '../ExportHandlers';
 const pdfBuffer = Buffer.from('%PDF-export-regression');
 const request = { html: '<p>Export</p>', outputPath: '/unused/pdf-export.pdf' };
 
-async function exportPdf(margins?: Electron.PrintToPDFMargins) {
+async function exportPdf(margins?: Electron.PrintToPDFOptions['margins']) {
   const pending = mocks.handlers.get('export:htmlToPdf')!({}, { ...request, margins });
   await vi.advanceTimersByTimeAsync(500);
   return pending;

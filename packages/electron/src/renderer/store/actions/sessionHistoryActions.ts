@@ -1,5 +1,5 @@
 import { sessionListMetadata } from '../atoms/sessionListMetadata';
-import { sessionTreeRootId } from '../../components/AgenticCoding/sessionTree';
+import { sessionTreeRootId } from '../../components/AgenticCoding/sessionTreeModel';
 import {selectedMachineAtom, machineSessionSelectionsAtom} from '../atoms/remoteMachines';
 /**
  * Action atoms for SessionHistory.

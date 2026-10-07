@@ -60,7 +60,8 @@ describe('placedViewDefinition', () => {
       expect(definition.sortColumns).toEqual([{ field: 'score', direction: 'desc' }, { field: 'title', direction: 'asc' }]);
       expect(definition.columnConfig?.columnWidths).toEqual({ title: 320, score: 100 });
       expect(definition.columnFilters?.clauses).toEqual([{ field: 'score', op: '>=', value: '2' }, { field: 'due', op: '<', value: due.toISOString() }, { field: 'title', op: 'is-not-empty' }]);
-      for (const attrs of [{ sort: 'score:sideways' }, { sort: 'unknown:asc' }, { w: 'title:NaN' }, { scope: 'closed' }, { filter: 'title:>hello' }, { filter: 'score:!1|' }]) expect(() => placedViewDefinition('task', '', attrs, fields)).toThrow();
+      const invalidAttrs: Record<string, string>[] = [{ sort: 'score:sideways' }, { sort: 'unknown:asc' }, { w: 'title:NaN' }, { scope: 'closed' }, { filter: 'title:>hello' }, { filter: 'score:!1|' }];
+      for (const attrs of invalidAttrs) expect(() => placedViewDefinition('task', '', attrs, fields)).toThrow();
     } finally { vi.useRealTimers(); }
   });
 
