@@ -14,7 +14,7 @@
  */
 
 import { decodeViewAttrValue, type PlacedViewScope } from '@nimbalyst/runtime/core/placedViewUrl';
-import type { QuadrantPin } from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/quadrantModel';
+import type { QuadrantPin } from '@nimbalyst/runtime/core/quadrantModel';
 import type { TrackerFieldFilter } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import { createDefaultViewDefinition, type SavedView } from '@nimbalyst/collab-client/trackers';
 import { getDefaultColumnConfig } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerColumns';

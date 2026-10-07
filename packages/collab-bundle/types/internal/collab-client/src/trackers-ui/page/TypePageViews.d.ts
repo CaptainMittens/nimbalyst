@@ -1,11 +1,11 @@
 import { type ReactNode } from 'react';
-import type { LexicalEditor } from 'lexical';
 import type { CollabOpenOptions } from '../../core';
 import { type PlacedViewScope } from '../../../../runtime/src/core/placedViewUrl';
+import type { NamedPageViewsController } from '../../../../runtime/src/editor/plugins/EmbedPlugin/namedPageViewsController';
 import type { PlacedViewHandoff } from './placedViewHandoff';
-export declare function TypePageViews({ typeId, editor, temporaryView, onClearTemporaryView, onPrepareDocument, scope, onOpenItem, children }: {
+export declare function TypePageViews({ typeId, controller, temporaryView, onClearTemporaryView, onPrepareDocument, scope, onOpenItem, children }: {
     typeId: string;
-    editor?: LexicalEditor | null;
+    controller?: NamedPageViewsController | null;
     temporaryView?: PlacedViewHandoff | null;
     onClearTemporaryView?: () => void;
     onPrepareDocument?: () => Promise<void>;

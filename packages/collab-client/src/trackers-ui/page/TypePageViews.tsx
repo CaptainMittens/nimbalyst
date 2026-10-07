@@ -1,8 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { LexicalEditor } from 'lexical';
 import type { CollabOpenOptions } from '../../core';
 import { createPlacedViewMarkdown, type PlacedViewScope } from '@nimbalyst/runtime/core/placedViewUrl';
-import { createNamedPageViewsController, type NamedPageViewsController, type NamedPageViewsSnapshot } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/namedPageViewsController';
+import type { NamedPageViewsController, NamedPageViewsSnapshot } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/namedPageViewsController';
 import { LazyPlacedViewEmbed } from '../embed/LazyPlacedViewEmbed';
 import type { PlacedViewHandoff } from './placedViewHandoff';
 
@@ -10,9 +9,9 @@ const EMPTY: NamedPageViewsSnapshot = { views: [], editable: false, error: null 
 const emptyRead = () => EMPTY;
 const emptySubscribe = () => () => {};
 
-export function TypePageViews({ typeId, editor, temporaryView, onClearTemporaryView, onPrepareDocument, scope, onOpenItem, children }: {
+export function TypePageViews({ typeId, controller, temporaryView, onClearTemporaryView, onPrepareDocument, scope, onOpenItem, children }: {
   typeId: string;
-  editor?: LexicalEditor | null;
+  controller?: NamedPageViewsController | null;
   temporaryView?: PlacedViewHandoff | null;
   onClearTemporaryView?: () => void;
   onPrepareDocument?: () => Promise<void>;
@@ -20,13 +19,6 @@ export function TypePageViews({ typeId, editor, temporaryView, onClearTemporaryV
   onOpenItem: (id: string, options?: CollabOpenOptions) => void;
   children: ReactNode;
 }) {
-  const [controller, setController] = useState<NamedPageViewsController | null>(null);
-  useEffect(() => {
-    if (!editor) { setController(null); return; }
-    const next = createNamedPageViewsController(editor, typeId);
-    setController(next);
-    return () => next.dispose();
-  }, [editor, typeId]);
   const state = useSyncExternalStore(controller?.subscribe ?? emptySubscribe, controller?.getSnapshot ?? emptyRead, emptyRead);
   const [selected, setSelected] = useState<string | null>(null);
   const [explored, setExplored] = useState(temporaryView?.attrs ?? {});
@@ -41,7 +33,7 @@ export function TypePageViews({ typeId, editor, temporaryView, onClearTemporaryV
   const current = active ?? (temporaryView ? { name: temporaryView.label, attrs: explored } : null);
   const beginAdd = () => {
     setForm('add'); setName(current?.name || 'New view'); draftId.current = crypto.randomUUID(); setError(null);
-    if (!editor && onPrepareDocument) void onPrepareDocument().catch(cause => setError(cause instanceof Error ? cause.message : 'Could not open the type description.'));
+    if (!controller && onPrepareDocument) void onPrepareDocument().catch(cause => setError(cause instanceof Error ? cause.message : 'Could not open the type description.'));
   };
   return <>
     <div className="type-page-tab-views flex flex-wrap items-center gap-1 border-b border-nim text-xs" role="tablist" aria-label="Type views" onKeyDown={event => {
@@ -58,7 +50,7 @@ export function TypePageViews({ typeId, editor, temporaryView, onClearTemporaryV
       {temporaryView && !active ? <span className="px-2.5 py-2 text-nim">{temporaryView.label || 'View'} · Unsaved view</span> : null}
     </div>
     <div className="flex flex-wrap gap-3 py-2 text-xs text-nim-link">
-      <button type="button" disabled={!state.editable && (!!editor || !onPrepareDocument)} onClick={beginAdd}>{temporaryView && !active ? 'Save as named view' : 'Add view'}</button>
+      <button type="button" disabled={!state.editable && (!!controller || !onPrepareDocument)} onClick={beginAdd}>{temporaryView && !active ? 'Save as named view' : 'Add view'}</button>
       {active && state.editable ? <><button type="button" onClick={() => { setForm('rename'); setName(active.name); }}>Rename view</button><button type="button" onClick={() => perform(() => { controller!.remove(active.id); setSelected(null); setForm(null); })}>Remove view</button></> : null}
       {current ? <button type="button" disabled={!scope} onClick={() => {
         // A copied link carries its definition, not a lookup of this named view.
@@ -77,7 +69,7 @@ export function TypePageViews({ typeId, editor, temporaryView, onClearTemporaryV
       <input aria-label="View name" className="rounded border border-nim bg-nim px-2 py-1 text-nim" autoFocus value={name} onChange={event => setName(event.target.value)} />
       <button type="submit" disabled={!state.editable || !name.trim()} className="text-nim-link">{form === 'rename' ? 'Rename' : 'Save view'}</button>
       <button type="button" onClick={() => setForm(null)}>Cancel</button>
-      {!editor ? <span role="status">Opening the type description…</span> : null}
+      {!controller ? <span role="status">Opening the type description…</span> : null}
     </form> : null}
     {copy ? <label className="py-2 text-xs text-nim-muted">Copy this link and paste it into a page<input aria-label="View link to copy" className="mt-1 w-full rounded border border-nim bg-nim px-2 py-1 text-nim" readOnly value={copy} onFocus={event => event.target.select()} /></label> : null}
     {error || state.error ? <div role="alert" className="py-2 text-xs text-nim-error">{error || state.error}</div> : null}

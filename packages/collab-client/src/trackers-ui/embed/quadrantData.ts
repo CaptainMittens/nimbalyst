@@ -10,7 +10,7 @@ import {
   quadrantNumber,
   type QuadrantPin,
   type QuadrantPoint,
-} from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/quadrantModel';
+} from '@nimbalyst/runtime/core/quadrantModel';
 
 export interface QuadrantQuery {
   xField: string;

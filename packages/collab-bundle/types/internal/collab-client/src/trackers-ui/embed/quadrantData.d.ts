@@ -4,7 +4,7 @@
  * counted, so the chart can say how many it could not place.
  */
 import type { TrackerRecord } from '../../../../runtime/src/core/TrackerRecord';
-import { type QuadrantPin, type QuadrantPoint } from '../../../../runtime/src/editor/plugins/QuadrantPlugin/quadrantModel';
+import { type QuadrantPin, type QuadrantPoint } from '../../../../runtime/src/core/quadrantModel';
 export interface QuadrantQuery {
     xField: string;
     yField: string;

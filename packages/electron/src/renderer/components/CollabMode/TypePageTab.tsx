@@ -35,9 +35,12 @@ import { useDesktopTrackerIdentity } from '../EmbedFrame/useDesktopTrackerIdenti
 import { isTeamTrackerSharing } from '../Settings/panels/trackerConfigUpgrade';
 import { typePageTitle } from './collabPageTabs';
 import { TypePageProse } from './TypePageProse';
+import { useTypePageMenuItems } from './usePageMenuItems';
+import { editorExportMenuItems } from '../TabEditor/editorExport';
 import { personalPageHistoryKey } from '../../../shared/personalPageUri';
 import { historyDialogFileAtom } from '../../store/atoms/historyDialog';
 import { temporaryTypeViewAtom, temporaryTypeViewKey } from './temporaryTypeViews';
+import { useNamedPageViewsController } from './useNamedPageViewsController';
 import './TypePageTab.css';
 
 type Lane = 'team' | 'personal';
@@ -139,6 +142,10 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
   const proseExists = documents.some((document) => document.documentId === proseId);
   const historyKey = !proseExists ? null : lane === 'personal' ? personalPageHistoryKey(proseId) : scope ? buildCollabUri(scope.orgId, proseId) : null;
   const openHistory = useSetAtom(historyDialogFileAtom);
+  const proseEditor = viewsEditor?.key === editorKey ? viewsEditor.editor : null;
+  const viewsController = useNamedPageViewsController(proseEditor, typeId);
+  const exportItems = useMemo(() => editorExportMenuItems(proseEditor, typeName), [proseEditor, typeName]);
+  const menuItems = useTypePageMenuItems(lane, typeId, typePlacements.some((placement) => placement.typeId === typeId), exportItems);
 
   return (
     <div className="type-page-tab tracker-page-view flex h-full min-h-0 flex-col overflow-hidden bg-nim" data-testid="type-page-tab" data-type-id={typeId}>
@@ -153,6 +160,7 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
           else if (scope) openPageAncestor(ancestor, { personal: false, scope });
         }}
         onShowHistory={historyKey ? () => openHistory(historyKey) : undefined}
+        menuItems={menuItems}
       />
       <div className="type-page-tab-scroller min-h-0 flex-1 overflow-y-auto">
         <div className="type-page-tab-column">
@@ -193,7 +201,7 @@ export const TypePageTab: React.FC<TypePageTabProps> = ({ typeId, workspacePath,
           <TrackersUIProvider dataSource={dataSource} identity={trackerIdentity} capabilities={DESKTOP_TRACKER_UI_CAPABILITIES}>
             <TypePageTable
               key={editorKey}
-              viewsEditor={viewsEditor?.key === editorKey ? viewsEditor.editor : null}
+              viewsController={viewsController}
               viewScope={lane === 'personal' ? 'local' : scope?.indexConfig.teamProjectId ? { orgId: scope.orgId, projectId: scope.indexConfig.teamProjectId } : undefined}
               onPrepareViewsDocument={async () => {
                 if (!scope) throw new Error('The page is still opening.');

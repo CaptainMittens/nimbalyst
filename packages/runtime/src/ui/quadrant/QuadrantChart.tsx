@@ -11,7 +11,7 @@ import {
   quadrantRange,
   type QuadrantLabels,
   type QuadrantPoint,
-} from './quadrantModel';
+} from '../../core/quadrantModel';
 
 const WIDTH = 430;
 const HEIGHT = 250;

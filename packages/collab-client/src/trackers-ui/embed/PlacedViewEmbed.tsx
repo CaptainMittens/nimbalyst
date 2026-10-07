@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState, useSyncExternalStore, type JSX, type ReactNode } from 'react';
 import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { createPlacedViewUrl, type PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
-import { QuadrantChart } from '@nimbalyst/runtime/editor/plugins/QuadrantPlugin/QuadrantChart';
+import { QuadrantChart } from '@nimbalyst/runtime/ui/quadrant/QuadrantChart';
 import { globalRegistry } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
 import type { SavedView } from '@nimbalyst/collab-client/trackers';
 import { useTrackersUI } from '../TrackersUIProvider';

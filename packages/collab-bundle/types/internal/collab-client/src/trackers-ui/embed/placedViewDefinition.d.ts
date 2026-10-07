@@ -13,7 +13,7 @@
  * dropping a clause would silently answer a different question.
  */
 import { type PlacedViewScope } from '../../../../runtime/src/core/placedViewUrl';
-import type { QuadrantPin } from '../../../../runtime/src/editor/plugins/QuadrantPlugin/quadrantModel';
+import type { QuadrantPin } from '../../../../runtime/src/core/quadrantModel';
 import { type SavedView } from '../../trackers/index';
 import type { TrackerFilterField } from '../trackerFilterFields';
 export interface PlacedQuadrant {

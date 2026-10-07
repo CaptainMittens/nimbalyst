@@ -15,7 +15,7 @@ import { resolveRoleFieldName } from '@nimbalyst/runtime/plugins/TrackerPlugin/t
 import type { TrackerGridDerivedColumn } from '../grid/TrackerGridSurface';
 import { typeWithSubtypes } from '../../docs/collabPageTree';
 import { LazyTrackerViewEmbed as TrackerViewEmbed } from '../embed/LazyTrackerViewEmbed';
-import type { LexicalEditor } from 'lexical';
+import type { NamedPageViewsController } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/namedPageViewsController';
 import type { PlacedViewScope } from '@nimbalyst/runtime/core/placedViewUrl';
 import { TypePageViews } from './TypePageViews';
 import type { PlacedViewHandoff } from './placedViewHandoff';
@@ -24,7 +24,8 @@ import { createItemWhereResolver, type WherePage, type WherePlacement } from '..
 
 export interface TypePageTableProps {
   typeId: string;
-  viewsEditor?: LexicalEditor | null;
+  /** Built by the host from its editor: this entry must not load the editor graph. */
+  viewsController?: NamedPageViewsController | null;
   viewScope?: PlacedViewScope;
   onPrepareViewsDocument?: () => Promise<void>;
   temporaryView?: PlacedViewHandoff | null;
@@ -50,7 +51,7 @@ export function typePageTypeIds(typeId: string): string[] {
   });
 }
 
-export function TypePageTable({ typeId, typeLabel, rootLabel, itemPlacements, pages, itemTitle, onOpenItem, temporaryView, onClearTemporaryView, viewsEditor, viewScope, onPrepareViewsDocument }: TypePageTableProps): React.JSX.Element {
+export function TypePageTable({ typeId, typeLabel, rootLabel, itemPlacements, pages, itemTitle, onOpenItem, temporaryView, onClearTemporaryView, viewsController, viewScope, onPrepareViewsDocument }: TypePageTableProps): React.JSX.Element {
   const model = globalRegistry.get(typeId);
   const view = useMemo(() => createTypePageView(typeId), [typeId]);
   const typeIds = useMemo(() => typePageTypeIds(typeId), [typeId, model]);
@@ -64,7 +65,7 @@ export function TypePageTable({ typeId, typeLabel, rootLabel, itemPlacements, pa
 
   return (
     <div className="type-page-tab-table flex flex-col" data-testid="type-page-table">
-      <TypePageViews typeId={typeId} editor={viewsEditor} scope={viewScope} temporaryView={temporaryView} onClearTemporaryView={onClearTemporaryView} onPrepareDocument={onPrepareViewsDocument} onOpenItem={onOpenItem}>
+      <TypePageViews typeId={typeId} controller={viewsController} scope={viewScope} temporaryView={temporaryView} onClearTemporaryView={onClearTemporaryView} onPrepareDocument={onPrepareViewsDocument} onOpenItem={onOpenItem}>
         <TrackerViewEmbed view={view} variant="page" onOpenItem={onOpenItem} derivedColumns={derivedColumns} typeIds={typeIds} />
       </TypePageViews>
     </div>

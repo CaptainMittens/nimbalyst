@@ -14,7 +14,7 @@
  * markdown round-trips exactly and a line this parser skips is not lost.
  */
 
-import { quadrantNumber, type QuadrantLabels, type QuadrantPoint } from './quadrantModel';
+import { quadrantNumber, type QuadrantLabels, type QuadrantPoint } from '../../../core/quadrantModel';
 
 // The fence language and the inserted default live with the node, which is on
 // the editor's eager path; this parser loads with the block.

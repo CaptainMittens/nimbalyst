@@ -4,7 +4,7 @@
  * it follows the theme.
  */
 import { type JSX } from 'react';
-import { type QuadrantLabels, type QuadrantPoint } from './quadrantModel';
+import { type QuadrantLabels, type QuadrantPoint } from '../../core/quadrantModel';
 export interface QuadrantChartProps extends QuadrantLabels {
     points: readonly QuadrantPoint[];
     /** Opens an item's page when a query point is clicked. */

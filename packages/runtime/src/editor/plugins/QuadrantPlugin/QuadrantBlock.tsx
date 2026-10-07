@@ -8,7 +8,7 @@ import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext
 import { useLexicalEditable } from '@lexical/react/useLexicalEditable';
 import { $getNodeByKey, type NodeKey } from 'lexical';
 
-import { QuadrantChart } from './QuadrantChart';
+import { QuadrantChart } from '../../../ui/quadrant/QuadrantChart';
 import { parseQuadrantFence } from './quadrantFence';
 import { $isQuadrantNode } from './QuadrantNodeCore';
 
