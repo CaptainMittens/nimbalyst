@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 <!-- New features go here -->
+
+### Changed
+<!-- Changes to existing functionality go here -->
+
+### Fixed
+<!-- Bug fixes go here -->
+
+### Removed
+<!-- Removed features go here -->
+
+## [0.80.1] - 2026-10-07
+
+
+### Added
+<!-- New features go here -->
 - Sessions now form nested trees on desktop and mobile, with drag-to-reassign, Undo, subtree activity summaries, and an optional compact one-line view.
 - Pages: plain pages have a status, owner, summary and tags, and can move between Personal and Team.
 - Pages: swipe two fingers on the trackpad to go Back and Forward.
