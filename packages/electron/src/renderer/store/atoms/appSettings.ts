@@ -19,7 +19,7 @@ import { SAVED_CREDENTIAL } from '../../../shared/providerCredentials';
 
 import { atom, type Atom } from 'jotai';
 import posthog from 'posthog-js';
-import { copyToClipboard } from '@nimbalyst/runtime';
+import { copyToClipboard } from '@nimbalyst/runtime/utils/clipboard';
 import { store } from '@nimbalyst/runtime/store';
 import { type EffortLevel, type ThinkingMode, DEFAULT_EFFORT_LEVEL, DEFAULT_THINKING_MODE, parseEffortLevel, parseThinkingMode } from '@nimbalyst/runtime/ai/server/effortLevels';
 import { AlphaFeatureTag, getDefaultAlphaFeatures } from '../../../shared/alphaFeatures';
