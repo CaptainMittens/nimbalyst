@@ -399,6 +399,7 @@ export type ConsoleLinkOpener = (href: string) => boolean;
  * Personal page): routed in its own tab. Returns the uninstall.
  */
 export declare function setConsoleLinkOpener(next: ConsoleLinkOpener): () => void;
+export { createNamedPageViewsController, type NamedPageViewsController } from './internal/runtime/src/editor/plugins/EmbedPlugin/namedPageViewsController';
 
 /** Page history: where the diff is in its change groups. */
 export interface DiffNavigationState {
