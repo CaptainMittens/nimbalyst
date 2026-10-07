@@ -53,8 +53,10 @@ it('terminates an active SQLite worker without aborting its parent process', () 
     })().catch(e => { console.error(e); process.exitCode = 1; });
   `;
   try {
+    // ~15s alone; 100 fresh databases ran past 25s under a loaded full suite. The
+    // bound only stops a hung child, so it is generous rather than tight.
     const result = spawnSync(process.execPath, ['-e', script], {
-      timeout: 25_000, encoding: 'utf8', maxBuffer: 1024 * 1024,
+      timeout: 75_000, encoding: 'utf8', maxBuffer: 1024 * 1024,
       env: { ...process.env, NIMBALYST_BETTER_SQLITE3_NATIVE: '' },
     });
     expect({ status: result.status, signal: result.signal, error: result.error?.message }, result.stderr)
@@ -64,4 +66,4 @@ it('terminates an active SQLite worker without aborting its parent process', () 
     // The child cannot clean up after SIGABRT; the surviving test process can.
     rmSync(temp, { recursive: true, force: true });
   }
-}, 30_000);
+}, 90_000);
