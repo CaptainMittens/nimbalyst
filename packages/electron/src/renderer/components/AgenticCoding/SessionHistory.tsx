@@ -1190,13 +1190,13 @@ const SessionHistoryComponent: React.FC = () => {
       }
       // Update atom state immediately for instant feedback (optimistic update)
       // If not showing archived, this effectively removes it from view
-      updateSessionStore({ sessionId, updates: { isArchived: true } });
+      // The backend archives the whole subtree, so mirror that here.
+      const archivedIds = sessionArchiveSubtreeIds(sessionRegistry, [sessionId]);
+      archivedIds.forEach(id => updateSessionStore({ sessionId: id, updates: { isArchived: true } }));
       // Also remove from filtered list for immediate feedback
-      setSessions(prev => prev.filter(s => s.id !== sessionId));
+      setSessions(prev => prev.filter(s => !archivedIds.includes(s.id)));
       // Notify parent to close the tab if open
-      if (onSessionArchive) {
-        onSessionArchive(sessionId);
-      }
+      archivedIds.forEach(id => onSessionArchive?.(id));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       errorNotificationService.showError('Failed to archive session', message);
@@ -1291,9 +1291,10 @@ const SessionHistoryComponent: React.FC = () => {
     try {
       await window.electronAPI.invoke('sessions:update-metadata', sessionId, { isArchived: false });
       // Update atom state immediately for instant feedback (optimistic update)
-      updateSessionStore({ sessionId, updates: { isArchived: false } });
+      const restoredIds = new Set(sessionArchiveSubtreeIds(sessionRegistry, [sessionId]));
+      restoredIds.forEach(id => updateSessionStore({ sessionId: id, updates: { isArchived: false } }));
       // Also update filtered list for immediate feedback
-      setSessions(prev => prev.map(s => s.id === sessionId ? { ...s, isArchived: false } : s));
+      setSessions(prev => prev.map(s => restoredIds.has(s.id) ? { ...s, isArchived: false } : s));
     } catch (err) {
       console.error('[SessionHistory] Failed to unarchive session:', err);
     }
@@ -1665,10 +1666,11 @@ const SessionHistoryComponent: React.FC = () => {
     );
     await Promise.all(promises);
     // Update atom state for each unarchived session
-    selectedSessionIds.forEach(sessionId => {
+    const restoredIds = new Set(sessionArchiveSubtreeIds(sessionRegistry, Array.from(selectedSessionIds)));
+    restoredIds.forEach(sessionId => {
       updateSessionStore({ sessionId, updates: { isArchived: false } });
     });
-    setSessions(prev => prev.map(s => selectedSessionIds.has(s.id) ? { ...s, isArchived: false } : s));
+    setSessions(prev => prev.map(s => restoredIds.has(s.id) ? { ...s, isArchived: false } : s));
     clearSelection();
   };
 

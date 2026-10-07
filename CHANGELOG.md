@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 <!-- Changes to existing functionality go here -->
 
 ### Fixed
+- Archiving or restoring a session now immediately hides or restores its child sessions in the session list and kanban board, instead of leaving them visible until a refresh
 <!-- Bug fixes go here -->
 
 ### Removed

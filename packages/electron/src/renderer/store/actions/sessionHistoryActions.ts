@@ -1,5 +1,6 @@
 import { sessionListMetadata } from '../atoms/sessionListMetadata';
 import { sessionTreeRootId } from '../../components/AgenticCoding/sessionTreeModel';
+import { sessionArchiveSubtreeIds } from '../../components/AgenticCoding/sessionArchiveSelection';
 import {selectedMachineAtom, machineSessionSelectionsAtom} from '../atoms/remoteMachines';
 /**
  * Action atoms for SessionHistory.
@@ -267,9 +268,10 @@ export const archiveSessionActionAtom = atom(null, async (get, set, sessionId: s
   try {
     const result = await window.electronAPI.invoke('sessions:update-metadata', sessionId, { isArchived: true });
     if (result.success) {
-      set(updateSessionStoreAtom, { sessionId, updates: { isArchived: true } });
+      const archivedIds = sessionArchiveSubtreeIds(get(sessionRegistryAtom), [sessionId]);
+      archivedIds.forEach(id => set(updateSessionStoreAtom, { sessionId: id, updates: { isArchived: true } }));
       const selected = get(selectedWorkstreamAtom(workspacePath));
-      if (selected?.id === sessionId) {
+      if (selected && archivedIds.includes(selected.id)) {
         set(setSelectedWorkstreamAtom, { workspacePath, selection: null });
       }
     } else {
