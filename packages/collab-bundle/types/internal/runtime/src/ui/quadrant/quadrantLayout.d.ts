@@ -25,6 +25,13 @@ export interface PlacedLabel {
     ty: number;
     anchor: 'start' | 'middle' | 'end';
     text: string;
+    /** A line from the dot to a label that had to sit away from it. */
+    leader?: {
+        x1: number;
+        y1: number;
+        x2: number;
+        y2: number;
+    };
 }
 export interface QuadrantLayout {
     plot: Rect;
