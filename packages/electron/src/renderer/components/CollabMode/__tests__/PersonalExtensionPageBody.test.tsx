@@ -84,7 +84,8 @@ describe('PersonalExtensionPageBody', () => {
     vi.stubGlobal('electronAPI', { invoke });
     const page = { title: 'Architecture', documentType: 'excalidraw', fileExtension: '.excalidraw' };
     const view = render(<PersonalExtensionPageView documentId="doc-3" workspacePath="/ws" page={page} revision={1} />);
-    expect((await screen.findByTestId('stub-drawing')).textContent).toBe('{"elements":[1]}');
+    // The editor mounts once the body arrives, then fills in from its own async loadContent.
+    await vi.waitFor(() => expect(screen.getByTestId('stub-drawing').textContent).toBe('{"elements":[1]}'));
 
     // The page was edited in its tab: a new revision reaches the open editor without a write from here.
     stored = '{"elements":[1,3]}';
