@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import PageMarkEditorPlugin, { getPageMarkToolbarActions } from '../PageMarkEditorPlugin';
 import { $createPageMarkNode, $isPageMarkNode, PageMarkNode } from '../PageMarkNode';
+import { $updatePageMark } from '../pageMarkActions';
 
 function Bridge({ onReady }: { onReady: (editor: LexicalEditor) => void }): null {
   const [editor] = useLexicalComposerContext();
@@ -45,6 +46,27 @@ describe('PageMarkEditorPlugin', () => {
     const span = document.querySelector('.page-mark') as HTMLElement;
     fireEvent.click(span);
     await waitFor(() => expect(document.querySelector('.page-mark-editor')).not.toBeNull());
+  });
+
+  it('redraws the chip when a decision is switched to an open question', async () => {
+    const editor = mount();
+    let key = '';
+    await act(async () => {
+      editor.update(() => {
+        const mark = $createPageMarkNode({ kind: 'decided', by: 'Ana' });
+        mark.append($createTextNode('Use the newer model.'));
+        $getRoot().append($createParagraphNode().append(mark));
+        key = mark.getKey();
+      }, { discrete: true });
+    });
+
+    await act(async () => {
+      editor.update(() => $updatePageMark(key, { kind: 'open', by: 'Ana' }), { discrete: true });
+    });
+
+    const span = document.querySelector('.page-mark') as HTMLElement;
+    expect(span.getAttribute('data-page-mark')).toBe('open');
+    expect(span.classList.contains('page-mark--open')).toBe(true);
   });
 
   it('marks the selection as an open question and opens its editor', async () => {

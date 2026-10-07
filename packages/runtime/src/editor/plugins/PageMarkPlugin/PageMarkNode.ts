@@ -157,10 +157,13 @@ export class PageMarkNode extends ElementNode {
   }
 
   updateDOM(prevNode: PageMarkNode, element: HTMLElement): boolean {
-    const next = this.getAttrs();
-    const prev = prevNode.getAttrs();
-    if (prev.kind !== next.kind || prev.by !== next.by || prev.email !== next.email || prev.on !== next.on || prev.over !== next.over) {
-      applyPageMarkAttributes(element, next);
+    // Read the fields directly: `getAttrs()` goes through `getLatest()`, which
+    // resolves `prevNode` to this same new version during reconciliation.
+    if (
+      prevNode.__kind !== this.__kind || prevNode.__by !== this.__by || prevNode.__email !== this.__email
+      || prevNode.__on !== this.__on || prevNode.__over !== this.__over
+    ) {
+      applyPageMarkAttributes(element, this.getAttrs());
     }
     return false;
   }
