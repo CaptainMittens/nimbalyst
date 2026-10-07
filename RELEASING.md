@@ -241,20 +241,14 @@ Before tagging, reconcile the iOS release's capabilities against the Mobile (iOS
 
 ### Using /ios-release
 
-Run the `/ios-release` slash command in Claude Code:
-
-```
-/ios-release patch    # For bug fixes (1.0.1 -> 1.0.2)
-/ios-release minor    # For new features (1.0.1 -> 1.1.0)
-/ios-release major    # For breaking changes (1.0.1 -> 2.0.0)
-```
+Run the `/ios-release` slash command in Claude Code. It releases the version already in `Info.plist` and takes no patch/minor/major argument: after a release is accepted in the App Store, move `Info.plist` (app and widget) to the next expected version by hand, and that is the version TestFlight builds carry until it ships.
 
 This command will:
 1. Find commits since last `ios/*` tag touching `packages/ios/` and `packages/runtime/`
 2. Generate developer changelog (for `IOS_CHANGELOG.md`) and App Store "What's New" text
 3. Update `IOS_CHANGELOG.md` [Unreleased] section
 4. Wait for your approval
-5. Run `./scripts/ios-release.sh` which bumps Info.plist version + build number, commits, and creates an annotated `ios/v*` tag
+5. Run `./scripts/ios-release.sh` which increments the Info.plist build number (the version is left as is), commits, and creates an annotated `ios/v*` tag
 
 ### After Tagging
 
