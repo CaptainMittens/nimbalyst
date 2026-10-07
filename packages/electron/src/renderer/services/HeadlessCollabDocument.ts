@@ -24,6 +24,7 @@
 import { getCollabContentAdapter } from '@nimbalyst/collab-adapters';
 import { parseCollabUri, type DocumentDecisionCommand, type DocumentDecisionResult } from '@nimbalyst/collab-protocol';
 import type { Doc } from 'yjs';
+import type { CollaborationContext } from '@nimbalyst/runtime';
 import type { CollabDocumentConfig } from '../utils/collabDocumentOpener';
 
 import {
@@ -88,6 +89,10 @@ export interface HeadlessCollabDocumentAcquisition {
     urlExtraQuery?: string;
   };
   yDoc: Doc;
+  /** The full open-document config, for mounting an editor on this replica. */
+  collabConfig: CollabDocumentConfig;
+  /** The replica's collaboration context: what a custom editor binds to. */
+  collaboration: CollaborationContext;
   /**
    * The same DocumentSyncProvider a mounted editor would hold.
    *
@@ -197,6 +202,8 @@ export async function acquireHeadlessCollabDocument(
       document,
       documentType: document.documentType,
       config: acquisition.resource.config,
+      collabConfig: acquisition.resource.config,
+      collaboration: acquisition.resource.collaboration,
       yDoc: acquisition.resource.syncProvider.getYDoc(),
       syncProvider: acquisition.resource.syncProvider,
       replica: acquisition.resource.replica,

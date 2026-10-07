@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pages: plain pages have a status, owner, summary and tags, and can move between Personal and Team.
 - Pages: swipe two fingers on the trackpad to go Back and Forward.
 - Pages: copy a file from disk into Team or Personal pages with Copy to Pages... in Files or Add from Files... in Pages; agents can import files the same way.
+- Agents can edit drawings, mind maps, data models and other editor pages in Pages with those editors' tools, without the page open.
 
 ### Changed
 <!-- Changes to existing functionality go here -->
