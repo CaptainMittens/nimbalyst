@@ -9,9 +9,8 @@ updates:
   # Root pnpm workspace (Dependabot's `npm` ecosystem also handles pnpm). One
   # pnpm-lock.yaml covers every project listed in pnpm-workspace.yaml,
   # including @nimbalyst/memory-engine, which used to sit outside the npm
-  # workspaces and needed its own entry. packages/browser-extension and
-  # packages/cloudflare-sandbox keep separate npm lockfiles and are not
-  # covered here.
+  # workspaces and needed its own entry, and packages/browser-extension and
+  # packages/cloudflare-sandbox, which used to keep separate npm lockfiles.
   - package-ecosystem: npm
     directory: /
     schedule:

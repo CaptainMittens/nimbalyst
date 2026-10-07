@@ -56,7 +56,7 @@ and CI stays green. A test runs only when BOTH:
 
    ```bash
    git clone <nimbalyst-collab-url> ../nimbalyst-collab
-   cd ../nimbalyst-collab && npm install
+   cd ../nimbalyst-collab && pnpm install
    ```
 
    (Use `COLLAB_SERVER_PATH` to point at a checkout elsewhere; an absolute path

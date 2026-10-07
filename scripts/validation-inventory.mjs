@@ -10,7 +10,6 @@ export const scriptTests = [
   "scripts/__tests__/prepush-test-gate.test.mjs",
   "scripts/__tests__/build-wiki-plugin.test.mjs",
   "scripts/__tests__/install-git-hooks.test.mjs",
-  "scripts/__tests__/ensure-sandbox-dependencies.test.mjs",
   "scripts/__tests__/check-analytics-allowlist.test.mjs",
   "scripts/__tests__/check-collab-client-boundaries.test.mjs",
   "scripts/__tests__/check-identity-scopes.test.mjs",

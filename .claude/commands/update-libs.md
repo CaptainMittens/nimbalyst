@@ -34,10 +34,10 @@ Goal: tell the user what would change and what to consider, without modifying an
 
 1. **Check current versions** by reading the relevant package.json files (root, `packages/electron`, `packages/runtime`). For claude-agent-sdk also note the `overrides` pin in the root `package.json`.
 2. **Fetch latest versions** from npm for each in-scope package:
-  - `npm view @anthropic-ai/claude-agent-sdk version`
-  - `npm view @modelcontextprotocol/sdk version`
-  - `npm view @openai/codex-sdk version`
-  - Use `npm view <pkg> versions --json` to enumerate the intermediate versions between current and latest.
+  - `pnpm view @anthropic-ai/claude-agent-sdk version`
+  - `pnpm view @modelcontextprotocol/sdk version`
+  - `pnpm view @openai/codex-sdk version`
+  - Use `pnpm view <pkg> versions --json` to enumerate the intermediate versions between current and latest.
 3. **Get changelogs** for the full gap between current and latest:
   - **claude-agent-sdk**: fetch the SDK changelog at https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md. If entries say "brought up to CLI version X.Y.Z", also fetch the Claude Code CLI changelog at https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md for those CLI versions.
   - **MCP SDK**: fetch https://github.com/modelcontextprotocol/typescript-sdk/releases.
@@ -103,7 +103,7 @@ Do not start until the user has explicitly approved. Only touch the packages the
 2. **Run `pnpm install`** at the repository root to update `pnpm-lock.yaml`.
 3. **Verify** with `pnpm why <package-name>` (or `pnpm list -r <package-name>`) for each updated package. If it still resolves the old version despite the package.json change:
   - Check whether `minimumReleaseAge` blocked the new version, and whether the `overrides` pin in `pnpm-workspace.yaml` was bumped.
-  - Use `npm view <package>@<version> --json` to confirm the version exists and read its `dependencies`.
+  - Use `pnpm view <package>@<version> --json` to confirm the version exists and read its `dependencies`.
   - Re-run `pnpm install` and verify again. Do not hand-edit `pnpm-lock.yaml`.
 4. **Verify Codex platform binaries** (if codex in scope) — `@openai/codex-sdk` depends on `@openai/codex`, which has optional platform-specific binary packages (e.g., `@openai/codex-darwin-arm64`). Check `ls node_modules/@openai/codex-darwin-arm64/vendor/`. If missing: `pnpm --filter @nimbalyst/electron --filter @nimbalyst/runtime add @openai/codex-sdk@<version>`, then verify again.
 5. **Verify claude-agent-sdk platform binaries** (if claude in scope) — check `node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/` (or host platform) exists.

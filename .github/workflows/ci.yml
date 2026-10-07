@@ -319,7 +319,7 @@ jobs:
   # To run them locally:
   #   1. Check out nimbalyst-collab as a sibling directory:
   #        git clone <nimbalyst-collab-url> ../nimbalyst-collab
-  #        cd ../nimbalyst-collab && npm install
+  #        cd ../nimbalyst-collab && pnpm install
   #   2. From stravu-editor, start the dev server (pnpm run dev).
   #   3. RUN_COLLAB_TESTS=1 pnpm exec playwright test \
   #        e2e/tracker/tracker-sync-collab.spec.ts

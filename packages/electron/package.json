@@ -20,7 +20,7 @@
     "licenses:generate": "node build/generate-third-party-licenses.js",
     "licenses:check": "node build/generate-third-party-licenses.js --check",
     "build": "pnpm run licenses:generate && cross-env NODE_OPTIONS='--max-old-space-size=8192' electron-vite build && pnpm run build:worker && pnpm run build:cloudflare-sandbox",
-    "build:cloudflare-sandbox": "npm ci --prefix ../cloudflare-sandbox --workspaces=false --ignore-scripts --no-audit --no-fund && npm run build --prefix ../cloudflare-sandbox",
+    "build:cloudflare-sandbox": "pnpm --filter @nimbalyst/cloudflare-sandbox run build",
     "build:worker": "node build/build-worker.js",
     "build:extensions": "node build/build-extensions.js",
     "typecheck": "tsc --noEmit",

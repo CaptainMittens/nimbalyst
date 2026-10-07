@@ -53,7 +53,7 @@ mkdir -p "$OUTPUT_DIR"
 # --- Build -------------------------------------------------------------------
 if [ "$SKIP_BUILD" -eq 0 ]; then
     echo "[1/4] Building transcript bundle..."
-    (cd "$ANDROID_DIR" && npm run build:transcript >/dev/null)
+    (cd "$ANDROID_DIR" && pnpm run build:transcript >/dev/null)
 
     echo "[2/4] Building debug APK..."
     (cd "$ANDROID_DIR" && ./gradlew :app:assembleDebug -q)

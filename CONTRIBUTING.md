@@ -29,6 +29,8 @@ corepack enable
 pnpm install
 ```
 
+npm is blocked at the repository root: `devEngines` in `package.json` makes any `npm` command there fail with `EBADDEVENGINES`. Use the pnpm equivalent.
+
 All pnpm settings live in the root `pnpm-workspace.yaml`; `.npmrc` holds registry and auth only. Two settings affect day-to-day work:
 
 - `allowBuilds` is an allowlist of packages permitted to run install scripts. A new dependency with an install script fails `pnpm install` until it is added there as `true` or `false`, which is a security decision that reviewers will look at.

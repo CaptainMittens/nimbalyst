@@ -21,10 +21,8 @@ packages:
   - packages/extensions/nimbalyst-memory/engine
   - packages/marketplace
   - packages/opencode-plugin
-  # Not in the workspace, each keeps its own npm lockfile because it deploys on
-  # its own and shares nothing with the app: packages/browser-extension (Chrome
-  # store build), packages/cloudflare-sandbox (container image, installed by
-  # scripts/ensure-sandbox-dependencies.mjs).
+  - packages/browser-extension
+  - packages/cloudflare-sandbox
 
 # Flat node_modules like npm's. electron-builder packaging, the extraResources
 # list, and several build scripts still expect one hoisted tree.

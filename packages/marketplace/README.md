@@ -150,7 +150,7 @@ The deploy script bumps the version in `package.json`, passes it to the Worker a
 ## Cloudflare account isolation
 
 This Worker deploys to the **Nimbalyst** Cloudflare account
-(`454b0e55f2d7f9abc0d52d4217ecdc3c`). Every npm script and shell script
+(`454b0e55f2d7f9abc0d52d4217ecdc3c`). Every package script and shell script
 that shells out to wrangler sets:
 
 ```
@@ -162,7 +162,7 @@ isolated from any other Cloudflare accounts on this machine. The same
 `XDG_CONFIG_HOME` is reused by `packages/collabv3` and
 `packages/collabv3-metrics` so one `pnpm run login` covers all three.
 
-Always go through the npm scripts. Running `wrangler` directly from the
+Always go through the package scripts (`pnpm run ...`). Running `wrangler` directly from the
 shell will use the default config dir and may pick a different account.
 
 ```bash

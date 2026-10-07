@@ -11,6 +11,12 @@
     "pnpm": ">=12"
   },
   "packageManager": "pnpm@12.9.1",
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "onFail": "error"
+    }
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/nimbalyst/nimbalyst.git"
@@ -67,7 +73,7 @@
     "check:team-lane-crypto-names": "node scripts/check-team-lane-crypto-names.mjs",
     "check:tracker-policy-reads": "node scripts/check-tracker-policy-reads.mjs",
     "check:analytics-allowlist": "node scripts/check-analytics-allowlist.mjs",
-    "test:cloudflare-sandbox": "node scripts/ensure-sandbox-dependencies.mjs && npm run typecheck --prefix packages/cloudflare-sandbox && npm run test:artifact --prefix packages/cloudflare-sandbox && node --test packages/cloudflare-sandbox/container/checks/image-pins.test.mjs"
+    "test:cloudflare-sandbox": "pnpm --filter @nimbalyst/cloudflare-sandbox run typecheck && pnpm --filter @nimbalyst/cloudflare-sandbox run test:artifact && node --test packages/cloudflare-sandbox/container/checks/image-pins.test.mjs"
   },
   "devDependencies": {
     "@babel/plugin-transform-flow-strip-types": "^7.24.7",
