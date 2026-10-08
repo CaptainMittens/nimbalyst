@@ -396,7 +396,7 @@ describe('AI input menu handoff', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByTestId('action-prompts-dropdown-panel')));
     await screen.findByTestId('action-prompt-item-review');
     await act(async () => { fireEvent.keyDown(document.activeElement!, { key: 'Enter' }); });
-    expect(onInsert).toHaveBeenCalledWith('Review the changes');
+    expect(onInsert).toHaveBeenCalledWith('Review the changes', { effort: undefined, model: undefined });
     expect(screen.queryByRole('menu')).toBeNull();
   });
 
@@ -426,7 +426,7 @@ describe('AI input menu handoff', () => {
     for (const key of 'ty') fireEvent.keyDown(panel, { key });
     expect(onInsert).not.toHaveBeenCalled();
     await act(async () => { fireEvent.keyDown(panel, { key: 'Enter' }); });
-    expect(onInsert).toHaveBeenLastCalledWith('Write type definitions');
+    expect(onInsert).toHaveBeenLastCalledWith('Write type definitions', { effort: undefined, model: undefined });
 
     fireEvent.click(screen.getByTestId('action-prompts-dropdown'));
     fireEvent.keyDown(screen.getByTestId('action-prompts-dropdown-panel'), { key: 'r' });
@@ -435,6 +435,6 @@ describe('AI input menu handoff', () => {
     const reopenedPanel = screen.getByTestId('action-prompts-dropdown-panel');
     for (const key of 'te') fireEvent.keyDown(reopenedPanel, { key });
     await act(async () => { fireEvent.keyDown(reopenedPanel, { key: 'Enter' }); });
-    expect(onInsert).toHaveBeenLastCalledWith('Write regression tests');
+    expect(onInsert).toHaveBeenLastCalledWith('Write regression tests', { effort: undefined, model: undefined });
   });
 });
