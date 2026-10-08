@@ -361,6 +361,7 @@ export class MetaAgentService {
       prompt: string;
       title?: string;
       model?: string;
+      effortLevel?: string;
       autoSubmit: boolean;
       useWorktree?: boolean;
     }
@@ -404,6 +405,7 @@ export class MetaAgentService {
       useWorktree: !!args.useWorktree,
       worktreeId: inheritedWorktreeId,
       model: effectiveModel,
+      effortLevel: args.effortLevel,
       parentSessionIdOverride: workstreamId,
       // Always fire-and-forget for human-triggered launches — the user can
       // watch the new session themselves; no need to surface child-completion

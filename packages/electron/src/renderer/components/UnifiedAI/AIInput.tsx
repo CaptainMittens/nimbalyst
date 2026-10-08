@@ -12,7 +12,7 @@ import { AIInputControls } from './AIInputControls';
 import { registerPendingVoiceCommandSetter } from './VoiceModeButton.tsx';
 import { PendingVoiceCommand } from './PendingVoiceCommand';
 import { pendingVoiceCommandAtom, voiceActiveSessionIdAtom, type PendingVoiceCommand as PendingVoiceCommandType } from '../../store/atoms/voiceModeState';
-import type { ActionPrompt } from '../../store/atoms/actionPrompts';
+import type { ActionPrompt, ActionPickerSettings } from '../../store/atoms/actionPrompts';
 import { SelectionChips } from './SelectionChips';
 import {
   MemoryPromptIndicator,
@@ -298,7 +298,10 @@ export const AIInput = forwardRef<AIInputRef, AIInputProps>(
     // Replace the draft with an action-prompt body and place the cursor at
     // the end. Pushes a boundary undo snapshot so Cmd+Z restores the prior
     // draft instead of coalescing with the user's next keystroke.
-    const handleActionPromptInsert = useCallback((body: string) => {
+    const handleActionPromptInsert = useCallback((body: string, picker?: ActionPickerSettings) => {
+      // An action that pins a model or effort switches the matching picker.
+      if (picker?.model && onModelChange && picker.model !== currentModel) onModelChange(picker.model);
+      if (picker?.effort && onEffortLevelChange && picker.effort !== effortLevel) onEffortLevelChange(picker.effort);
       pushSnapshot(captureSnapshot(), { boundary: true });
       onChange(body);
       requestAnimationFrame(() => {
@@ -311,7 +314,7 @@ export const AIInput = forwardRef<AIInputRef, AIInputProps>(
           // best-effort cursor placement
         }
       });
-    }, [pushSnapshot, captureSnapshot, onChange]);
+    }, [pushSnapshot, captureSnapshot, onChange, onModelChange, currentModel, onEffortLevelChange, effortLevel]);
 
     // File mention state via Jotai atoms
     // Subscribes directly to atoms instead of receiving props (no prop drilling)

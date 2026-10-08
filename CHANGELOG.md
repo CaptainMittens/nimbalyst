@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-<!-- New features go here -->
+- Actions can set an `effort` level, and choosing an action that sets a model or effort switches the composer's pickers to match
 
 ### Changed
 <!-- Changes to existing functionality go here -->

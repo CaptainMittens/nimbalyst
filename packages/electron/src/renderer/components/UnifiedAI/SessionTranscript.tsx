@@ -1402,6 +1402,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
           actionLabel: action.label,
           config: {
             model: action.config.model,
+            effort: action.config.effort,
             foreground: action.config.foreground,
             autoSubmit: action.config.autoSubmit,
             worktree: action.config.worktree,

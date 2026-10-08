@@ -7,6 +7,7 @@ import { useMenuTypeahead } from '../../hooks/useMenuTypeahead';
 import {
   actionPromptsAtomFamily,
   type ActionPrompt,
+  type ActionPickerSettings,
 } from '../../store/atoms/actionPrompts';
 
 interface ActionPromptsDropdownProps {
@@ -18,7 +19,7 @@ interface ActionPromptsDropdownProps {
    * `launch: same-session` (or has no config at all). The composer should
    * replace its draft with this string and push an undo snapshot.
    */
-  onInsert: (body: string) => void;
+  onInsert: (body: string, picker?: ActionPickerSettings) => void;
   /**
    * Called when the user picks an action whose config is `launch: new-session`.
    * If omitted, the dropdown falls back to the same-session insert path so
@@ -108,7 +109,7 @@ export function ActionPromptsDropdown({ open, onOpenChange, workspacePath, onIns
         return;
       }
 
-      onInsert(action.body);
+      onInsert(action.body, { model: action.config?.model, effort: action.config?.effort });
       menu.setIsOpen(false);
       try {
         posthog?.capture('action_prompt_inserted', {
