@@ -14,12 +14,13 @@ import { runWorkspace } from './commands/workspace.js';
 import { runSession, runDoc } from './commands/sessionDoc.js';
 import { runRelease } from './commands/release.js';
 import { runLogin, runLogout, runWhoami } from './commands/login.js';
-import { runPages, wikiRenamed } from './commands/pages.js';
+import { runPages } from './commands/pages.js';
 
 export const VERSION = '0.1.0';
 
-const PAGES_HELP = `Team pages (Nimbalyst Teams sign-in; server = NIM_SERVER, default https://sync.nimbalyst.com):
+const PAGES_HELP = `Team wiki (Nimbalyst Teams sign-in; server = NIM_SERVER, default https://sync.nimbalyst.com):
   nim login / nim logout / nim whoami
+  nim wiki ...                               (same as nim pages ...)
   nim pages status                           (unbound, bound, or ambiguous, with your teams)
   nim pages bind --org <id> --project <id>   (team admins: connect this repo's remote)
   nim pages create-project --org <id> --name <n> [--bind]   (team admins)
@@ -151,9 +152,8 @@ export async function main(argv: string[]): Promise<number> {
       case 'whoami':
         return await runWhoami(args);
       case 'pages':
-        return await runPages(args);
       case 'wiki':
-        return wikiRenamed();
+        return await runPages(args);
       default:
         process.stderr.write(`nim: unknown command '${args.noun}'. Run 'nim --help'.\n`);
         return ExitCode.USAGE;

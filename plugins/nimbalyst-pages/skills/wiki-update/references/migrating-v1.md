@@ -16,7 +16,7 @@ The earlier knowledge graph stored knowledge as many small tracker items: `entit
 
 | Old | Becomes |
 | --- | --- |
-| `entity` with a label that names a kind of thing (product, technology, person, organization, subsystem) | A typed page of the project's matching type (Competitor, Technology, Person, Module). Create the type first with `knowledge-setup` if the team wants it. |
+| `entity` with a label that names a kind of thing (product, technology, person, organization, subsystem) | A typed page of the project's matching type (Competitor, Technology, Person, Module). Create the type first with the setup skill (`/nimbalyst-pages:wiki-setup`) if the team wants it. |
 | `entity` that is an area, topic, home or one-off page | A plain page. An area becomes a page with an empty body or a short overview; its children nest under it. |
 | `entity.parent` | Tree position: the page sits under its parent page. |
 | Label-carrying field properties (status, website, lifecycle) | A single-valued field on the type when the team wants it in the header or the table; otherwise a sentence in the body. Multi-valued properties become body text or a table, never header lists. |
@@ -28,7 +28,7 @@ The earlier knowledge graph stored knowledge as many small tracker items: `entit
 | `finding` | The answer written as a decision or a conclusion on the page the question affects, with the claims it rested on as linked sources. Keep `scope` and `limitations` as one sentence each. |
 | `investigation` | One or two sentences on the affected page: what was tried, when, and what it showed, including inconclusive results, with links to the session or document. |
 | `decision` or `keystone` item | `[What was decided.]{decided by="<who>" email=<their email> on=<YYYY-MM-DD> over="<what was not chosen>"}` in the page it affects, with the reason in the next sentence. A decision that affects several pages is marked once on the most specific page and linked from the others. |
-| `predicates.yaml` entries | Keep the ones that read as named relations between the project's types, and add `objectKinds` with `knowledge-setup`. Do not remove the others. |
+| `predicates.yaml` entries | Keep the ones that read as named relations between the project's types, and add `objectKinds` with the setup skill. Do not remove the others. |
 | `ontology-proposal` items | Leave them. They describe the old model. |
 
 ## Done means

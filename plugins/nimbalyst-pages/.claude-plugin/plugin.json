@@ -1,7 +1,7 @@
 {
   "name": "nimbalyst-pages",
   "version": "0.2.0",
-  "description": "Your team's Nimbalyst Pages from Claude Code: read them as context, and record what people decided in the page it affects, with citations to what was said.",
+  "description": "Your team's Nimbalyst Wiki from Claude Code: read its pages as context, and record what people decided in the page it affects, with citations to what was said.",
   "author": {
     "name": "Nimbalyst",
     "url": "https://nimbalyst.com"

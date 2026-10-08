@@ -57,7 +57,7 @@ export interface BrowserTrackerSchemaState {
     navigationEntries: TrackerNavigationEntry[];
     /**
      * The room's predicate registry: the labels and inverse labels of the
-     * relations knowledge-graph statements use. Empty until the room publishes
+     * relations wiki pages use. Empty until the room publishes
      * one; an unreadable publish leaves the previous registry in place.
      */
     predicates: PredicateDefinition[];

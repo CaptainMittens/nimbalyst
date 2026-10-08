@@ -1,7 +1,7 @@
 {
-  "name": "knowledge",
+  "name": "wiki",
   "version": "1.0.0",
-  "description": "Knowledge pages setup, writing guide, and authoring guidance for Nimbalyst Pages",
+  "description": "Wiki setup, writing guide, and authoring guidance for the Nimbalyst Wiki",
   "author": {
     "name": "Nimbalyst",
     "url": "https://nimbalyst.com"

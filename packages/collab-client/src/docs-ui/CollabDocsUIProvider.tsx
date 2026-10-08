@@ -79,7 +79,7 @@ export function CollabDocsUIProvider({
 export function useCollabDocsUI(): CollabDocsUIContextValue {
   const value = useContext(CollabDocsUIContext);
   if (!value) {
-    throw new Error('Pages UI must be rendered inside CollabDocsUIProvider');
+    throw new Error('Wiki UI must be rendered inside CollabDocsUIProvider');
   }
   return value;
 }

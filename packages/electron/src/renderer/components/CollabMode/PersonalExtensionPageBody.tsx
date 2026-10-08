@@ -263,7 +263,7 @@ const PersonalExtensionEditor: React.FC<PersonalExtensionPageBodyProps & { body:
         ) : (
           <div className="py-4 text-center text-sm text-nim-faint" role="status">
             {body.status === 'unavailable'
-              ? 'This page is unavailable on this device. It may have been deleted. Check Pages Trash for a recoverable copy.'
+              ? 'This page is unavailable on this device. It may have been deleted. Check Wiki Trash for a recoverable copy.'
               : body.status === 'error' ? 'This page could not be loaded.' : 'Loading...'}
             {(body.status === 'unavailable' || body.status === 'error') && (
               <button type="button" className="ml-2 text-nim-link hover:underline" onClick={body.retryLoad}>Try again</button>

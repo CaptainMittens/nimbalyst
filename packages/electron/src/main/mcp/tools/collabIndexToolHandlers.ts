@@ -1,5 +1,5 @@
 import { BrowserWindow } from "electron";
-import { PAGE_TOOL_DESKTOP_PROJECT_ARG } from "@nimbalyst/collab-protocol";
+import { PAGE_TOOL_CONTRACT, PAGE_TOOL_DESKTOP_PROJECT_ARG } from "@nimbalyst/collab-protocol";
 import { findWindowIdForWorkspacePath } from "../mcpWorkspaceResolver";
 import { getMostRecentlyFocusedWorkspaceWindow } from "../../window/WindowManager";
 import { requestFromRenderer } from "../rendererRequest";
@@ -12,7 +12,7 @@ type McpToolResult = {
 };
 
 /**
- * Page tree MCP tools for Pages mode, Team and Personal sections: list the
+ * Page tree MCP tools for Wiki mode, Team and Personal sections: list the
  * tree, create pages, move and reorder pages, typed pages and placed types,
  * rename, delete, Set type, and a plain page's own fields. Folders are pages in the page tree; the
  * `folder` names on the wire (`parentFolderId`, `folderPath`, kind 'folder')
@@ -31,13 +31,16 @@ const SLOW_ROUND_TRIP_TIMEOUT_MS = 60000;
 const SECTION = {
   type: "string",
   enum: ["team", "personal"],
-  description: "Pages section. Default 'team'. 'personal' is local and works with no account.",
+  description: "Wiki section. Default 'team'. 'personal' is local and works with no account.",
 };
 const PARENT_KIND = {
   type: "string",
   enum: ["page", "item"],
   description: "What the parent id names: a page, or a typed page ('item'). Inferred from the id when omitted.",
 };
+/** listPages paging and filters, shaped as the remote server takes them; without them an agent never sees past the first page. */
+const { root, maxDepth, kinds, limit, cursor, projection } = PAGE_TOOL_CONTRACT.find((tool) => tool.name === "listPages")!.inputSchema.properties;
+
 const BESIDE = "Tree node id from listPages (e.g. 'document:<id>', 'item:<id>', 'type:<id>'), or a bare page id, issue key or type id.";
 
 export function getCollabIndexToolSchemas() {
@@ -45,13 +48,16 @@ export function getCollabIndexToolSchemas() {
     {
       name: "listPages",
       description:
-        "List a Pages section as a tree: pages, placed types and typed pages, each with nodeId, kind, id, title, parentNodeId, depth, sortOrder and the https link to write in page content (types also a viewLink); pages carry the uri to read and edit their body, typed pages their issueKey and whether they are placed outside their type. The team section lists the current project and names the team's other projects; pass one as `project` to list it.",
-      inputSchema: { type: "object", properties: { section: SECTION, project: PAGE_TOOL_DESKTOP_PROJECT_ARG } },
+        "List a Wiki section as a paginated tree (100 nodes by default, at most 500): while truncated is true, call again with nextCursor and the same arguments; root, maxDepth and kinds narrow the listing. Pages, placed types and typed pages, each with nodeId, kind, id, title, parentNodeId, depth, sortOrder and the https link to write in page content (types also a viewLink); pages carry the uri to read and edit their body, typed pages their issueKey and whether they are placed outside their type. The team section lists the current project and names the team's other projects; pass one as `project` to list it.",
+      inputSchema: {
+        type: "object",
+        properties: { section: SECTION, root, maxDepth, kinds, limit, cursor, projection, project: PAGE_TOOL_DESKTOP_PROJECT_ARG },
+      },
     },
     {
       name: "searchPages",
       description:
-        "Search a Pages section by the text in page bodies and titles: pages, typed pages and type pages. Every word must match; the last also matches as a word start. Returns the best matches first, each with kind, id, title, the uri to read with readCollabDoc, the https link to write in page content, and a snippet of the matching text. Use it to find what the pages say about a topic (for example what was decided about X) instead of reading pages one by one. Pass `project` to search another project of the team.",
+        "Search a Wiki section by the text in page bodies and titles: pages, typed pages and type pages. Every word must match; the last also matches as a word start. Returns the best matches first, each with kind, id, title, the uri to read with readCollabDoc, the https link to write in page content, and a snippet of the matching text. Use it to find what the pages say about a topic (for example what was decided about X) instead of reading pages one by one. Pass `project` to search another project of the team.",
       inputSchema: {
         type: "object",
         properties: {
@@ -66,7 +72,7 @@ export function getCollabIndexToolSchemas() {
     {
       name: "createSharedDoc",
       description:
-        "Create a page in Pages, under a page, under a typed page, or at the top of the section. Returns the documentId, the uri of its body and the https link to it.",
+        "Create a page in the Wiki, under a page, under a typed page, or at the top of the section. Returns the documentId, the uri of its body and the https link to it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -94,7 +100,7 @@ export function getCollabIndexToolSchemas() {
     {
       name: "importFileToPages",
       description:
-        "Copy a file from this computer into Pages as a page: a drawing, mind map, data model, mockup, spreadsheet, slides, notebook or markdown file becomes a page of that type that teammates can open. Use it instead of linking a file path from a Team page, which teammates cannot open. Returns the documentId, the uri and the https link to it.",
+        "Copy a file from this computer into the Wiki as a page: a drawing, mind map, data model, mockup, spreadsheet, slides, notebook or markdown file becomes a page of that type that teammates can open. Use it instead of linking a file path from a Team page, which teammates cannot open. Returns the documentId, the uri and the https link to it.",
       inputSchema: {
         type: "object",
         properties: {
@@ -127,7 +133,7 @@ export function getCollabIndexToolSchemas() {
     {
       name: "moveSharedItem",
       description:
-        "Move or reorder a node in the Pages tree: a page (kind 'doc', 'folder' or 'page'), a typed page ('item': places it under a page or typed page, or back under its type with underType), or a type ('type': Place type, or move its placement). Give a new parent, or before/after a sibling to reorder. Refuses a move that would put a node inside itself.",
+        "Move or reorder a node in the Wiki tree: a page (kind 'doc', 'folder' or 'page'), a typed page ('item': places it under a page or typed page, or back under its type with underType), or a type ('type': Place type, or move its placement). Give a new parent, or before/after a sibling to reorder. Refuses a move that would put a node inside itself.",
       inputSchema: {
         type: "object",
         properties: {
@@ -215,7 +221,7 @@ export function getCollabIndexToolSchemas() {
 }
 
 /**
- * Resolve the renderer window that owns the Pages sessions for this call.
+ * Resolve the renderer window that owns the Wiki sessions for this call.
  * Prefers the session's workspace window; falls back to the most recently
  * focused workspace window, mirroring what the person sees.
  */
@@ -348,7 +354,7 @@ async function runInRenderer(
   extra: Record<string, unknown> = {},
 ): Promise<McpToolResult> {
   const window = await resolveTargetWindow(workspacePath);
-  if (!window) return errorResult("Error: No open workspace window available for Pages.");
+  if (!window) return errorResult("Error: No open workspace window available for the Wiki.");
 
   const payload = { ...(args ?? {}), ...(workspacePath ? { workspacePath } : {}) };
   delete (payload as { resultChannel?: unknown }).resultChannel;

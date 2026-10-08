@@ -1,5 +1,5 @@
 {
-  "description": "Once per session, after substantive work, ask the agent to record what it decided in the team pages.",
+  "description": "Once per session, after substantive work, ask the agent to record what it decided in the team wiki.",
   "hooks": {
     "Stop": [
       {

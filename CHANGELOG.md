@@ -13,9 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- Changes to existing functionality go here -->
+- Pages is now called Wiki: the Knowledge skills are /wiki:setup and /wiki:update, `nim wiki` works like `nim pages`, and agents on a wiki page are pointed at /wiki:update.
 
 ### Fixed
 <!-- Bug fixes go here -->
+- Agents on desktop can list past the first 100 wiki pages.
 
 ### Removed
 <!-- Removed features go here -->

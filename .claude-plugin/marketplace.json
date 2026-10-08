@@ -9,7 +9,7 @@
     {
       "name": "nimbalyst-pages",
       "source": "./plugins/nimbalyst-pages",
-      "description": "Your team's Nimbalyst Pages from Claude Code: read them for context and record decisions where they belong."
+      "description": "Your team's Nimbalyst Wiki from Claude Code: read it for context and record decisions where they belong."
     }
   ]
 }

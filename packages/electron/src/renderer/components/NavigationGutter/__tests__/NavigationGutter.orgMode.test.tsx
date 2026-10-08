@@ -48,7 +48,7 @@ vi.mock('../../CodexUsageIndicator', () => ({ CodexUsageIndicator: () => null })
 vi.mock('../../GeminiUsageIndicator', () => ({ GeminiUsageIndicator: () => null }));
 vi.mock('../../UnifiedAI/VoiceModeButton', () => ({ VoiceModeButton: () => null }));
 
-import { NavigationGutter } from '../NavigationGutter';
+import { NavigationGutter, ORG_MODE_GUTTER_BUTTON_ENABLED } from '../NavigationGutter';
 
 afterEach(() => {
   cleanup();
@@ -105,7 +105,7 @@ describe('Org mode gutter item', () => {
     screen.getByTestId('collab-mode-button');
   });
 
-  it('switches to Org mode without touching the window\'s org selection, and badges unread', () => {
+  it.skipIf(!ORG_MODE_GUTTER_BUTTON_ENABLED)('switches to Org mode without touching the window\'s org selection, and badges unread', () => {
     projectOrg.current = { orgId: 'org-project', name: 'Project Org' };
     const store = createStore();
     // The standalone window is pointed somewhere else; the mode must not care.

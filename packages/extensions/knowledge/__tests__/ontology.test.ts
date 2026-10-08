@@ -8,7 +8,7 @@ import { parsePredicateRegistryYAML, relationsForPair } from '@nimbalyst/tracker
 // registry with `tracker_define_type`. They must parse with the runtime parser,
 // and the link menu must offer each one for the pair of types it names, and
 // not for a pair it does not.
-const RELATIONS = path.resolve(__dirname, '../claude-plugin/skills/knowledge-graph/references/relations.yaml');
+const RELATIONS = path.resolve(__dirname, '../claude-plugin/skills/update/references/relations.yaml');
 const parsed = parsePredicateRegistryYAML(readFileSync(RELATIONS, 'utf-8'));
 const predicates = parsed.predicates ?? [];
 

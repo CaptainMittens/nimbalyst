@@ -82,7 +82,7 @@ export async function openAgentEditedPage(uri: string, workspacePath: string, re
   if (uri.startsWith(TRACKER_CONTENT_PREFIX)) return openTypedPage(uri.slice(TRACKER_CONTENT_PREFIX.length), workspacePath, request);
   if (isCollabUri(uri)) {
     if (!openSharedDocumentInTab(parseCollabUri(uri).documentId, request.source, request.options)) {
-      throw new Error('Open the team\'s Pages to view this page.');
+      throw new Error('Open the team\'s Wiki to view this page.');
     }
     return;
   }

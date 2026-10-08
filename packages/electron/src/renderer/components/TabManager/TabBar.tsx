@@ -201,7 +201,7 @@ const TabItem: React.FC<TabItemProps> = ({
         />
       ) : tab.kind === 'type' || tab.kind === 'personal-page' ? (
         <>
-          {/* Same icons as the type and document rows in the Pages tree. */}
+          {/* Same icons as the type and document rows in the Wiki tree. */}
           {tab.kind === 'type'
             ? <MaterialSymbol icon="table" size={13} className="tab-type-icon mr-1 shrink-0 opacity-80 text-[var(--nim-purple)]" />
             : <MaterialSymbol icon="description" size={13} className="tab-personal-page-icon mr-1 shrink-0 opacity-80" />}

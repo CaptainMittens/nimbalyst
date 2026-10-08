@@ -6,7 +6,7 @@
 # the dated facts) are in `predicates.yaml` next to this file.
 #
 # `organization` is defined by the core pack; the entry here EXTENDS it with the
-# organization facts. When a label already exists, knowledge-setup unions its
+# organization facts. When a label already exists, wiki setup unions its
 # `properties`, `factBox` and `expects` with the pack's and keeps every other
 # key as the project has it.
 #

@@ -256,7 +256,7 @@ test('label health: expectations come from label data, ranges and cycles are rep
 
 test('the core and market packs, as data, reproduce the kind stand-in\'s product reports and keep competes-with off', () => {
   const [core, market] = [coreLabelsYaml, marketLabelsYaml].map((text) => yaml.load(text) as Partial<LabelRegistry>);
-  // knowledge-setup unions a re-declared label's properties, factBox and expects; the market pack's organization is a superset.
+  // wiki setup unions a re-declared label's properties, factBox and expects; the market pack's organization is a superset.
   const marketIds = new Set((market.labels ?? []).map((label: LabelDefinition) => label.id));
   const labels: LabelRegistry = {
     labels: [...(core.labels ?? []).filter((label) => !marketIds.has(label.id)), ...(market.labels ?? [])],

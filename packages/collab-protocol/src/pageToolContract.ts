@@ -1,5 +1,5 @@
 /**
- * The Pages agent tools as one contract: the tools a terminal agent reaches on
+ * The Wiki agent tools as one contract: the tools a terminal agent reaches on
  * the remote MCP server (`/mcp`), with the same names and arguments as the
  * desktop agent's tools, so one skill text serves both.
  *
@@ -118,7 +118,7 @@ export const PAGE_TOOL_DESKTOP_PROJECT_ARG = {
 const SECTION = {
   type: 'string',
   enum: ['team', 'personal'],
-  description: "Pages section. Only 'team' here; Personal pages live in the desktop app.",
+  description: "Wiki section. Only 'team' here; Personal pages live in the desktop app.",
 } as const;
 
 const TEAM_SECTION_ONLY: Readonly<Record<string, PageToolAcceptedValues>> = {
@@ -195,8 +195,6 @@ export const PAGE_TOOL_CONTRACT: readonly PageToolContract[] = [
       cursor: { type: 'string', description: 'nextCursor from the previous response. Keep the same query; restart if the tree changes.' },
       projection: { type: 'string', enum: ['full', 'compact'], description: 'Compact omits content links; full (default) preserves all navigation fields.' },
     } },
-    // Desktop returns its local tree without the remote pagination/filter controls.
-    remoteOnlyArgs: ['root', 'maxDepth', 'kinds', 'limit', 'cursor', 'projection'],
     remoteAcceptedValues: TEAM_SECTION_ONLY,
     desktopProjectArg: true,
   },

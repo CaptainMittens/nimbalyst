@@ -33,7 +33,7 @@ export interface CollabSidebarProps {
     typeResolver?: CollabTypeTreeResolver;
     /**
      * Archive a typed page (the tracker's own archive, which keeps its comments
-     * and sessions). Typed pages never go to Pages Trash; hosts without tracker
+     * and sessions). Typed pages never go to Wiki Trash; hosts without tracker
      * writes omit it and the row offers no Archive.
      */
     onArchiveItem?: (itemId: string) => Promise<void>;

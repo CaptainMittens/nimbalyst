@@ -248,7 +248,7 @@ Two-tier architecture — `ai_agent_messages` (raw append-only log, sole source 
 
 Tracker sharing model: **a tracker is personal or it is the team's; if it is the team's, the server owns it — schema and items together — and `.nimbalyst/trackers/*.yaml` is the local copy.** Read [TRACKER_SCHEMA_SHARING.md](./docs/TRACKER_SCHEMA_SHARING.md) before changing a tracker schema or sharing and numbering behavior.
 
-Record a decision where it is read. In a project with Pages, follow its "How we write this wiki" page: mark the decision as a sentence in the page it affects, and add a **decision** tracker item as well only when no single page owns it, work or commits hang off it, it is not settled, or its reasons don't fit in the mark. Without Pages, put it in the plan doc or a decision item. Not every choice needs a record. When fixing a bug, ensure a **bug** tracker item exists before writing fix code. See [TRACKER_WORKFLOWS.md](./docs/TRACKER_WORKFLOWS.md) for the exact `tracker_create` calls and lifecycle.
+Record a decision where it is read. In a project with a Wiki, follow its "How we write this wiki" page: mark the decision as a sentence in the page it affects, and add a **decision** tracker item as well only when no single page owns it, work or commits hang off it, it is not settled, or its reasons don't fit in the mark. Without a Wiki, put it in the plan doc or a decision item. Not every choice needs a record. When fixing a bug, ensure a **bug** tracker item exists before writing fix code. See [TRACKER_WORKFLOWS.md](./docs/TRACKER_WORKFLOWS.md) for the exact `tracker_create` calls and lifecycle.
 
 ### `NIM-###` Keys Are Tracker-Scoped — Cite GitHub Issues in Source
 

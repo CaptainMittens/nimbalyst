@@ -59,6 +59,7 @@ import type { DriveReason } from './QueueDriveService';
 import { resolveExtensionAgentRef } from './providerResolution';
 import { resolveToolLoopTurnConfig } from './toolLoopTurnConfig';
 import { resolveProviderAuthRequirement } from './providerAuthRequirement';
+import { isWikiSkillAvailable } from './wikiSkillAvailability';
 
 /**
  * Read the OpenCode session role the user picked, from session metadata.
@@ -1375,7 +1376,8 @@ export class MessageStreamingHandler {
         rawContext,
         session.id,
         session.provider as AIProviderType,
-        undefined // No mode transition for now - will be added when integrating with SessionTranscript
+        undefined, // No mode transition for now - will be added when integrating with SessionTranscript
+        { wikiSkillAvailable: isWikiSkillAvailable() }
       );
 
       // Merge prepared document context with session metadata

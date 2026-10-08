@@ -1404,7 +1404,7 @@ export default function App() {
       files: 'Files',
       agent: 'Agent',
       tracker: 'Tracker',
-      collab: 'Pages',
+      collab: 'Wiki',
       org: 'Organization',
       'pr-review': 'PR Review',
       settings: 'Settings',

@@ -715,7 +715,9 @@ describe('nim pages', () => {
       ['readCollabDoc', { repo: 'git@github.com:acme/widgets.git', filePath: 'collab://org:o1:doc:home' }],
     ]);
 
-    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(2);
-    expect(stderr).toContain("'nim wiki' is now 'nim pages'");
+    // `nim wiki` is an alias of `nim pages`.
+    stdout = '';
+    expect(await main(['wiki', 'read', 'collab://org:o1:doc:home', '--workspace', dir])).toBe(0);
+    expect(stdout).toBe('# Home\n\nLine two\n');
   });
 });

@@ -1,15 +1,15 @@
 ---
 name: connect
-description: Connect this repository to its Nimbalyst team project so the session can read and write the team's pages. Use at the start of a task in a git repository before any Pages tool, when a Pages tool returns repo_not_bound, ambiguous_project, pin_mismatch, project_not_accessible or admin_required, or when the user asks to connect a repository to a team project. How to write pages is in the knowledge-graph skill.
+description: Connect this repository to its Nimbalyst team project so the session can read and write the team's pages. Use at the start of a task in a git repository before any wiki tool, when a wiki tool returns repo_not_bound, ambiguous_project, pin_mismatch, project_not_accessible or admin_required, or when the user asks to connect a repository to a team project. How to write pages is in the wiki-update skill.
 ---
 
 # Connect to the team's pages
 
-This skill only finds the team project and connects the repository to it. What to write, and how, is in the `knowledge-graph` skill; types and the guide page are in `knowledge-setup`.
+This skill only finds the team project and connects the repository to it. What to write, and how, is in the `wiki-update` skill; types and the guide page are in `wiki-setup`.
 
 ## Nimbalyst desktop comes first
 
-If the desktop app's Pages tools are available (`mcp__nimbalyst-trackers__*`, or `listPages` from a server whose name does not contain `nimbalyst-pages`), you are running inside Nimbalyst, which already reaches the same pages. Use those tools and do not call this plugin's tools in this session: two write paths into the same pages produce duplicates.
+If the desktop app's wiki tools are available (`mcp__nimbalyst-trackers__*`, or `listPages` from a server whose name does not contain `nimbalyst-pages`), you are running inside Nimbalyst, which already reaches the same pages. Use those tools and do not call this plugin's tools in this session: two write paths into the same pages produce duplicates.
 
 ## Who can use the pages
 
@@ -27,7 +27,7 @@ Every tool of this plugin's `nimbalyst-pages` server takes `repo`, and `project`
 
 Call `pages_status` with `repo` (and `project` when pinned). Every result names the signed-in `user` (name and email); that is who a decision mark names when the person at this terminal decided something. It returns one of three states:
 
-- **`bound`**: `project` names the team project (`orgName`, `projectName`, `role`, `url`), with `homeLink` and, when the project has one, `guideLink`. Before the first write, read the guide page, as the `knowledge-graph` skill says. When the task touches an area the pages may cover, find the relevant pages with `listPages` and read the useful ones with `readCollabDoc`. Keep reading proportionate: a few pages, not the whole tree.
+- **`bound`**: `project` names the team project (`orgName`, `projectName`, `role`, `url`), with `homeLink` and, when the project has one, `guideLink`. Before the first write, read the guide page, as the `wiki-update` skill says. When the task touches an area the pages may cover, find the relevant pages with `listPages` and read the useful ones with `readCollabDoc`. Keep reading proportionate: a few pages, not the whole tree.
 - **`ambiguous`**: the remote is bound to several projects the user can reach, listed in `projects`. Ask the user which one this repository uses with the host's question tool (in Claude Code, `AskUserQuestion`): one option per project in that list, labelled "<projectName> (<orgName>)", plus "Not now". Only a project from that list may be pinned; never pin a project the user names that is not in it, even one they can reach, because the repository is not connected to it. On a choice, write `.nimbalyst/wiki.json` at the repository root as `{ "orgId": ..., "projectId": ... }`, keeping any other keys already in the file, pass it as `project` from then on, and tell the user to commit the file so teammates resolve the same project. Do not commit it yourself. On "Not now", do not call the plugin's tools again this session.
 - **`unbound`**: no team project the user can reach is bound to this remote. `teams` lists the user's teams with their `role` and the `projects` in each that the user can reach. See the next section. Ask at most once per session.
 
@@ -39,7 +39,7 @@ Only offer this when the user is working in the repository in a way that would b
 
 - **The user is an admin of at least one team**: ask with the host's question tool. Offer, for each team they administer:
   - **Connect to <projectName> (<orgName>)**: one option per entry in that team's `projects`. On a choice, call `pages_bind_repo` with `repo`, `orgId`, and that `projectId`. Never ask the user to type a project id.
-  - **Create a new project in <orgName>**: call `pages_create_project` with `orgId`, a `name` (suggest the repository name; let the user change it), and `repo`. The new project has a Home page; offer `knowledge-setup` to install the guide page.
+  - **Create a new project in <orgName>**: call `pages_create_project` with `orgId`, a `name` (suggest the repository name; let the user change it), and `repo`. The new project has a Home page; offer the `wiki-setup` skill to install the guide page.
   - **Not now**: do not ask again this session.
 
   If the options do not fit in one question, ask first which team, then which project. Tell the user that everyone who can reach that project in Nimbalyst will see its pages, and print its `url`.

@@ -103,9 +103,9 @@ DB, or a live-only command in offline mode). `6` is retired.
 `NIM_DB`, `NIM_WORKSPACE`, `NIM_ENDPOINT` + `NIM_TOKEN` (force live), `NIM_OWNER`
 (resolves `--owner me`), `NO_COLOR`, `NIM_DEBUG` (stack traces).
 
-## Team pages
+## Team wiki
 
-The `pages` commands work on a Nimbalyst team project's Pages on the sync server with your Nimbalyst Teams sign-in, not through a running Nimbalyst app. Each one calls the same Pages tool a terminal agent uses through the `nimbalyst-pages` Claude Code plugin, with the same arguments, so a script and an agent see the same results. A repository reaches its pages through the team project a team admin connected its remote to; who belongs is decided in Nimbalyst Teams. Only team pages are reachable; Personal pages live in the desktop app.
+The `pages` commands (or `nim wiki`, an alias) work on a Nimbalyst team project's Wiki on the sync server with your Nimbalyst Teams sign-in, not through a running Nimbalyst app. Each one calls the same wiki tool a terminal agent uses through the `nimbalyst-pages` Claude Code plugin, with the same arguments, so a script and an agent see the same results. A repository reaches its pages through the team project a team admin connected its remote to; who belongs is decided in Nimbalyst Teams. Only team pages are reachable; Personal pages live in the desktop app.
 
 ```sh
 nim login                      # device code, approved in the Nimbalyst console
@@ -128,7 +128,7 @@ nim pages comments --page <uri>                           # citable comments
 
 `nim --help` lists every verb: `list`, `read`, `edit`, `create`, `create-folder`, `move`, `rename`, `delete`, `set-type`, `members`, `types`, `define-type`, `items`, `item`, `create-item`, `update-item`, `comments`. Edits land directly, as an agent's do; each page's history is how a person reverts one.
 
-`repo` is `git remote get-url origin`. `.nimbalyst/wiki.json` holds an optional `{ orgId, projectId }` pin, sent as `project` to choose among projects you can already reach; it grants nothing. `--repo`, or `--org` with `--project`, targets something else and ignores the current directory's wiki.json. `nim pages pin` only accepts a project the repository actually resolves to (one of an ambiguous match, or its bound project), and only for the current checkout. Tokens live in `credentials.json` (mode 0600, directory 0700) under the user config dir, are written under a lock, and refresh on their own; `nim logout` revokes the session on the server before deleting them. `nim wiki` was renamed to `nim pages`.
+`repo` is `git remote get-url origin`. `.nimbalyst/wiki.json` holds an optional `{ orgId, projectId }` pin, sent as `project` to choose among projects you can already reach; it grants nothing. `--repo`, or `--org` with `--project`, targets something else and ignores the current directory's wiki.json. `nim pages pin` only accepts a project the repository actually resolves to (one of an ambiguous match, or its bound project), and only for the current checkout. Tokens live in `credentials.json` (mode 0600, directory 0700) under the user config dir, are written under a lock, and refresh on their own; `nim logout` revokes the session on the server before deleting them. `nim wiki <verb>` is the same command as `nim pages <verb>`.
 
 Env: `NIM_SERVER` (default `https://sync.nimbalyst.com`; `http://` only for localhost), `NIM_CONFIG_DIR` (credentials location), `NIM_GITHUB_NATIVE=on` (the earlier GitHub sign-in for `nim login`, off by default; `NIM_GITHUB_CLIENT_ID` configures its device flow).
 

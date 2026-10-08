@@ -155,7 +155,7 @@ export interface CollabSidebarProps {
   typeResolver?: CollabTypeTreeResolver;
   /**
    * Archive a typed page (the tracker's own archive, which keeps its comments
-   * and sessions). Typed pages never go to Pages Trash; hosts without tracker
+   * and sessions). Typed pages never go to Wiki Trash; hosts without tracker
    * writes omit it and the row offers no Archive.
    */
   onArchiveItem?: (itemId: string) => Promise<void>;
@@ -1672,7 +1672,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   ]);
   renderTreeRef.current = renderTree;
 
-  const selectedFolderLabel = selectedFolderPath ? getCollabNodeName(selectedFolderPath) : 'Pages';
+  const selectedFolderLabel = selectedFolderPath ? getCollabNodeName(selectedFolderPath) : 'Wiki';
   const contextDocument = contextMenu?.node.type === 'document' ? contextMenu.node.document : null;
   const useLocalOrigin = controller.useLocalOrigin ?? useUnavailableLocalOrigin;
   const contextLocalOrigin = useLocalOrigin(
@@ -2125,7 +2125,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 setContextMenu(null);
                 void confirmDestructive(
                   'Archive page',
-                  `Archive "${name}"? It leaves Pages and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
+                  `Archive "${name}"? It leaves the Wiki and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
                   'Archive',
                 ).then((accepted) => {
                   if (accepted) onArchiveItem(itemId).catch(reportTypePlacementError);

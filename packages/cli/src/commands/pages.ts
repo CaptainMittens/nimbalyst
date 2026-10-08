@@ -1,5 +1,5 @@
 /**
- * `nim pages ...`: the team's Nimbalyst Pages from a shell, through the same
+ * `nim pages ...` (alias `nim wiki`): the team's Nimbalyst Wiki from a shell, through the same
  * Pages tools a terminal agent calls on the sync server's `/mcp` (collab-protocol
  * `pageToolContract.ts`). One verb per tool; `status`, `bind`,
  * `create-project` and `pin` (target resolution and the repo binding) live in
@@ -331,10 +331,5 @@ export async function runPages(args: ParsedArgs): Promise<number> {
   const call = pagesToolCall(args);
   const result = await tool(ctx, call.tool, call.args);
   return print(ctx, result, () => renderResult(ctx, call.tool, result));
-}
-
-/** `nim wiki` was renamed; say where it went instead of failing as an unknown noun. */
-export function wikiRenamed(): never {
-  throw usageError(`'nim wiki' is now 'nim pages'. Run 'nim --help' for the commands.`);
 }
 

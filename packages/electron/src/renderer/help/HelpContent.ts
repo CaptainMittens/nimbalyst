@@ -374,7 +374,7 @@ export const HelpContent: Record<string, HelpEntry> = {
     shortcut: KeyboardShortcuts.view.trackerMode,
   },
   'collab-mode-button': {
-    title: 'Pages',
+    title: 'Wiki',
     body: 'Browse and edit pages shared with your team in real-time. Collaborate on markdown, spreadsheets, diagrams, and placed tracker types.',
     shortcut: KeyboardShortcuts.view.collabMode,
   },

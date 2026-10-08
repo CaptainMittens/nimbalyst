@@ -117,7 +117,7 @@ export const TrackerPageView: React.FC<TrackerPageViewProps> = ({
   const confirmArchive = onArchive && (() => {
     void confirmDestructive(
       'Archive page',
-      `Archive "${title}"? It leaves Pages and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
+      `Archive "${title}"? It leaves the Wiki and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
       'Archive',
     ).then((accepted) => { if (accepted) onArchive(); });
   });

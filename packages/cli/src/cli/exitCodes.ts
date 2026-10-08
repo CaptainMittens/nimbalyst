@@ -10,7 +10,7 @@ export const ExitCode = {
   SCHEMA_INCOMPATIBLE: 4,
   WRITE_NOT_PERMITTED: 5,
   /**
-   * Retired with `nim wiki` (fields written, page text failed); nothing
+   * Retired with the first `nim wiki` commands (fields written, page text failed); nothing
    * returns it now. Kept so the number is never given another meaning.
    */
   PARTIAL_WRITE: 6,
