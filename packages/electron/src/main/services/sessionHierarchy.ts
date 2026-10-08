@@ -148,7 +148,8 @@ export async function findSessionTreeRoot(db: HierarchyDatabase, sessionId: stri
   return rows[0].id;
 }
 
-export interface HierarchyMove { source?: 'remote'; sessionId: string; workspaceId: string; title: string; previousParentId: string | null; previousManagerId: string | null; parentId: string | null; managerId: string | null }
+/** `source` is unset for a local user move. 'remote' (snapshot apply) and 'system' (delete-lift) are not user moves and must not notify anyone. */
+export interface HierarchyMove { source?: 'remote' | 'system'; sessionId: string; workspaceId: string; title: string; previousParentId: string | null; previousManagerId: string | null; parentId: string | null; managerId: string | null }
 const moveListeners = new Set<(move: HierarchyMove) => Promise<void>>();
 const archiveListeners = new Set<(sessionIds: string[], archived: boolean) => Promise<void>>();
 export function onSubtreeArchive(listener: (sessionIds: string[], archived: boolean) => Promise<void>): () => void {
@@ -241,5 +242,5 @@ export async function deleteSessionAndLiftChildren(db: HierarchyDatabase, sessio
     { sql: 'DELETE FROM ai_sessions WHERE id=$1', params: [sessionId] },
   ]);
   if (deleted) for (const { child, parentId, managerId } of changes) await publishHierarchyMove({ sessionId: child.id, workspaceId: child.workspace_id, title: child.title || 'Untitled Session',
-    previousParentId: child.parent_session_id ?? null, previousManagerId: child.created_by_session_id ?? null, parentId, managerId });
+    previousParentId: child.parent_session_id ?? null, previousManagerId: child.created_by_session_id ?? null, parentId, managerId, source: 'system' });
 }

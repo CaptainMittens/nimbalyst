@@ -11,7 +11,7 @@ vi.mock('@nimbalyst/runtime/storage/repositories/AISessionsRepository', () => ({
   },
 }));
 vi.mock('@nimbalyst/runtime/storage/repositories/AgentMessagesRepository', () => ({
-  AgentMessagesRepository: {},
+  AgentMessagesRepository: { create: vi.fn() },
 }));
 vi.mock('@nimbalyst/runtime/storage/repositories/SessionFilesRepository', () => ({
   SessionFilesRepository: {},
@@ -84,6 +84,7 @@ vi.mock('../ai/claudeCliLauncherSingleton', () => ({
 }));
 
 import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AISessionsRepository';
+import { AgentMessagesRepository } from '@nimbalyst/runtime/storage/repositories/AgentMessagesRepository';
 import { MetaAgentService } from '../MetaAgentService';
 import { database } from '../../database/PGLiteDatabaseWorker';
 
@@ -107,6 +108,7 @@ describe('MetaAgentService parent agent_role promotion (NIM-858)', () => {
     vi.mocked(AISessionsRepository.create).mockReset();
     vi.mocked(AISessionsRepository.get).mockReset();
     vi.mocked(AISessionsRepository.updateMetadata).mockReset();
+    vi.mocked(AgentMessagesRepository.create).mockReset();
     // These tests assert on the real queue path; vitest sets NODE_ENV=test
     // (unless the shell already set it), which would take the synthetic bypass.
     vi.spyOn(MetaAgentService.prototype as any, 'shouldBypassChildAgentExecutionForTests').mockReturnValue(false);
@@ -211,5 +213,33 @@ describe('MetaAgentService parent agent_role promotion (NIM-858)', () => {
     for (const call of ai.queuePromptForSession.mock.calls) expect(call[3]).toMatchObject({ promptProvenance: { messageKind: 'report', originSessionId: 'worker' } });
     expect(ai.triggerQueuedPromptProcessingForSession).not.toHaveBeenCalled();
     expect(ai.interruptCurrentTurn).not.toHaveBeenCalled();
+  });
+
+  it('keeps system reassignments silent (remote snapshot, delete-lift)', async () => {
+    const service = MetaAgentService.getInstance();
+    const ai = { queuePromptForSession: vi.fn(async (..._args: any[]) => ({ id: 'report' })), triggerQueuedPromptProcessingForSession: vi.fn() };
+    (service as any).aiService = ai;
+    vi.mocked(AISessionsRepository.get).mockImplementation(async id => ({ ...STANDARD_PARENT, id, title: id } as any));
+    vi.mocked(database.query).mockResolvedValue({ rows: [{ status: 'idle' }] } as any);
+    for (const source of ['remote', 'system'] as const) {
+      await (service as any).reportManagerChange({ sessionId: 'worker', workspaceId: '/workspace/path', title: 'Worker', source,
+        previousParentId: 'old', previousManagerId: 'old', parentId: 'new', managerId: 'new' });
+    }
+    expect(ai.queuePromptForSession).not.toHaveBeenCalled();
+    expect(AgentMessagesRepository.create).not.toHaveBeenCalled();
+  });
+
+  it('leaves a passive note in an idle manager instead of queueing a turn', async () => {
+    const service = MetaAgentService.getInstance();
+    const ai = { queuePromptForSession: vi.fn(async (..._args: any[]) => ({ id: 'report' })), triggerQueuedPromptProcessingForSession: vi.fn() };
+    (service as any).aiService = ai;
+    vi.mocked(AISessionsRepository.get).mockImplementation(async id => ({ ...STANDARD_PARENT, id, title: id } as any));
+    vi.mocked(database.query).mockResolvedValue({ rows: [{ status: 'idle' }] } as any);
+    await (service as any).reportManagerChange({ sessionId: 'worker', workspaceId: '/workspace/path', title: 'Worker',
+      previousParentId: 'old', previousManagerId: 'old', parentId: 'new', managerId: 'new' });
+    expect(ai.queuePromptForSession).not.toHaveBeenCalled();
+    expect(ai.triggerQueuedPromptProcessingForSession).not.toHaveBeenCalled();
+    expect(AgentMessagesRepository.create).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(AgentMessagesRepository.create).mock.calls[0][0]).toMatchObject({ sessionId: 'new', content: 'You now manage Worker (moved by the user).' });
   });
 });
