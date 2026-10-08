@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 <!-- Changes to existing functionality go here -->
+- The tracker reference preview card on desktop shows the item's summary, its key fields, and what it links to.
 - Pages is now called Wiki: the Knowledge skills are /wiki:setup and /wiki:update, `nim wiki` works like `nim pages`, and agents on a wiki page are pointed at /wiki:update.
 
 ### Fixed

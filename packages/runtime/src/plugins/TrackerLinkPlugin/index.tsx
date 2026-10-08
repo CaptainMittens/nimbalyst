@@ -36,6 +36,12 @@ export {
 } from './trackerReferenceSource';
 
 export {
+  setTrackerReferenceLinksSource,
+  type TrackerReferenceLinkGroup,
+  type TrackerReferenceLinksSource,
+} from './trackerReferencePreviewData';
+
+export {
   useResolvedTrackerReference,
   navigateToTrackerReference,
   type ResolvedTrackerReference,
