@@ -1957,6 +1957,8 @@ interface ElectronAPI {
 
   // Open external links
   openExternal: (url: string) => Promise<void>;
+  /** Always the browser; skips the in-app routing `openExternal` applies to console links. */
+  openInBrowser: (url: string) => Promise<void>;
   openThirdPartyNotices: () => Promise<{ success: boolean; error?: string }>;
 
   // Image operations

@@ -74,6 +74,14 @@ export function registerWindowHandlers() {
         }
     });
 
+    // An explicit "Open in browser" action: always the browser, never routed
+    // back into the app (that would reopen the doc the user is already on).
+    safeHandle('open-in-browser', async (_event, url: string) => {
+        if (typeof url === 'string' && /^https?:\/\//i.test(url)) {
+            await shell.openExternal(url);
+        }
+    });
+
     safeHandle('legal:open-third-party-notices', async () => {
         const noticesPath = app.isPackaged
             ? join(process.resourcesPath, 'legal', 'THIRD_PARTY_NOTICES.txt')

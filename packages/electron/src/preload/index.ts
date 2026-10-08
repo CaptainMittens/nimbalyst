@@ -1708,6 +1708,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Open external links
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+  openInBrowser: (url: string) => ipcRenderer.invoke('open-in-browser', url),
   openThirdPartyNotices: () => ipcRenderer.invoke('legal:open-third-party-notices'),
 
   // Image operations
