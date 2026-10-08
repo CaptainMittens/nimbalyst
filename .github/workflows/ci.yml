@@ -144,6 +144,10 @@ jobs:
           set -o pipefail
           node scripts/run-validation.mjs unit 2>&1 | tee /tmp/vitest-ci.log
 
+      - name: Print Vitest failures
+        if: failure() && needs.changes.outputs.docs-only != 'true'
+        run: cat .vitest/last-run.log || true
+
       - name: Record Vitest summary
         id: vitest-summary
         if: always() && needs.changes.outputs.docs-only != 'true'
