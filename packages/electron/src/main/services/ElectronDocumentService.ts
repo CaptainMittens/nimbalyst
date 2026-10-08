@@ -46,9 +46,11 @@ import {
 } from './tracker/relationshipFieldStorage';
 import { projectionWouldChange } from './tracker/projectionUpdateGuard';
 import { assignLocalKeysToRows } from './tracker/localKeyAllocator';
+import { typeHasLocalNumbers } from './tracker/localNumberTypes';
 import { workspaceLocalKeyStore } from './tracker/workspaceLocalKeyStore';
 import { extractFrontmatter, extractCommonFields } from '../utils/frontmatterReader';
 import { frontmatterHashChanged } from './documentMetadataChange';
+import { resolveWorkspaceFileForOpen } from './workspaceFileForOpen';
 import {
   PLAN_INVALID_STATUS_SIGNAL_KIND,
   VIRTUAL_DOCS,
@@ -67,6 +69,8 @@ import {
 import { globalRegistry } from '@nimbalyst/tracker-schema';
 import { database } from '../database/PGLiteDatabaseWorker';
 import { isExcludedFromTrackerProjection, shouldExcludeDir, shouldExcludePath } from '../utils/fileFilters';
+import { isInLocalWikiFolder, localWikiFolderWithin } from './localWiki/localWikiLocation';
+import { isLocalWikiItemId, refuseLocalWikiItem } from './localWiki/localWikiItemIds';
 import { isRendererUnsupportedImage, resolveImageExtension, sniffImageExtension } from '../utils/imageFormat';
 import { compressImage } from './ImageCompressor';
 import { recordTypedPageBodySnapshot } from './tracker/typedPageBodyHistory';
@@ -1030,7 +1034,13 @@ export class ElectronDocumentService implements DocumentService {
         null;
     }
 
-    if (!doc) {
+    // The scan index is capped, so a real file can be missing from it.
+    const unindexedPath =
+      !doc && fallback?.path
+        ? await resolveWorkspaceFileForOpen(this.workspacePath, fallback.path)
+        : null;
+
+    if (!doc && !unindexedPath) {
       throw new Error(
         `Document not found (id=${documentId || 'n/a'}, path=${fallback?.path ?? 'n/a'}, name=${fallback?.name ?? 'n/a'})`
       );
@@ -1046,7 +1056,7 @@ export class ElectronDocumentService implements DocumentService {
         : BrowserWindow.getFocusedWindow()?.webContents;
     if (target) {
       target.send('open-document', {
-        path: path.join(this.workspacePath, doc.path)
+        path: unindexedPath ?? path.join(this.workspacePath, doc!.path)
       });
     }
   }
@@ -1278,6 +1288,7 @@ export class ElectronDocumentService implements DocumentService {
     this.startScanIfNeeded();
 
     const items: TrackerItem[] = [];
+    const wikiFolder = localWikiFolderWithin(this.workspacePath);
 
     for (const metadata of this.metadataCache.values()) {
       const pathLower = metadata.path.toLowerCase();
@@ -1285,6 +1296,10 @@ export class ElectronDocumentService implements DocumentService {
         continue;
       }
       if (isExcludedFromTrackerProjection(metadata.path)) continue;
+      // Local wiki pages are typed pages through @nimbalyst/local-wiki, keyed by
+      // their own ids; projecting a legacy `trackerStatus` block there too would
+      // list the page twice.
+      if (isInLocalWikiFolder(metadata.path, wikiFolder)) continue;
 
       const resolved = resolveFullDocumentFrontmatter(metadata.frontmatter);
       if (!resolved) continue;
@@ -1407,6 +1422,8 @@ export class ElectronDocumentService implements DocumentService {
     itemId: string,
     options?: { createProjectionForFullDocument?: boolean }
   ): Promise<any | null> {
+    // A Local wiki item has no row, and no write path may give it one.
+    if (isLocalWikiItemId(itemId)) return null;
     const direct = await database.query<any>(
       `SELECT * FROM tracker_items WHERE id = $1`,
       [itemId]
@@ -1489,6 +1506,7 @@ export class ElectronDocumentService implements DocumentService {
     expectedType?: string,
   ): Promise<TrackerItem | null> {
     if (isExcludedFromTrackerProjection(relativePath)) return null;
+    if (isInLocalWikiFolder(relativePath, localWikiFolderWithin(this.workspacePath))) return null;
     const fullPath = path.join(this.workspacePath, relativePath);
 
     let fileContent: string;
@@ -1607,6 +1625,7 @@ export class ElectronDocumentService implements DocumentService {
     frontmatter: Record<string, any>,
   ): Promise<void> {
     if (isExcludedFromTrackerProjection(relativePath)) return;
+    if (isInLocalWikiFolder(relativePath, localWikiFolderWithin(this.workspacePath))) return;
     try {
       const resolved = resolveFullDocumentFrontmatter(frontmatter);
       if (!resolved) return; // not a tracker document -> nothing to do (no DB hit)
@@ -1814,14 +1833,14 @@ export class ElectronDocumentService implements DocumentService {
    * one of them drifts. Rows already numbered cost nothing: in the steady
    * state `unnumbered` is empty and this returns without a query. New items
    * and the one-time backfill of items that predate local numbering are the
-   * same path.
+   * same path. Only types that opt in (`localNumbers: true`) are numbered.
    *
    * Failure is not fatal -- an item with no number still works everywhere,
    * so a broken sweep must not take the tracker list down with it.
    */
   private async assignLocalKeysFrom(rows: any[]): Promise<void> {
     const unnumbered = rows
-      .filter((row) => row.local_key == null && row.deleted_at == null)
+      .filter((row) => row.local_key == null && row.deleted_at == null && typeHasLocalNumbers(row.type))
       .sort((a, b) => String(a.created).localeCompare(String(b.created)) || String(a.id).localeCompare(String(b.id)))
       .map((row) => row.id as string);
     if (unnumbered.length === 0) return;
@@ -2598,6 +2617,7 @@ export class ElectronDocumentService implements DocumentService {
    * Permanently delete a tracker item from the database.
    */
   async deleteTrackerItem(itemId: string): Promise<void> {
+    refuseLocalWikiItem(itemId, 'deleting a database item');
     const row = await this.resolveTrackerRowForPublicId(itemId);
     const rowId = row?.id || itemId;
 
@@ -2659,7 +2679,8 @@ export class ElectronDocumentService implements DocumentService {
   async updateTrackerItemInFile(itemId: string, updates: Record<string, any>): Promise<TrackerItem> {
     let row = await this.resolveTrackerRowForPublicId(itemId, { createProjectionForFullDocument: false });
     const parsedFullDocumentId = parseFullDocumentTrackerId(itemId);
-    if (!row && parsedFullDocumentId) {
+    if (!row && parsedFullDocumentId
+      && !isInLocalWikiFolder(parsedFullDocumentId.relativePath, localWikiFolderWithin(this.workspacePath))) {
       row = {
         id: itemId,
         type: parsedFullDocumentId.trackerType,
@@ -2835,6 +2856,10 @@ export class ElectronDocumentService implements DocumentService {
   async importTrackerItemFromFile(relativePath: string, options?: {
     skipDuplicates?: boolean;
   }): Promise<{ item: TrackerItem | null; skipped: boolean; error?: string }> {
+    // A Local wiki page is already a typed page through the wiki library.
+    if (isInLocalWikiFolder(relativePath, localWikiFolderWithin(this.workspacePath))) {
+      return { item: null, skipped: true, error: 'Local wiki pages are not imported into the database' };
+    }
     const fullPath = path.join(this.workspacePath, relativePath);
 
     // Check for duplicate by source_ref
