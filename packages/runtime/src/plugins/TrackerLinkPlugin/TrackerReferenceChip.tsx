@@ -340,6 +340,11 @@ export function TrackerReferenceChip({
   const isCompleted = statusPresentation?.tone === 'completed';
   const label = resolved?.issueKey ?? unresolvedLabel ?? referenceKey;
   const title = resolved?.title;
+  // The name is what a reader cares about, so it carries the weight. A type
+  // with no key prefix falls back to the raw item id, which is never shown
+  // inline; the key stays in the tooltip and the preview card.
+  const showTitle = Boolean(title) && (variant === 'default' || !resolved?.issueKey);
+  const showKey = !showTitle || Boolean(resolved?.issueKey);
   const typeColor = resolved?.type ? getTypeColor(resolved.type) : undefined;
   const typeIcon = resolved?.type ? getTypeIcon(resolved.type) : undefined;
   const ownerInitials = resolved?.owner
@@ -428,17 +433,19 @@ export function TrackerReferenceChip({
             {typeIcon}
           </span>
         ) : null}
-        <span
-          className="tracker-reference-chip-key"
-          style={{
-            flexShrink: 0,
-            fontWeight: 700,
-            color: 'var(--nim-text)',
-          }}
-        >
-          {label}
-        </span>
-        {title && variant === 'default' ? (
+        {showKey ? (
+          <span
+            className="tracker-reference-chip-key"
+            style={{
+              flexShrink: 0,
+              fontWeight: showTitle ? 400 : 700,
+              color: showTitle ? 'var(--nim-text-muted)' : 'var(--nim-text)',
+            }}
+          >
+            {label}
+          </span>
+        ) : null}
+        {showTitle ? (
           <span
             className="tracker-reference-chip-title"
             style={{
@@ -447,7 +454,8 @@ export function TrackerReferenceChip({
               maxWidth: '32ch',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
-              color: 'var(--nim-text-muted)',
+              fontWeight: 600,
+              color: 'var(--nim-text)',
               textDecoration: isCompleted ? 'line-through' : undefined,
             }}
           >

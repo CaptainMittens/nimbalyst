@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 <!-- Bug fixes go here -->
 - Agents on desktop can list past the first 100 wiki pages.
+- Tracker reference chips bold the item's name instead of its key, and no longer show a raw internal ID for types without an issue key.
 - Moving a session under a new parent no longer sends "moved by the user" notes to old sessions or wakes them when the session-tree update runs.
 
 ### Removed

@@ -305,9 +305,12 @@ describe('TrackerReferenceChip', () => {
     expect(typeIcon?.textContent).toBe('bug_report');
     expect(typeIcon?.style.color).toBe('rgb(220, 38, 38)');
     expect(key?.textContent).toBe('NIM-1');
-    expect(key?.style.color).toBe('var(--nim-text)');
+    // The name carries the weight; the key is secondary.
+    expect(key?.style.color).toBe('var(--nim-text-muted)');
+    expect(key?.style.fontWeight).toBe('400');
     expect(title?.textContent).toBe('Theme-safe tracker preview');
-    expect(title?.style.color).toBe('var(--nim-text-muted)');
+    expect(title?.style.color).toBe('var(--nim-text)');
+    expect(title?.style.fontWeight).toBe('600');
     expect(title?.style.overflow).toBe('hidden');
     expect(title?.style.textOverflow).toBe('ellipsis');
     expect(status?.textContent).toContain('In Progress');
@@ -343,6 +346,34 @@ describe('TrackerReferenceChip', () => {
         ?.getAttribute('data-resolved'),
     ).toBe('true');
   });
+
+  it.each(['default', 'compact'] as const)(
+    'never shows the raw item id inline for a type without a key prefix (%s)',
+    variant => {
+      const keyless: TrackerRecord = {
+        ...trackerRecord,
+        id: 'competitor_1787921177066_w5a0b2',
+        issueKey: undefined,
+        primaryType: 'competitor',
+        typeTags: ['competitor'],
+        fields: { title: 'Reddit', status: 'active' },
+      };
+      const store = createStore();
+      store.set(trackerItemsMapAtom, new Map([[keyless.id, keyless]]));
+
+      const { container } = render(
+        <Provider store={store}>
+          <TrackerReferenceChip referenceKey={keyless.id} variant={variant} />
+        </Provider>,
+      );
+
+      const chip = container.querySelector<HTMLElement>('.tracker-reference-chip');
+      expect(chip?.textContent).not.toContain(keyless.id);
+      expect(container.querySelector('.tracker-reference-chip-key')).toBeNull();
+      expect(container.querySelector('.tracker-reference-chip-title')?.textContent).toBe('Reddit');
+      expect(chip?.getAttribute('title')).toContain(keyless.id);
+    },
+  );
 
   it.each(['done', 'completed', 'implemented', 'decided'])(
     'makes the %s state unmistakably complete',
