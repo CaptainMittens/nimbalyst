@@ -1,10 +1,12 @@
 package com.nimbalyst.app
 
 import android.content.Intent
+import android.graphics.Color
 import android.os.Bundle
 import android.os.Looper
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -41,7 +43,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // The app is dark only; the automatic style would pick dark icons on a phone in
+        // light mode and hide them against our background.
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+        )
         // A recreated activity (rotation, process restore) would replay the launch link.
         if (savedInstanceState == null) handleIntent(intent)
 

@@ -18,7 +18,7 @@ enum class PhaseFilter {
 /** Header status for a group, with the same precedence as iOS `computeAggregatedStatus`. */
 enum class AggregatedStatus { WAITING_FOR_INPUT, PROCESSING, PENDING_PROMPT, UNREAD, IDLE }
 
-enum class GroupKind { STANDALONE, WORKSTREAM, WORKTREE, META_AGENT }
+enum class GroupKind { STANDALONE, WORKSTREAM, WORKTREE }
 
 enum class TimePeriod { TODAY, YESTERDAY, THIS_WEEK, LAST_WEEK, THIS_MONTH, OLDER }
 
@@ -62,7 +62,7 @@ internal fun aggregatedStatus(sessions: Collection<SessionEntity>): AggregatedSt
 object SessionListGrouping {
 
     data class Group(
-        /** Stable key: `s:<id>`, `ws:<parentId>`, `wt:<worktreeId>`, `meta:<metaId>`. */
+        /** Stable key: `s:<id>`, `ws:<parentId>`, `wt:<worktreeId>`. */
         val key: String,
         val kind: GroupKind,
         /** The row the header shows. For a worktree, its oldest member. */
@@ -82,15 +82,14 @@ object SessionListGrouping {
     data class Facets(val hasArchived: Boolean, val hasPhaseData: Boolean)
 
     data class Sections(
-        val metaAgents: List<Group>,
         val pinned: List<Group>,
         val timeline: List<Pair<TimePeriod, List<Group>>>,
         /** More groups exist below the window than are shown. */
         val hasMore: Boolean,
         val facets: Facets,
     ) {
-        val isEmpty: Boolean get() = metaAgents.isEmpty() && pinned.isEmpty() && timeline.isEmpty()
-        val allGroups: List<Group> get() = metaAgents + pinned + timeline.flatMap { it.second }
+        val isEmpty: Boolean get() = pinned.isEmpty() && timeline.isEmpty()
+        val allGroups: List<Group> get() = pinned + timeline.flatMap { it.second }
     }
 
     fun facets(sessions: List<SessionEntity>) = Facets(
@@ -151,7 +150,6 @@ object SessionListGrouping {
         val kindTag = key.substringBefore(':')
         val anchor = key.substringAfter(':')
         val kind = when (kindTag) {
-            "meta" -> GroupKind.META_AGENT
             "ws" -> GroupKind.WORKSTREAM
             "wt" -> GroupKind.WORKTREE
             else -> GroupKind.STANDALONE
@@ -168,7 +166,6 @@ object SessionListGrouping {
 
         val phasePass = when {
             phase == PhaseFilter.ALL -> true
-            kind == GroupKind.META_AGENT -> true
             kind == GroupKind.STANDALONE -> phase.matches(parent.phase)
             kind == GroupKind.WORKTREE && children.isEmpty() -> phase.matches(parent.phase)
             parent.sessionType == WORKSTREAM_TYPE -> children.any { phase.matches(it.phase) }
@@ -230,9 +227,8 @@ object SessionListGrouping {
     }
 
     /**
-     * Split ordered groups into what the list renders. Meta-agent groups lead (desktop
-     * places them at the top), pinned groups follow in their own section, and the rest is
-     * bucketed by time. Only the newest [windowSize] timeline groups are shown; running
+     * Split ordered groups into what the list renders. Pinned groups lead in their own
+     * section, and the rest is bucketed by time. Only the newest [windowSize] timeline groups are shown; running
      * or queued groups beyond that window are merged in anyway -- the iOS exception lane --
      * so an active session is never stranded below the fold.
      */
@@ -242,14 +238,11 @@ object SessionListGrouping {
         windowSize: Int,
         now: Calendar = Calendar.getInstance(),
     ): Sections {
-        val metaAgents = groups.filter { it.kind == GroupKind.META_AGENT }
-        val rest = groups.filter { it.kind != GroupKind.META_AGENT }
-        val pinned = rest.filter { it.isPinned }
-        val timeline = rest.filter { !it.isPinned }
+        val pinned = groups.filter { it.isPinned }
+        val timeline = groups.filter { !it.isPinned }
         val window = timeline.take(windowSize)
         val exceptions = timeline.drop(windowSize).filter { it.isActive }
         return Sections(
-            metaAgents = metaAgents,
             pinned = pinned,
             timeline = groupByTime(window + exceptions, now),
             hasMore = timeline.size > window.size + exceptions.size,

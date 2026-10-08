@@ -11,6 +11,7 @@
 #   bash packages/android/scripts/take-screenshots.sh --device=emulator-5554   # skip boot, use a running device
 #   bash packages/android/scripts/take-screenshots.sh --skip-build
 #   bash packages/android/scripts/take-screenshots.sh --avd=Nimbalyst_Tablet_10in --out=/tmp/tablet-10
+#   bash packages/android/scripts/take-screenshots.sh --avd=Nimbalyst_Tablet_7in --port=5556   # fixed console port for parallel runs
 #
 # Several AVDs can run at once: a booted AVD gets its own console port, so
 # --avd never captures from a different emulator that happens to be up.
@@ -30,6 +31,7 @@ ALL_SCREENS="pairing projects sessions detail composer newsession computers file
 SCREENS="$ALL_SCREENS"
 AVD=""
 DEVICE=""
+PORT=""
 SKIP_BUILD=0
 
 for arg in "$@"; do
@@ -38,6 +40,7 @@ for arg in "$@"; do
         --avd=*) AVD="${arg#*=}" ;;
         --device=*) DEVICE="${arg#*=}" ;;
         --out=*) OUTPUT_DIR="${arg#*=}" ;;
+        --port=*) PORT="${arg#*=}" ;;
         --skip-build) SKIP_BUILD=1 ;;
         *) echo "Unknown argument: $arg" >&2; exit 1 ;;
     esac
@@ -90,8 +93,15 @@ if [ -z "$DEVICE" ]; then
     fi
     echo "   AVD: $AVD"
     # Pick a free console port so this run owns exactly one emulator serial.
-    PORT=5554
-    while "$ADB" devices | grep -q "^emulator-$PORT"; do PORT=$((PORT + 2)); done
+    # An emulator still booting is not in `adb devices` yet, so also skip ports
+    # an emulator process has claimed. Runs launched in the same instant can
+    # still race; give each its own --port.
+    if [ -z "$PORT" ]; then
+        PORT=5554
+        while "$ADB" devices | grep -q "^emulator-$PORT" || pgrep -f -- "-port $PORT( |$)" >/dev/null; do
+            PORT=$((PORT + 2))
+        done
+    fi
     DEVICE="emulator-$PORT"
     "$EMULATOR" -avd "$AVD" -port "$PORT" -no-snapshot -no-boot-anim -no-audio >/dev/null 2>&1 &
     EMULATOR_PID=$!

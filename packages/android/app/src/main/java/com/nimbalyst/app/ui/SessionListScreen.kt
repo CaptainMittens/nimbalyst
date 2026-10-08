@@ -183,18 +183,14 @@ fun SessionListScreen(
         if (!facets.hasPhaseData && phaseFilter != PhaseFilter.ALL) phaseFilter = PhaseFilter.ALL
     }
 
-    fun isExpanded(group: SessionListGrouping.Group): Boolean {
-        val toggled = group.key in toggledGroups
-        return if (group.kind == GroupKind.META_AGENT) !toggled else toggled
-    }
+    fun isExpanded(group: SessionListGrouping.Group): Boolean = group.key in toggledGroups
 
     fun toggle(group: SessionListGrouping.Group) {
         toggledGroups = if (group.key in toggledGroups) toggledGroups - group.key else toggledGroups + group.key
     }
 
     fun expand(key: String) {
-        val defaultExpanded = key.startsWith("meta:")
-        toggledGroups = if (defaultExpanded) toggledGroups - key else (toggledGroups - key) + key
+        toggledGroups = toggledGroups + key
     }
 
     fun create(kind: CreateKind, modelId: String?, workstream: SessionListGrouping.Group?) {
@@ -321,10 +317,6 @@ fun SessionListScreen(
                         if (coverageNotice != SearchCoverageNotice.NONE) {
                             item(key = "search-coverage") { SearchCoverageRow(coverageNotice) }
                         }
-                        if (current.metaAgents.isNotEmpty()) {
-                            item(key = "h-meta") { SectionHeader(stringResource(R.string.session_list_section_meta_agent)) }
-                            groupItems(current.metaAgents, selectedSessionId, ::isExpanded, ::toggle, onSelectSession, onLongPress, rowMenu)
-                        }
                         if (current.pinned.isNotEmpty()) {
                             item(key = "h-pinned") { SectionHeader(stringResource(R.string.session_list_section_pinned)) }
                             groupItems(current.pinned, selectedSessionId, ::isExpanded, ::toggle, onSelectSession, onLongPress, rowMenu)
@@ -408,8 +400,8 @@ private fun LazyListScope.groupItems(
         }
         val expanded = isExpanded(group)
         item(key = group.key) {
-            val headerIsSession = group.kind == GroupKind.META_AGENT ||
-                (group.kind == GroupKind.WORKSTREAM && group.parent.sessionType != SessionListGrouping.WORKSTREAM_TYPE)
+            val headerIsSession = group.kind == GroupKind.WORKSTREAM &&
+                group.parent.sessionType != SessionListGrouping.WORKSTREAM_TYPE
             Box {
                 GroupHeader(
                     group = group,
