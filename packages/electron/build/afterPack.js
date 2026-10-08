@@ -12,7 +12,6 @@ const { spawnSync } = require('child_process');
 const { relocateClaudeRuntime } = require('./claude-runtime.js');
 const { validatePackagedTutorialProject } = require('./validate-extra-resources.js');
 const { findUnresolvedDependencies } = require('./packaged-dependency-check.js');
-const asar = require('@electron/asar');
 
 exports.default = async function(context) {
   const { appOutDir, packager } = context;
@@ -145,6 +144,9 @@ exports.default = async function(context) {
   // Every module in app.asar must find the dependencies it declares. The SDK
   // and native-binary checks above do not load the electron-store chain, so a
   // collector packaging the wrong version of a transitive dep passed them.
+  // Required here, not at module load: the Windows ARM64 signing job loads this
+  // config through npx without installing dependencies.
+  const asar = require('@electron/asar');
   const appAsar = path.join(resourcesDir, 'app.asar');
   const unresolved = findUnresolvedDependencies(asar.listPackage(appAsar), (file) => {
     try {
