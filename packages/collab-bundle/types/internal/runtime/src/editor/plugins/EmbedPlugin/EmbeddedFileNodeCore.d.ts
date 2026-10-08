@@ -18,7 +18,7 @@
 import type { JSX } from 'react';
 import { DecoratorNode, type DOMConversionMap, type DOMExportOutput, type EditorConfig, type LexicalEditor, type LexicalNode, type NodeKey, type SerializedLexicalNode, type Spread } from 'lexical';
 export type EmbedAttrs = Record<string, string>;
-export declare const PLACED_VIEW_ATTR_KEYS: readonly ["mode", "cols", "sort", "filter", "group", "scope", "w", "ordering", "hide", "start", "end", "x", "y", "xl", "yl", "q", "pin", "height"];
+export declare const PLACED_VIEW_ATTR_KEYS: readonly ["mode", "cols", "sort", "filter", "group", "scope", "w", "ordering", "hide", "start", "end", "x", "y", "xl", "yl", "q", "pin", "height", "width"];
 export interface EmbeddedFilePayload {
     src: string;
     label: string;

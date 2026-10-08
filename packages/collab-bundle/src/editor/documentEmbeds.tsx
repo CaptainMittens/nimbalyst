@@ -1,5 +1,6 @@
 import React from 'react';
 import { usePlacedViewAttrs } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/usePlacedViewAttrs';
+import { PlacedViewResizeFrame } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/PlacedViewResizeFrame';
 import { buildCollabUri, isCollabUri, parseCollabUri } from '@nimbalyst/collab-protocol';
 import { setEmbedPluginCallbacks, type EmbedFrameProps } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/EmbedPluginCallbacks';
 import { parsePlacedViewUrl, type PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
@@ -73,7 +74,8 @@ function BrowserDocumentEmbed({ src, label, nodeKey, attrs }: EmbedFrameProps): 
   const target = parsePlacedViewUrl(src);
   if (target) {
     const view = placedViewRenderer?.({ nodeKey, src, label, target, attrs, onAttrsChange });
-    return view ? <>{view}</> : <BrowserPlacedViewNote src={src} label={label} />;
+    if (!view) return <BrowserPlacedViewNote src={src} label={label} />;
+    return target.kind === 'type' ? <PlacedViewResizeFrame attrs={attrs} onAttrsChange={onAttrsChange}>{view}</PlacedViewResizeFrame> : <>{view}</>;
   }
   const artifact = sharedArtifact(src);
   const preview = artifact ? render?.(nodeKey, artifact) : null;

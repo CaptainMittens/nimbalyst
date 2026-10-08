@@ -132,6 +132,17 @@ describe('TrackerViewEmbed', () => {
     expect(change).toHaveBeenLastCalledWith({ w: 'title:320,realtime:180' });
   });
 
+  it('fits an unsized table body to its rows, and a saved height overrides the fit', async () => {
+    const view = (attrs: Record<string, string>) => <TrackersUIProvider dataSource={fakeSource()} identity={null}><PlacedViewEmbed target={{ kind: 'type', typeId: 'ev-target' }} label="Targets" attrs={attrs} /></TrackersUIProvider>;
+    const { rerender } = render(view({}));
+    await screen.findByText('1 item');
+    const body = () => document.querySelector<HTMLElement>('[data-placed-view-body]')!;
+    // One row fits well under the old fixed 420px, so the body shrinks to its floor.
+    expect(body().style.height).toBe('120px');
+    rerender(view({ height: '300' }));
+    expect(body().style.height).toBe('300px');
+  });
+
   it('sorts by subsequent fields on a tie without reversing descending results twice', () => {
     const rows = [record('b', 'ev-target', { title: 'B', realtime: 2 }), record('a', 'ev-target', { title: 'A', realtime: 2 }), record('c', 'ev-target', { title: 'C', realtime: 1 })];
     const { result } = renderHook(() => useTrackerViewRows(rows, { ...comparison.definition, ordering: 'realtime', sortColumns: [{ field: 'realtime', direction: 'desc' }, { field: 'title', direction: 'asc' }] }, { identity: null }), { wrapper: ({ children }) => <TrackersUIProvider dataSource={fakeSource()} identity={null}>{children}</TrackersUIProvider> });

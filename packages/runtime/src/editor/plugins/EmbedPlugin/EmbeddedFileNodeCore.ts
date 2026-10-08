@@ -36,7 +36,7 @@ import { createNodeDecoratorSlot } from '../../nodes/nodeDecoratorSlot';
 import { parseEmbedAttrs, serializeEmbedAttrs } from './embedAttrs';
 
 export type EmbedAttrs = Record<string, string>;
-export const PLACED_VIEW_ATTR_KEYS = ['mode', 'cols', 'sort', 'filter', 'group', 'scope', 'w', 'ordering', 'hide', 'start', 'end', 'x', 'y', 'xl', 'yl', 'q', 'pin', 'height'] as const;
+export const PLACED_VIEW_ATTR_KEYS = ['mode', 'cols', 'sort', 'filter', 'group', 'scope', 'w', 'ordering', 'hide', 'start', 'end', 'x', 'y', 'xl', 'yl', 'q', 'pin', 'height', 'width'] as const;
 
 
 export interface EmbeddedFilePayload {

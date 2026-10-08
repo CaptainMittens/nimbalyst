@@ -30,6 +30,14 @@ import { isViewRecordEditable, writeViewEdits } from './viewItemEdits';
 import './ViewEmbedHeader.css';
 
 const DEFAULT_BODY_HEIGHT_PX = 420;
+
+/**
+ * A table's body fitted to its rows (compact grid: 32px rows under a header),
+ * between `min` and `max`. Past `max` the grid scrolls inside.
+ */
+export function fitTableBodyHeight(rowCount: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, 42 + rowCount * 32));
+}
 const MODE_LABEL: Record<string, string> = {
   list: 'list', table: 'table', kanban: 'board',
   timeline: 'timeline', radar: 'list', 'tag-board': 'list', inbox: 'list',
@@ -56,7 +64,10 @@ export interface TrackerViewEmbedProps {
    * drops the card chrome and fills its container, for a tab that is the view.
    */
   variant?: 'card' | 'page';
-  /** Body height in pixels for the `card` variant. */
+  /**
+   * Body height in pixels for the `card` variant. Unset, an ungrouped table
+   * fits its rows up to the default height and other modes use the default.
+   */
   height?: number;
   /** Read-only columns after the fields, in table mode (a type page's Where). */
   derivedColumns?: readonly TrackerGridDerivedColumn[];
@@ -106,7 +117,7 @@ export function TrackerViewEmbed({
       renderableViewModes={capabilities.renderableViewModes}
       onOpenAsTable={onOpenAsTable}
       onOpenItem={onOpenItem}
-      height={height ?? DEFAULT_BODY_HEIGHT_PX}
+      height={height}
       variant={variant}
       derivedColumns={derivedColumns}
       typeIds={typeIds}
@@ -148,7 +159,7 @@ function LoadedViewEmbed({
   renderableViewModes: ReadonlySet<SavedViewDefinition['viewMode']>;
   onOpenAsTable?: (view: SavedView) => void;
   onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
-  height: number;
+  height?: number;
   variant: 'card' | 'page';
   derivedColumns?: readonly TrackerGridDerivedColumn[];
   typeIds?: readonly string[];
@@ -213,7 +224,7 @@ function LoadedViewEmbed({
       body = definition.groupBy === 'none' || !rows.length ? grid(rows) : <div className="flex min-h-0 flex-1 flex-col overflow-auto">
         {groupTrackerRecordsByAxis(rows, definition.groupBy, resolveRelationshipLabel).map(group => <details key={group.key} open className="border-b border-nim">
           <summary className="cursor-pointer bg-nim-secondary px-3 py-2 text-xs">{group.label} · {group.items.length}</summary>
-          <div style={{ height: Math.max(100, Math.min(360, 42 + group.items.length * 32)) }}>{grid(group.items)}</div>
+          <div style={{ height: fitTableBodyHeight(group.items.length, 100, 360) }}>{grid(group.items)}</div>
         </details>)}
       </div>;
       break;
@@ -257,6 +268,9 @@ function LoadedViewEmbed({
   }
 
   const isPage = variant === 'page';
+  // Before the items load the row count says nothing, so keep the default rather than collapse.
+  const fitsRows = mode === 'table' && definition.groupBy === 'none' && loaded;
+  const bodyHeight = height ?? (fitsRows ? fitTableBodyHeight(rows.length, 120, DEFAULT_BODY_HEIGHT_PX) : DEFAULT_BODY_HEIGHT_PX);
   return (
     <div
       className={isPage
@@ -287,7 +301,8 @@ function LoadedViewEmbed({
         className={isPage
           ? 'tracker-saved-view-embed-body flex min-h-0 flex-1 flex-col bg-nim'
           : 'tracker-saved-view-embed-body flex min-h-0 flex-col bg-nim'}
-        style={isPage ? undefined : { height }}
+        style={isPage ? undefined : { height: bodyHeight }}
+        data-placed-view-body={isPage ? undefined : ''}
       >
         {body}
       </div>
