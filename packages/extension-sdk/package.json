@@ -1,6 +1,6 @@
 {
   "name": "@nimbalyst/extension-sdk",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "SDK for building Nimbalyst extensions",
   "repository": {
     "type": "git",
@@ -17,7 +17,7 @@
     "./dist/validate.js": "./dist/validate.browser.js"
   },
   "nimbalyst": {
-    "minAppVersion": "0.78.0"
+    "minAppVersion": "0.79.0"
   },
   "publishConfig": {
     "access": "public"
