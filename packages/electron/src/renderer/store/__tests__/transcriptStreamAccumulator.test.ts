@@ -95,6 +95,29 @@ function createHarness(dbMessages: TranscriptViewMessage[] = []): Harness {
 }
 
 describe('TranscriptStreamAccumulator', () => {
+  it('does not retain events for a session this window has not loaded', () => {
+    // Every window receives every session's events; one that never opened the
+    // session used to keep all of them (base64 tool results included) forever.
+    let tracked = false;
+    const harness = createHarness([makeDbMessage(1, 'user_message', 'hi')]);
+    const acc = new TranscriptStreamAccumulator({
+      emit: (output) => { harness.emitCount++; harness.lastEmit = output; },
+      readDbMessages: () => harness.dbMessages,
+      schedule: (cb) => { harness.pendingFrame.push(cb); },
+      isSessionTracked: () => tracked,
+    });
+
+    acc.apply(makeAssistantEvent(2, 'x'.repeat(1000)));
+    expect(acc.retainedEventCount(SESSION_ID)).toBe(0);
+    expect(acc.hasPendingFlush(SESSION_ID)).toBe(false);
+
+    tracked = true;
+    acc.apply(makeAssistantEvent(3, 'loaded'));
+    harness.tickFrame();
+    expect(acc.retainedEventCount(SESSION_ID)).toBe(1);
+    expect(harness.lastEmit?.messages.map(m => m.text)).toEqual(['hi', 'loaded']);
+  });
+
   it('replaces an evicted runtime generation while preserving legitimate repeated messages and canonical order', async () => {
     const raw: RawMessage[] = [
       {

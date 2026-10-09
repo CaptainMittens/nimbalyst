@@ -40,6 +40,7 @@ import {
   sessionRegistryAtom,
   sessionChildrenAtom,
   sessionStoreAtom,
+  isSessionLoadInFlight,
   sessionDraftInputAtom,
   sessionLastSubmitAtAtom,
   sessionDraftLocalModifiedAtAtom,
@@ -83,6 +84,9 @@ const transcriptAccumulator = new TranscriptStreamAccumulator({
     const currentSession = store.get(sessionStoreAtom(sessionId));
     return currentSession?.messages ?? [];
   },
+  // Keep events while a load is in flight: its snapshot may predate them.
+  isSessionTracked: (sessionId) =>
+    store.get(sessionStoreAtom(sessionId)) != null || isSessionLoadInFlight(sessionId),
   // requestAnimationFrame caps flushes at the display refresh rate (~60 Hz)
   // and gives the JS thread a chance to do other work between frames.
   // Falls back to setTimeout in non-DOM environments (Vitest, headless).

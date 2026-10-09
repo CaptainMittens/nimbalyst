@@ -1723,6 +1723,10 @@ export const openSessionsAtom = atom<OpenSession[]>([]);
  */
 const loadSessionPromises = new Map<string, Promise<SessionData | null>>();
 const loadSessionWorkspaces = new Map<string, string>();
+
+export function isSessionLoadInFlight(sessionId: string): boolean {
+  return loadSessionPromises.has(sessionId);
+}
 /** Non-atom transcript caches release their references at the same boundary. */
 export const sessionDataReleaseListenersAtom = atom<ReadonlySet<(sessionId: string) => void>>(new Set<(sessionId: string) => void>());
 const closedSessionWorkspacesAtom = atom<Set<string>>(new Set<string>());

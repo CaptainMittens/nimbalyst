@@ -11,7 +11,7 @@
  * (when Claude Code saves large outputs to files).
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import type { CustomToolWidgetProps } from './index';
 import { parseToolResult } from '../../../../ai/server/transcript/toolResultParser';
 import { FullscreenModal } from '../FullscreenModal';
@@ -260,8 +260,11 @@ export const EditorScreenshotWidget: React.FC<CustomToolWidgetProps> = ({
 
   // Canonical transcript stores tool results as strings -- JSON-stringified for
   // MCP content arrays (including image blocks). Parse once so the array/object
-  // helpers below can match.
-  const parsedResult = tool ? parseToolResult(tool.result) : undefined;
+  // helpers below can match. The result can be ~700 KB of base64, so parse and
+  // build the data URL only when it changes, not on every transcript render.
+  const hasTool = !!tool;
+  const toolResult = tool?.result;
+  const parsedResult = useMemo(() => (hasTool ? parseToolResult(toolResult) : undefined), [hasTool, toolResult]);
 
   // Check if result is a persisted-output reference
   const isPersisted = tool ? isPersistedOutput(parsedResult) : false;
@@ -301,16 +304,19 @@ export const EditorScreenshotWidget: React.FC<CustomToolWidgetProps> = ({
     loadPersistedFile();
   }, [persistedFilePath, readFile]);
 
+  const inlineImageData = useMemo(() => extractImageData(parsedResult), [parsedResult]);
+  const imageData = inlineImageData || persistedImageData;
+  const imageSrc = useMemo(
+    () => (imageData ? `data:${imageData.mimeType};base64,${imageData.imageBase64}` : null),
+    [imageData],
+  );
+
   if (!tool) return null;
 
   // Extract file path from arguments and get display name
   const args = tool.arguments as Record<string, any> | undefined;
   const filePath = (args?.file_path || args?.filePath || '') as string;
   const fileName = extractFileName(filePath);
-
-  // Extract image data from result (either inline or from persisted file)
-  const inlineImageData = extractImageData(parsedResult);
-  const imageData = inlineImageData || persistedImageData;
 
   // Log image source and size for debugging
   if (imageData) {
@@ -322,11 +328,6 @@ export const EditorScreenshotWidget: React.FC<CustomToolWidgetProps> = ({
 
   const hasError = isToolError(parsedResult, message);
   const errorMessage = extractErrorMessage(parsedResult, message) || persistedLoadError;
-
-  // Build image source URL
-  const imageSrc = imageData
-    ? `data:${imageData.mimeType};base64,${imageData.imageBase64}`
-    : null;
 
   return (
     <div className="editor-screenshot-widget rounded bg-nim-secondary border border-nim overflow-hidden">

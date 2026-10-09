@@ -51,6 +51,8 @@ interface CollabDocsUIContextValue {
 /** Exported for this package's own hooks (`useCollabPagesState`); hosts use `useCollabDocsUI`. */
 export const CollabDocsUIContext = createContext<CollabDocsUIContextValue | null>(null);
 
+const NO_CONTROLLER: CollabDocsUIController = {};
+
 export interface CollabDocsUIProviderProps {
   session: CollabDocsSession;
   controller?: CollabDocsUIController;
@@ -62,14 +64,17 @@ export function CollabDocsUIProvider({
   controller,
   children,
 }: CollabDocsUIProviderProps) {
+  // A fresh object here re-renders every consumer (each sidebar row and unread
+  // dot) whenever the host re-renders the provider.
+  const value = useMemo(() => ({
+    scope: session.scope,
+    host: session.host,
+    session,
+    controller: controller ?? NO_CONTROLLER,
+  }), [session, controller]);
   return (
     <JotaiProvider store={store}>
-      <CollabDocsUIContext.Provider value={{
-        scope: session.scope,
-        host: session.host,
-        session,
-        controller: controller ?? {},
-      }}>
+      <CollabDocsUIContext.Provider value={value}>
         {children}
       </CollabDocsUIContext.Provider>
     </JotaiProvider>

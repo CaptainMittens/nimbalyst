@@ -73,6 +73,13 @@ export interface AccumulatorOptions {
    * tests pass a manual queue.
    */
   schedule: Scheduler;
+  /**
+   * Whether this window holds (or is loading) the session's data. Main sends
+   * every session's events to every window; events for a session this window
+   * has not loaded are dropped instead of retained. Its later load reads the
+   * persisted transcript, and later events re-enter here.
+   */
+  isSessionTracked?: (sessionId: string) => boolean;
 }
 
 export class TranscriptStreamAccumulator {
@@ -86,6 +93,10 @@ export class TranscriptStreamAccumulator {
    * then schedules a flush if one is not already pending.
    */
   apply(event: TranscriptEvent): void {
+    if (this.opts.isSessionTracked && !this.opts.isSessionTracked(event.sessionId)) {
+      this.sessions.delete(event.sessionId);
+      return;
+    }
     const state = this.ensureSession(event.sessionId);
     // A snapshot can replace the atom while older callbacks are still queued.
     this.observeSnapshot(event.sessionId, state);
@@ -136,6 +147,11 @@ export class TranscriptStreamAccumulator {
    */
   hasPendingFlush(sessionId: string): boolean {
     return this.sessions.get(sessionId)?.flushScheduled ?? false;
+  }
+
+  /** For tests: how many live events are held for a session. */
+  retainedEventCount(sessionId: string): number {
+    return this.sessions.get(sessionId)?.eventsById.size ?? 0;
   }
 
   // ---------------- Internals ----------------
