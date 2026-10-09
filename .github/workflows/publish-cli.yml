@@ -368,21 +368,32 @@ jobs:
       # its install hint, so that version must exist before nim does. A version
       # already on the registry is skipped, so re-running after a partial
       # publish (wiki-web out, nim failed) finishes the job instead of failing.
+      #
+      # npm runs from the pack directory, never the repo root: the root
+      # package.json requires pnpm in `devEngines`, and npm refuses to run
+      # there (EBADDEVENGINES). Only a 404 means "not published yet"; any other
+      # `npm view` error stops the job instead of being read as one.
       - name: Publish to npm (Trusted Publishing via OIDC)
         run: |
           set -euo pipefail
           for DIR in packages/wiki-web packages/cli; do
             NAME=$(node -p "require('./$DIR/package.json').name")
             VERSION=$(node -p "require('./$DIR/package.json').version")
-            if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
-              echo "$NAME@$VERSION is already published; skipping"
-              continue
-            fi
             PACK_DIR="$RUNNER_TEMP/pack-$(basename "$DIR")"
             mkdir -p "$PACK_DIR"
+            if PUBLISHED=$(cd "$PACK_DIR" && npm view "$NAME@$VERSION" version 2> "$PACK_DIR/view-error.txt"); then
+              if [ -n "$PUBLISHED" ]; then
+                echo "$NAME@$VERSION is already published; skipping"
+                continue
+              fi
+            elif ! grep -q 'E404' "$PACK_DIR/view-error.txt"; then
+              cat "$PACK_DIR/view-error.txt"
+              echo "::error::npm view $NAME@$VERSION failed"
+              exit 1
+            fi
             (cd "$DIR" && pnpm pack --pack-destination "$PACK_DIR")
             TARBALL=$(ls "$PACK_DIR"/*.tgz)
-            npm publish "$TARBALL" --access public --provenance
+            (cd "$PACK_DIR" && npm publish "$TARBALL" --access public --provenance)
           done
 
       - name: Summary
