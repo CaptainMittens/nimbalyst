@@ -105,6 +105,8 @@ DB, or a live-only command in offline mode). `6` is retired. `7` conflict (`nim 
 
 ## Wiki
 
+For what the wiki is and how to use it from Claude Code, the app and the browser, see the [Nimbalyst Wiki README](../../plugins/nimbalyst-wiki/README.md).
+
 `nim wiki` works on two wikis: the project's local wiki (files in the repository, no account) and its team project's wiki on the sync server. `init` and `write` are local only; `status`, `edit`, `create`, `items` and the other team verbs below are team only. `list` (or `ls`), `read`, `move` and `search` use the local wiki when the project has one, and the team wiki otherwise or when the call names a team target (a `collab://` uri, a console link, `--repo`, or `--org` with `--project`). `--team` or `--local` forces either one.
 
 ### Team wiki

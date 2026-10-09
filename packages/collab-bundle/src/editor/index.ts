@@ -16,6 +16,8 @@ export {
   type ConsoleLinkOpener,
   type PageReferenceOpener,
 } from './consoleLinkOpener';
+// Relative file links (`Personas/CMO.md`): a host that serves a folder of pages resolves them itself.
+export { setWorkspaceFileLinkOpener, type WorkspaceFileLinkOpener } from '@nimbalyst/runtime/editor/utils/workspaceLinkNavigation';
 // trackers-ui must not load the editor graph, so the host builds the views controller from this entry.
 export { createNamedPageViewsController, type NamedPageViewsController } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/namedPageViewsController';
 // Page history: the markdown diff and revision projection. The dialog is in `./docs-ui`.

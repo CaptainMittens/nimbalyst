@@ -13,6 +13,7 @@ import {
   type createCollabDocsScopeLifecycle,
 } from '@nimbalyst/collab-bundle/docs-ui';
 import { ulidLike } from './ids';
+import { resolveWikiLink, type LinkTarget } from './links';
 import { LocalPagesDataSource } from './LocalPagesDataSource';
 
 type DocsHost = Parameters<typeof createCollabDocsScopeLifecycle>[0];
@@ -76,6 +77,11 @@ export class LocalCollabHost implements DocsHost {
   private currentSource: LocalPagesDataSource | null = null;
   private viewPreferences: ViewPreferences = { treeFilter: 'all', showUnreadBubbles: false };
   private treeState: TreeState | null = null;
+
+  /** A relative link in page `fromId`'s body, resolved to a page in the wiki or a file outside it. */
+  resolveLink(fromId: string, href: string): LinkTarget {
+    return resolveWikiLink(this.currentSource?.allPages() ?? [], this.pagePath(fromId), href);
+  }
 
   /** Wiki-relative file of a page, from the last snapshot read. */
   pagePath(id: string): string | null {

@@ -406,6 +406,13 @@ export type PageReferenceOpener = (documentId: string, options: { newTab: boolea
  * (`nimbalyst://doc/<id>`). Returns the uninstall.
  */
 export declare function setPageReferenceOpener(next: PageReferenceOpener): () => void;
+/** Opens a relative file link (`Personas/CMO.md`) as written; `currentDocumentPath` is null in the browser. */
+export type WorkspaceFileLinkOpener = (rawHref: string, currentDocumentPath: string | null) => void;
+/**
+ * How this host opens a relative file link met in a document. Without one the
+ * editor swallows the click. Pass null to remove it.
+ */
+export declare function setWorkspaceFileLinkOpener(opener: WorkspaceFileLinkOpener | null): void;
 export { createNamedPageViewsController, type NamedPageViewsController } from './internal/runtime/src/editor/plugins/EmbedPlugin/namedPageViewsController';
 
 /** Page history: where the diff is in its change groups. */

@@ -133,6 +133,11 @@ export class LocalPagesDataSource implements CollabDocsDataSource {
     return this.pages.get(id);
   }
 
+  /** Every page from the last snapshot read, typed pages included. */
+  allPages(): Iterable<LocalPage> {
+    return this.pages.values();
+  }
+
   subscribe(cb: (change: CollabDocsDataChange) => void): () => void {
     this.listeners.add(cb);
     // The session starts `disconnected` and only a status change moves it; the

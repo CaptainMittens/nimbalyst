@@ -197,6 +197,8 @@ If you need to create a release without the `/release` command:
 
 `@nimbalyst/cli` (`nim`) and `@nimbalyst/wiki-web` (the browser app for `nim wiki serve`) are published to npm together, at the same version, by the manual `.github/workflows/publish-cli.yml` workflow. They are released independently of the desktop app.
 
+`/publish-npm` runs the steps below for these two and for `@nimbalyst/extension-sdk`: it reports what changed since each package's last publish (`node scripts/npm-publish-status.mjs`), bumps, commits, and dispatches the dry run and the publish.
+
 1. Bump `version` in both `packages/cli/package.json` and `packages/wiki-web/package.json` to the same value. `nim --version` is set from `packages/cli/package.json` at build time, so there is nothing else to bump. The workflow fails if the two versions differ.
 2. Run the workflow with `dry_run` checked (optionally with `version` set to the expected value). It builds, tests, packs both packages, checks the wiki-web size budget, and smoke-tests the packed tarballs, including an install with optional dependencies omitted (no better-sqlite3).
 3. Run it again without `dry_run` to publish. wiki-web is published first; a version already on npm is skipped, so a run that failed halfway can be re-run.

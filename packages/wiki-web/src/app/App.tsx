@@ -18,6 +18,7 @@ import {
   type CollabDocsSession,
 } from '@nimbalyst/collab-bundle/docs-ui';
 import { TrackersUIProvider } from '@nimbalyst/collab-bundle/trackers-ui';
+import { setWorkspaceFileLinkOpener } from '@nimbalyst/collab-bundle/editor';
 import { LocalCollabHost, routePath } from '../host/LocalCollabHost';
 import type { LocalTrackerDataSource } from '../host/LocalTrackerDataSource';
 import { DraftStore, DraftStoreContext, prepareToLeave, resolveLeave, type LeaveChoice, type LeaveDecision } from './drafts';
@@ -137,7 +138,7 @@ export function App({ root, trackers, module }: AppProps) {
     <TrackersUIProvider dataSource={trackers} identity={null}>
       {session ? (
         <CollabDocsUIProvider session={session}>
-          <Shell root={root} pagePath={(id) => host.pagePath(id)} route={route} navigate={navigate} trackers={trackers} module={module} notice={notice} onDismissNotice={() => setNotice(null)} leaving={leaving} onChooseLeave={chooseLeave} />
+          <Shell root={root} host={host} route={route} navigate={navigate} trackers={trackers} module={module} notice={notice} onNotice={setNotice} onDismissNotice={() => setNotice(null)} leaving={leaving} onChooseLeave={chooseLeave} />
         </CollabDocsUIProvider>
       ) : (
         <div className="flex h-full items-center justify-center text-sm text-nim-muted">{notice ?? 'Opening the wiki…'}</div>
@@ -155,23 +156,25 @@ function joinPath(root: string, relative: string | null): string | null {
 
 function Shell({
   root,
-  pagePath,
+  host,
   route,
   navigate,
   trackers,
   module,
   notice,
+  onNotice,
   onDismissNotice,
   leaving,
   onChooseLeave,
 }: {
   root: string;
-  pagePath: (id: string) => string | null;
+  host: LocalCollabHost;
   route: Route;
   navigate: (route: Route, options?: { newTab?: boolean }) => void;
   trackers: LocalTrackerDataSource;
   module: PageModule;
   notice: string | null;
+  onNotice: (message: string) => void;
   onDismissNotice: () => void;
   leaving: Leaving | null;
   onChooseLeave: (choice: LeaveChoice) => void;
@@ -186,6 +189,19 @@ function Shell({
   );
   const resolved: Route = route.kind === 'home' && home ? { kind: 'page', id: home.documentId } : route;
   const open = (next: Route) => ({ newTab }: { newTab: boolean }) => navigate(next, { newTab });
+
+  // A relative link in the open page's body (`Personas/CMO.md`) opens that page here.
+  // Without an opener the editor swallows the click and nothing happens.
+  const openPageId = resolved.kind === 'page' || resolved.kind === 'item' ? resolved.id : null;
+  useEffect(() => {
+    if (!openPageId) return undefined;
+    setWorkspaceFileLinkOpener((href) => {
+      const target = host.resolveLink(openPageId, href);
+      if (target.kind === 'outside') onNotice(`${target.path} is not a page in this wiki, so it cannot open here. Open it in your editor or in Nimbalyst.`);
+      else navigate(target);
+    });
+    return () => setWorkspaceFileLinkOpener(null);
+  }, [host, navigate, onNotice, openPageId]);
 
   return (
     <div className="wiki-web-app flex h-full min-h-0">
@@ -231,7 +247,7 @@ function Shell({
             <button type="button" className="rounded border border-nim px-2 py-1 hover:bg-nim-hover" onClick={() => onChooseLeave('overwrite')}>Use mine and overwrite the file</button>
           </div>
         ) : null}
-        {resolved.kind === 'page' ? <PageView pageId={resolved.id} filePath={joinPath(root, pagePath(resolved.id))} navigate={navigate} />
+        {resolved.kind === 'page' ? <PageView pageId={resolved.id} filePath={joinPath(root, host.pagePath(resolved.id))} navigate={navigate} />
           : resolved.kind === 'item' ? <TypedPageView itemId={resolved.id} module={module} trackers={trackers} navigate={navigate} />
             : resolved.kind === 'type' ? <TypeTableView typeId={resolved.typeId} module={module} trackers={trackers} navigate={navigate} />
               : resolved.kind === 'search' ? <SearchView query={resolved.query} navigate={navigate} />
