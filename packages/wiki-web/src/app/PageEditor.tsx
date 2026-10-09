@@ -35,16 +35,23 @@ import { DraftStoreContext, type Conflict, type PageDraft, type SaveOutcome } fr
 const SAVE_DELAY_MS = 600;
 const LOCAL_USER = { memberId: asTeamMemberId('local'), name: 'You' };
 
-type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
+export type SaveState = 'saved' | 'saving' | 'unsaved' | 'error';
+
+export function saveStateLabel(state: SaveState, error: string | null): string {
+  return state === 'saving' ? 'Saving…' : state === 'unsaved' ? 'Unsaved changes' : state === 'error' ? `Not saved: ${error}` : 'Saved to file';
+}
 
 export function PageEditor({
   pageId,
   trackerReferences,
   trackerReferenceSource,
+  onSaveState,
 }: {
   pageId: string;
   trackerReferences?: TrackerReferenceResolver;
   trackerReferenceSource?: { itemId: string; type: string };
+  /** When given, the host shows the save state (in its header); otherwise it is a line under the body. */
+  onSaveState?: (state: SaveState, error: string | null) => void;
 }) {
   const drafts = useContext(DraftStoreContext);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -269,6 +276,12 @@ export function PageEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageId]);
 
+  const onSaveStateRef = useRef(onSaveState);
+  onSaveStateRef.current = onSaveState;
+  useEffect(() => {
+    onSaveStateRef.current?.(saveState, saveError);
+  }, [saveState, saveError]);
+
   useEffect(() => {
     const flush = () => {
       if (timerRef.current) void save();
@@ -278,7 +291,7 @@ export function PageEditor({
   }, [save]);
 
   return (
-    <div className="wiki-web-page-editor flex min-h-0 flex-col">
+    <div className="wiki-web-page-editor flex min-h-0 flex-1 flex-col">
       {malformed ? (
         <div className="wiki-web-banner mx-8 my-2 rounded border border-nim bg-nim-secondary px-3 py-2 text-xs text-nim-muted" role="status">
           This file&apos;s frontmatter does not parse, so it is shown whole and read-only. Fix it in an editor and it opens normally.
@@ -301,10 +314,13 @@ export function PageEditor({
       {loadError ? (
         <div className="wiki-web-banner mx-8 my-2 text-xs text-nim-error" role="alert">{loadError}</div>
       ) : null}
-      <div ref={hostRef} className="wiki-web-editor-host min-h-[200px]" data-testid="wiki-web-editor" />
-      <div className="wiki-web-save-state px-8 pb-2 text-[11px] text-nim-faint" data-save-state={saveState} aria-live="polite">
-        {saveState === 'saving' ? 'Saving…' : saveState === 'unsaved' ? 'Unsaved changes' : saveState === 'error' ? `Not saved: ${saveError}` : 'Saved to file'}
-      </div>
+      {/* The console's editor surface (web-console collab/editorSurfaceStyles.ts): the editor fills the pane. */}
+      <div ref={hostRef} className="wiki-web-editor-host collab-editor-surface flex min-h-[200px] flex-1 flex-col bg-nim" data-testid="wiki-web-editor" />
+      {onSaveState ? null : (
+        <div className="wiki-web-save-state px-8 pb-2 text-[11px] text-nim-faint" data-save-state={saveState} aria-live="polite">
+          {saveStateLabel(saveState, saveError)}
+        </div>
+      )}
     </div>
   );
 }

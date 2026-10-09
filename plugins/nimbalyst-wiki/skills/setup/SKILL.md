@@ -1,5 +1,5 @@
 ---
-name: wiki-setup
+name: setup
 description: Create a project wiki with a useful Home, starter pages, and a writing guide.
 ---
 
@@ -11,9 +11,11 @@ Leave the person with a wiki they can read and navigate: a populated Home, usefu
 
 Check what exists first. Create missing pages, fill empty bodies, and add missing context or links with small edits that preserve existing prose. Never delete, rename, archive, or replace a person's content without their approval. Re-running setup must not duplicate pages, sections, or links.
 
-The base guide is `references/wiki-guide.md` next to this file. Example relations are in `../wiki-update/references/relations.yaml`.
+The base guide is `references/wiki-guide.md` next to this file. Example relations are in `../update/references/relations.yaml`.
 
 ## 0. Which project
+
+On a local wiki, follow "On a local wiki" at the end of this skill instead of this step.
 
 Setup works on a team project's pages on the Nimbalyst server. Follow the `connect` skill first: `pages_status` must report `bound`, and every call below takes the same `repo` and `project` arguments. A project created with `pages_create_project` already has its Home page. Types defined here are always the team's.
 
@@ -21,10 +23,10 @@ Setup works on a team project's pages on the Nimbalyst server. Follow the `conne
 
 Read only; change nothing in this step.
 
-- Read the project's README, relevant docs and the user's brief to learn its purpose, audience, and known choices. Read the existing Home, guide, and relevant overview pages using `listPages` and `readCollabDoc`. Follow the project's guide and the update skill (`/nimbalyst-pages:wiki-update`) for all page writing, marks, citations, and links.
+- Read the project's README, relevant docs and the user's brief to learn its purpose, audience, and known choices. Read the existing Home, guide, and relevant overview pages using `listPages` and `readCollabDoc`. Follow the project's guide and the update skill (`/nimbalyst-wiki:update`) for all page writing, marks, citations, and links.
 - Search with `searchPages` before deciding a page is missing; reuse equivalent pages even when their titles differ. If a listing is truncated, follow its continuation before concluding something does not exist. Keep all reads and writes in the chosen project and section.
 - `tracker_list_types`: the types that exist, any `extends`, and the relations (predicates) that exist.
-- **Content from the earlier knowledge graph:** types `entity`, `claim`, `question`, `finding`, `investigation`, `ontology-proposal`, project types that held decisions (`keystone`, `decision-exploration`), `.nimbalyst/labels.yaml`, predicates whose only `subjectKinds` is `entity`, and an `entity` titled "How we write this wiki". Report them as "earlier model, left in place". Do not edit or remove them, do not add labels or vocabulary packs, and never pass `labels` to `tracker_define_type`. Offer the move into pages as a separate job the person starts (`../wiki-update/references/migrating-v1.md`).
+- **Content from the earlier knowledge graph:** types `entity`, `claim`, `question`, `finding`, `investigation`, `ontology-proposal`, project types that held decisions (`keystone`, `decision-exploration`), `.nimbalyst/labels.yaml`, predicates whose only `subjectKinds` is `entity`, and an `entity` titled "How we write this wiki". Report them as "earlier model, left in place". Do not edit or remove them, do not add labels or vocabulary packs, and never pass `labels` to `tracker_define_type`. Offer the move into pages as a separate job the person starts (`../update/references/migrating-v1.md`).
 
 ## 2. Understand what would make this wiki useful
 
@@ -109,7 +111,7 @@ Add a relation when the team links two of its types often and the link means one
 - `subjectKinds`: the types a link can be written on; `objectKinds`: the types it can point at. Use the project's type ids; subtypes are covered through `extends`.
 - `valueShape: entity` and `direction: directed` or `symmetric`. No qualifiers.
 
-Copy the shape from `../wiki-update/references/relations.yaml`, renamed to the project's types, and send only new ids with `tracker_define_type` (`predicates: [...]`; it merges by id and keeps the rest). Do not add generic relations ("related to", "depends on"): a plain link says that already.
+Copy the shape from `../update/references/relations.yaml`, renamed to the project's types, and send only new ids with `tracker_define_type` (`predicates: [...]`; it merges by id and keeps the rest). Do not add generic relations ("related to", "depends on"): a plain link says that already.
 
 - An existing id with a different definition is a conflict: keep it and report it.
 - Adding `objectKinds` to an existing predicate narrows it and counts as destructive. Propose it to the person; only with their approval pass `confirmDestructive`.
@@ -120,3 +122,13 @@ Copy the shape from `../wiki-update/references/relations.yaml`, renamed to the p
 Read back every created or edited page and check its content, tree placement, and links against the person's intended use. Setup is complete only when Home introduces the project, links to the guide and useful starter pages, and those pages address the agreed priorities with grounded content or clearly stated gaps. Report blocked writes or missing context as incomplete; successful type creation is not a substitute.
 
 Lead the report with a link to Home and the pages created or filled. Briefly note any types or relations added, earlier-model content left in place, conflicts, and information still needed. For a check-only request, report these findings without making changes.
+
+## On a local wiki
+
+When the `connect` skill chose the local wiki (or the person asked for one), set it up with the `nimbalyst-local` server's tools. Everything above applies, with these differences:
+
+- **Create it first** if there is none: `initLocalWiki`, after asking where it should live as the `connect` skill describes (default `nimbalyst-local/wiki`, kept out of git; or a checked-in folder such as `docs/wiki`). It creates the Home page.
+- **No project or `pages_status`.** Find the guide and Home with `listPages`.
+- **Links** in Home and every page are relative paths carrying the target's id, as the update skill's "On a local wiki" says, never console links.
+- **Types** are files, not a tool call: there is no `tracker_define_type` here. Write `.nimbalyst/trackers/<type>.yaml` with the same fields as the JSON above, in YAML, plus `storage: pages` (one markdown page per item, with a body) or `storage: table` (one CSV of rows, no bodies; for long uniform lists). Leave out `sharing`. Check `tracker_list_types` first and never overwrite an existing type file without the person's approval. Place a table type under a page with `moveSharedItem` (`kind: type`).
+- **Relations** are a team-wiki feature; skip step 6 on a local wiki.

@@ -12,17 +12,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CollabDocsUIProvider,
   CollabSidebar,
+  PagesSectionEntries,
   createCollabDocsScopeLifecycle,
   useCollabPagesState,
   type CollabDocsSession,
 } from '@nimbalyst/collab-bundle/docs-ui';
 import { TrackersUIProvider } from '@nimbalyst/collab-bundle/trackers-ui';
-import { LocalCollabHost, routePath, type WikiRoute } from '../host/LocalCollabHost';
+import { LocalCollabHost, routePath } from '../host/LocalCollabHost';
 import type { LocalTrackerDataSource } from '../host/LocalTrackerDataSource';
 import { DraftStore, DraftStoreContext, prepareToLeave, resolveLeave, type LeaveChoice, type LeaveDecision } from './drafts';
-import { PageView, SearchView, TypedPageView, TypeTableView, type PageModule } from './views';
+import { PageView, SearchView, TypedPageView, TypesView, TypeTableView, type PageModule, type ViewRoute } from './views';
 
-type Route = WikiRoute | { kind: 'search'; query: string };
+type Route = ViewRoute;
 
 function parseLocation(): Route {
   const { pathname, search } = window.location;
@@ -32,11 +33,14 @@ function parseLocation(): Route {
   if (kind === 'item' && value) return { kind: 'item', id: value };
   if (kind === 'type' && value) return { kind: 'type', typeId: value };
   if (kind === 'search') return { kind: 'search', query: new URLSearchParams(search).get('q') ?? '' };
+  if (kind === 'types') return { kind: 'types' };
   return { kind: 'home' };
 }
 
 function pathOf(route: Route): string {
-  return route.kind === 'search' ? `/search?q=${encodeURIComponent(route.query)}` : routePath(route);
+  if (route.kind === 'search') return route.query ? `/search?q=${encodeURIComponent(route.query)}` : '/search';
+  if (route.kind === 'types') return '/types';
+  return routePath(route);
 }
 
 type Leaving = { reason: 'conflict' | 'error'; proceed: () => void };
@@ -164,7 +168,7 @@ function Shell({
   root: string;
   pagePath: (id: string) => string | null;
   route: Route;
-  navigate: (route: Route) => void;
+  navigate: (route: Route, options?: { newTab?: boolean }) => void;
   trackers: LocalTrackerDataSource;
   module: PageModule;
   notice: string | null;
@@ -174,7 +178,6 @@ function Shell({
 }) {
   const typeResolver = module.useBrowserTypeResolver('team');
   const { documents } = useCollabPagesState();
-  const [query, setQuery] = useState(route.kind === 'search' ? route.query : '');
 
   // Home is the first top-level page, as `nim wiki init` writes one.
   const home = useMemo(
@@ -182,32 +185,26 @@ function Shell({
     [documents],
   );
   const resolved: Route = route.kind === 'home' && home ? { kind: 'page', id: home.documentId } : route;
+  const open = (next: Route) => ({ newTab }: { newTab: boolean }) => navigate(next, { newTab });
 
   return (
     <div className="wiki-web-app flex h-full min-h-0">
       <aside className="wiki-web-sidebar flex w-[280px] shrink-0 flex-col border-r border-nim bg-nim-secondary">
-        <form
-          className="wiki-web-search-form border-b border-nim px-3 py-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (query.trim()) navigate({ kind: 'search', query: query.trim() });
-          }}
-        >
-          <input
-            className="w-full rounded border border-nim bg-nim px-2 py-1 text-xs text-nim outline-none focus:border-nim-focus"
-            placeholder="Search the wiki"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            aria-label="Search the wiki"
-          />
-        </form>
         <div className="min-h-0 flex-1">
+          {/* As the desktop's Wiki section: a compact section label and the Home / Search / Types rows above the tree. */}
           <CollabSidebar
             activeDocumentId={resolved.kind === 'page' ? resolved.id : null}
             activeItemId={resolved.kind === 'item' ? resolved.id : null}
             activeTypeId={resolved.kind === 'type' ? resolved.typeId : null}
-            scopeName="Local wiki"
-            scopePath={<span title={root} className="truncate">{root}</span>}
+            sectionTitle="Local wiki"
+            sectionEntries={(
+              <PagesSectionEntries
+                active={resolved.kind === 'search' ? 'search' : resolved.kind === 'types' ? 'types' : resolved.kind === 'page' && resolved.id === home?.documentId ? 'home' : null}
+                onOpenHome={home ? open({ kind: 'page', id: home.documentId }) : undefined}
+                onOpenSearch={open({ kind: 'search', query: '' })}
+                onOpenTypes={open({ kind: 'types' })}
+              />
+            )}
             typeResolver={typeResolver}
             onArchiveItem={async (itemId) => {
               await trackers.command({ type: 'archive-item', itemId, archive: true });
@@ -215,7 +212,7 @@ function Shell({
           />
         </div>
       </aside>
-      <main className="wiki-web-main min-w-0 flex-1 overflow-auto select-text">
+      <main className="wiki-web-main flex min-w-0 flex-1 flex-col overflow-auto select-text">
         {notice ? (
           <div className="wiki-web-notice flex items-start gap-2 border-b border-nim bg-nim-secondary px-4 py-2 text-xs text-nim" role="alert">
             <span className="flex-1">{notice}</span>
@@ -234,10 +231,11 @@ function Shell({
             <button type="button" className="rounded border border-nim px-2 py-1 hover:bg-nim-hover" onClick={() => onChooseLeave('overwrite')}>Use mine and overwrite the file</button>
           </div>
         ) : null}
-        {resolved.kind === 'page' ? <PageView pageId={resolved.id} filePath={joinPath(root, pagePath(resolved.id))} />
+        {resolved.kind === 'page' ? <PageView pageId={resolved.id} filePath={joinPath(root, pagePath(resolved.id))} navigate={navigate} />
           : resolved.kind === 'item' ? <TypedPageView itemId={resolved.id} module={module} trackers={trackers} navigate={navigate} />
             : resolved.kind === 'type' ? <TypeTableView typeId={resolved.typeId} module={module} trackers={trackers} navigate={navigate} />
               : resolved.kind === 'search' ? <SearchView query={resolved.query} navigate={navigate} />
+                : resolved.kind === 'types' ? <TypesView trackers={trackers} navigate={navigate} />
                 : <div className="px-8 py-6 text-sm text-nim-muted">This wiki has no pages yet. Create one from the tree.</div>}
       </main>
     </div>

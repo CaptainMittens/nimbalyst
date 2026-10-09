@@ -11,12 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Actions can set an `effort` level, and choosing an action that sets a model or effort switches the composer's pickers to match
 - The Wiki's Local section (formerly Personal) keeps its pages as plain files in the project, default `nimbalyst-local/wiki`, which agents and the `nim` CLI can read and edit; existing Personal pages stay visible and can be exported to files
-- `nim wiki` commands, `nim mcp` (a stdio MCP server for the local wiki) and `nim wiki serve` (the local wiki in a browser) work without the desktop app
+- `nim wiki` commands, `nim mcp` (a stdio MCP server for the local wiki) and `nim wiki serve` (the local wiki in a browser) work without the desktop app, and Claude Code can create and maintain a local wiki through the Nimbalyst Wiki plugin
 
 ### Changed
 - Local tracker item numbers (`NIM.75`) are only given to types that set `localNumbers: true`
+- The `nimbalyst-pages` Claude Code plugin is now `nimbalyst-wiki` (commands `/nimbalyst-wiki:setup`, `update`, `capture`), and `nim pages` is now `nim wiki`
 
 ### Fixed
+- The Claude Code wiki plugin now includes its MCP servers, which were missing when it was installed from GitHub
 - Clicking a document link to an existing file, such as the root package.json, now opens it in large workspaces where the file was missing from the scan index
 - Windows no longer keep the full transcripts of agent sessions they have not opened or recently viewed in memory; reopening an older session reloads its history
 - Streaming agent responses no longer re-render every visible tool card and diff in the transcript on each update

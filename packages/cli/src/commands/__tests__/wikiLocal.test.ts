@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import { initWiki, openWiki } from '@nimbalyst/local-wiki';
 import { main } from '../../index.js';
 import { parseArgs } from '../../cli/parse.js';
+import { isLocalWikiCall } from '../wikiLocal.js';
 import { runLocalTracker } from '../trackerLocal.js';
 
 const dirs: string[] = [];
@@ -24,6 +25,7 @@ function scratch(): string {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -100,11 +102,27 @@ describe('nim wiki over a local folder', () => {
     expect(hits.map((h: { id: string }) => h.id)).toEqual([read.id]);
   });
 
-  it('tells a project without a wiki to run nim wiki init', async () => {
+  it('routes one noun to the local or team wiki, with --team and --local to force it', async () => {
     const repo = scratch();
-    const result = await nim('wiki', 'ls', '--workspace', repo);
-    expect(result.code).toBe(1);
-    expect(result.err).toContain('nim wiki init');
+    vi.stubEnv('NIM_CONFIG_DIR', path.join(repo, 'config')); // signed out
+    vi.stubEnv('NIM_SERVER', 'https://sync.test');
+    const route = (...argv: string[]) => isLocalWikiCall(parseArgs(['wiki', ...argv, '--workspace', repo]));
+
+    // Neither wiki reachable: say how to get each.
+    const none = await nim('wiki', 'list', '--workspace', repo);
+    expect(none.code).toBe(1);
+    expect(none.err).toMatch(/nim wiki init.*nim login/);
+    expect(route('status')).toBe(false);
+    expect(() => route('list', '--team', '--local')).toThrow(/not both/);
+    expect(() => route('edit', 'x', '--local')).toThrow(/is for the team wiki/);
+    expect(() => route('write', 'x', '--team')).toThrow(/use 'nim wiki edit'/);
+
+    expect((await nim('wiki', 'init', '--workspace', repo)).code).toBe(0);
+    for (const verb of ['list', 'ls', 'read', 'search']) expect(route(verb, 'Home')).toBe(true);
+    expect(route('read', 'collab://org:o1:doc:home')).toBe(false);
+    expect(route('list', '--org', 'o1', '--project', 'p1')).toBe(false);
+    expect(route('list', '--team')).toBe(false);
+    expect(route('items')).toBe(false);
   });
 
   it('loads a wiki written by the library unchanged', async () => {

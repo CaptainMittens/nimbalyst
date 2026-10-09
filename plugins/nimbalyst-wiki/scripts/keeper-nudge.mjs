@@ -1,19 +1,19 @@
 #!/usr/bin/env node
-// Stop hook for the nimbalyst-pages plugin. Asks the agent, at most once per
+// Stop hook for the nimbalyst-wiki plugin. Asks the agent, at most once per
 // session, to record what the session established in the team's pages, and
 // only when the transcript shows substantive work: a git commit, at least N
 // file edits, or a plan written. Every other stop passes through silently, and
-// so does every stop in a directory with no git remote: team pages are reached
-// through a remote, so there is nothing to record into.
+// so does every stop in a directory with no wiki to record into: neither a git
+// remote (team pages are reached through one) nor a local wiki.
 //
 // A hook that fails must never trap the user in a session, so every error path
 // exits 0 with no output. Plain Node, no dependencies.
 //
 // Env:
-//   NIMBALYST_PAGES_NUDGE_MIN_EDITS   edits that count as substance (default 5)
-//   NIMBALYST_PAGES_NUDGE_STATE_DIR   where once-per-session markers live (default:
-//                                     $XDG_STATE_HOME/nimbalyst-pages, else
-//                                     ~/.claude/state/nimbalyst-pages; created 0700)
+//   NIMBALYST_WIKI_NUDGE_MIN_EDITS   edits that count as substance (default 5)
+//   NIMBALYST_WIKI_NUDGE_STATE_DIR   where once-per-session markers live (default:
+//                                     $XDG_STATE_HOME/nimbalyst-wiki, else
+//                                     ~/.claude/state/nimbalyst-wiki; created 0700)
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -22,6 +22,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_MIN_EDITS = 5;
+// The local wiki's root marker (packages/local-wiki FORMAT.md); the hook has no dependencies to import it from.
+const LOCAL_WIKI_MARKER = '.nimbalyst-wiki.yaml';
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const GIT_COMMIT = /\bgit\b[^|;&\n]*\bcommit\b/;
 const PLAN_PATH = /(^|[\\/])(plans?|\.claude[\\/]plans)[\\/]|(^|[\\/])[^\\/]*plan[^\\/]*\.md$/i;
@@ -30,7 +32,7 @@ const PLAN_PATH = /(^|[\\/])(plans?|\.claude[\\/]plans)[\\/]|(^|[\\/])[^\\/]*pla
 const PAGE_WRITE = /(^|__)(applyCollabDocEdit|createSharedDoc|setPageType|moveSharedItem|tracker_create|tracker_update)$/;
 
 export function minEdits(env = process.env) {
-  const parsed = Number.parseInt(env.NIMBALYST_PAGES_NUDGE_MIN_EDITS ?? '', 10);
+  const parsed = Number.parseInt(env.NIMBALYST_WIKI_NUDGE_MIN_EDITS ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_MIN_EDITS;
 }
 
@@ -79,9 +81,9 @@ export function substanceReason(signals, threshold) {
 // Per-user, not the shared temp dir: another local user could otherwise
 // pre-create or read markers named after this user's session ids.
 function stateDir(env) {
-  if (env.NIMBALYST_PAGES_NUDGE_STATE_DIR) return env.NIMBALYST_PAGES_NUDGE_STATE_DIR;
-  if (env.XDG_STATE_HOME) return path.join(env.XDG_STATE_HOME, 'nimbalyst-pages');
-  return path.join(env.HOME || homedir(), '.claude', 'state', 'nimbalyst-pages');
+  if (env.NIMBALYST_WIKI_NUDGE_STATE_DIR) return env.NIMBALYST_WIKI_NUDGE_STATE_DIR;
+  if (env.XDG_STATE_HOME) return path.join(env.XDG_STATE_HOME, 'nimbalyst-wiki');
+  return path.join(env.HOME || homedir(), '.claude', 'state', 'nimbalyst-wiki');
 }
 
 function markerPath(sessionId, env) {
@@ -99,8 +101,31 @@ export function hasGitRemote(dir) {
   }
 }
 
+/**
+ * Whether the project has a local wiki: its `.nimbalyst/local-wiki.json`
+ * setting, or the default folder's marker. Any failure counts as no.
+ */
+export function hasLocalWiki(dir) {
+  try {
+    let root = dir;
+    try {
+      root = execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim() || dir;
+    } catch {
+      // not a git checkout: the directory itself is the project
+    }
+    return existsSync(path.join(root, '.nimbalyst', 'local-wiki.json')) || existsSync(path.join(root, 'nimbalyst-local', 'wiki', LOCAL_WIKI_MARKER));
+  } catch {
+    return false;
+  }
+}
+
+/** Somewhere to record: a team wiki through a git remote, or a local wiki. */
+export function hasWiki(dir) {
+  return hasGitRemote(dir) || hasLocalWiki(dir);
+}
+
 /** Returns the hook's stdout JSON, or null to let the stop through. */
-export function decide(input, env = process.env, remoteCheck = hasGitRemote) {
+export function decide(input, env = process.env, remoteCheck = hasWiki) {
   if (!input || typeof input !== 'object' || input.stop_hook_active === true) return null;
   const sessionId = typeof input.session_id === 'string' ? input.session_id : '';
   const transcriptPath = typeof input.transcript_path === 'string' ? input.transcript_path : '';
@@ -121,8 +146,8 @@ export function decide(input, env = process.env, remoteCheck = hasGitRemote) {
   return {
     decision: 'block',
     reason:
-      `This session did substantive work (${why}). Before stopping, run the /nimbalyst-pages:capture command ` +
-      'to record any decision made or question answered in the team pages it affects. ' +
+      `This session did substantive work (${why}). Before stopping, run the /nimbalyst-wiki:capture command ` +
+      'to record any decision made or question answered in the wiki pages it affects. ' +
       'If nothing is worth keeping, reply "nothing to record" and stop. This reminder appears once per session.',
   };
 }

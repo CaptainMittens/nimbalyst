@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * `nim login` and `nim pages` against a mocked collab server (and a mocked
+ * `nim login` and `nim wiki` against a mocked collab server (and a mocked
  * GitHub for the gated GitHub sign-in). The contract pinned here: only our
  * tokens are stored, in a 0600 file under a lock; a 401 refreshes once; every
  * Pages call carries the repo, and the project pin, the skill would have passed.
@@ -205,7 +205,7 @@ describe('nim login', () => {
       return { json: { jsonrpc: '2.0', id: 1, result: { isError: true, content: [{ type: 'text', text: JSON.stringify({ code: 'x', message: 'bad \u001b[2J\u001b]0;pwned\u0007 thing' }) }] } } };
     });
     const dir = gitRepo('git@github.com:acme/widgets.git');
-    expect(await main(['pages', 'item', 'i1', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'item', 'i1', '--workspace', dir])).toBe(2);
     expect(stderr).toContain('bad');
     expect(stderr).not.toMatch(/\u001b/);
   });
@@ -298,7 +298,7 @@ function rpcCalls(): any[] {
   return calls.filter((c) => c.url === 'https://sync.test/mcp').map((c) => JSON.parse(c.body));
 }
 
-describe('nim pages', () => {
+describe('nim wiki', () => {
   it('status sends pages_status with the origin remote as repo and prints unbound, bound, and ambiguous', async () => {
     writeCredentials('access-1');
     const dir = gitRepo('git@github.com:acme/widgets.git');
@@ -311,37 +311,37 @@ describe('nim pages', () => {
     };
     handlers.push((c) => (c.url === 'https://sync.test/mcp' ? toolResult(status) : undefined));
 
-    expect(await main(['pages', 'status', '--workspace', dir])).toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(0);
     expect(rpcCalls()).toEqual([
       { jsonrpc: '2.0', id: expect.any(Number), method: 'tools/call', params: { name: 'pages_status', arguments: { repo: 'git@github.com:acme/widgets.git' } } },
     ]);
     expect(calls[0].headers.authorization).toBe('Bearer access-1');
     expect(stdout).toMatch(/not connected/);
     expect(stdout).toMatch(/Acme.*o1.*admin/);
-    expect(stdout).toContain('nim pages bind --org o1 --project <projectId>');
+    expect(stdout).toContain('nim wiki bind --org o1 --project <projectId>');
     expect(stdout).not.toContain('--org o2');
     expect(stdout).not.toMatch(/join|secret/i);
 
     status = { state: 'unbound', teams: [{ orgId: 'o1', orgName: 'Acme', role: 'owner', projects: [{ projectId: 'p7', projectName: 'Docs' }] }] };
     stdout = '';
-    expect(await main(['pages', 'status', '--workspace', dir])).toBe(0);
-    expect(stdout).toMatch(/nim pages bind --org o1 --project p7.*Docs/);
+    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(0);
+    expect(stdout).toMatch(/nim wiki bind --org o1 --project p7.*Docs/);
     expect(stdout).not.toContain('<projectId>');
 
     status = { state: 'unbound', teams: [{ orgId: 'o2', orgName: 'Side', role: 'member' }] };
     stdout = '';
-    expect(await main(['pages', 'status', '--workspace', dir])).toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(0);
     expect(stdout).toContain('Ask a team admin to connect this repo in Nimbalyst');
-    expect(stdout).not.toContain('nim pages bind');
+    expect(stdout).not.toContain('nim wiki bind');
 
     status = { state: 'bound', project: { orgId: 'o1', orgName: 'Acme', projectId: 'p1', projectName: 'Widgets', role: 'member', url: 'https://console.test/org/acme/project/p1/wiki' } };
     stdout = '';
-    expect(await main(['pages', 'status', '--workspace', dir])).toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(0);
     expect(stdout).toMatch(/state\s+bound/);
     expect(stdout).toMatch(/project\s+Widgets \(p1\)/);
     expect(stdout).toContain('https://console.test/org/acme/project/p1/wiki');
     stdout = '';
-    expect(await main(['pages', 'status', '--workspace', dir, '-q'])).toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir, '-q'])).toBe(0);
     expect(stdout.trim()).toBe('bound');
 
     status = {
@@ -352,12 +352,12 @@ describe('nim pages', () => {
       ],
     };
     stdout = '';
-    expect(await main(['pages', 'status', '--workspace', dir])).toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(0);
     expect(stdout).toMatch(/more than one/);
-    expect(stdout).toContain('nim pages pin --org <orgId> --project <projectId>');
+    expect(stdout).toContain('nim wiki pin --org <orgId> --project <projectId>');
     expect(stdout).toMatch(/Widgets fork.*p2/);
     stdout = '';
-    expect(await main(['pages', 'status', '--workspace', dir, '--json'])).toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir, '--json'])).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({ state: 'ambiguous' });
   });
 
@@ -375,10 +375,10 @@ describe('nim pages', () => {
     handlers.push((c) => (c.url === 'https://sync.test/mcp' ? toolResult(status) : undefined));
 
     // A project the user can reach but the repo is not connected to is refused, even if the server would accept it as `project`.
-    expect(await main(['pages', 'pin', '--org', 'o9', '--project', 'p9', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'pin', '--org', 'o9', '--project', 'p9', '--workspace', dir])).toBe(2);
     expect(fs.existsSync(pinFile)).toBe(false);
 
-    expect(await main(['pages', 'pin', '--org', 'o2', '--project', 'p2', '--workspace', dir])).toBe(0);
+    expect(await main(['wiki', 'pin', '--org', 'o2', '--project', 'p2', '--workspace', dir])).toBe(0);
     expect(JSON.parse(fs.readFileSync(pinFile, 'utf8'))).toEqual({ orgId: 'o2', projectId: 'p2' });
     expect(stdout).toContain('Fork');
 
@@ -389,28 +389,28 @@ describe('nim pages', () => {
     ]);
 
     status = { state: 'bound', project: { orgId: 'o2', orgName: 'Side', projectId: 'p2', projectName: 'Fork' } };
-    expect(await main(['pages', 'items', '--workspace', dir, '-q'])).toBe(0);
+    expect(await main(['wiki', 'items', '--workspace', dir, '-q'])).toBe(0);
     expect(rpcCalls().at(-1)).toMatchObject({ params: { name: 'tracker_list', arguments: { repo: 'git@github.com:acme/widgets.git', project: { orgId: 'o2', projectId: 'p2' } } } });
 
     // Bound: only the bound project can be pinned.
     fs.rmSync(pinFile);
-    expect(await main(['pages', 'pin', '--org', 'o1', '--project', 'p1', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'pin', '--org', 'o1', '--project', 'p1', '--workspace', dir])).toBe(2);
     expect(fs.existsSync(pinFile)).toBe(false);
 
     // Unbound: nothing to pin.
     status = { state: 'unbound', teams: [] };
-    expect(await main(['pages', 'pin', '--org', 'o2', '--project', 'p2', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'pin', '--org', 'o2', '--project', 'p2', '--workspace', dir])).toBe(2);
 
     // --repo naming another repository is refused rather than pinning this checkout for it.
     status = { state: 'bound', project: { orgId: 'o2', projectId: 'p2' } };
     const before = calls.length;
-    expect(await main(['pages', 'pin', '--org', 'o2', '--project', 'p2', '--repo', 'git@github.com:acme/other.git', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'pin', '--org', 'o2', '--project', 'p2', '--repo', 'git@github.com:acme/other.git', '--workspace', dir])).toBe(2);
     expect(stderr).toMatch(/--repo/);
     expect(calls.length).toBe(before);
     expect(fs.existsSync(pinFile)).toBe(false);
   });
 
-  it('pin_mismatch is a usage error that points at nim pages status', async () => {
+  it('pin_mismatch is a usage error that points at nim wiki status', async () => {
     writeCredentials('access-1');
     const dir = gitRepo('git@github.com:acme/widgets.git');
     handlers.push((c) =>
@@ -418,8 +418,8 @@ describe('nim pages', () => {
         ? { json: { jsonrpc: '2.0', id: 1, result: { isError: true, content: [{ type: 'text', text: JSON.stringify({ code: 'pin_mismatch', message: 'The pin in .nimbalyst/wiki.json names a project this repository is not connected to' }) }] } } }
         : undefined,
     );
-    expect(await main(['pages', 'items', '--workspace', dir])).toBe(2);
-    expect(stderr).toContain("names a project this repository is not connected to (pin_mismatch) Run 'nim pages status'");
+    expect(await main(['wiki', 'items', '--workspace', dir])).toBe(2);
+    expect(stderr).toContain("names a project this repository is not connected to (pin_mismatch) Run 'nim wiki status'");
   });
   it('bind calls pages_bind_repo, and create-project calls pages_create_project with the repo only on --bind', async () => {
     writeCredentials('access-1');
@@ -431,10 +431,10 @@ describe('nim pages', () => {
       return toolResult({ project: { orgId: 'o1', projectId: 'p-new', projectName: 'Docs', url: 'https://console.test/p-new' } });
     });
 
-    expect(await main(['pages', 'bind', '--org', 'o1', '--project', 'p1', '--workspace', dir])).toBe(0);
+    expect(await main(['wiki', 'bind', '--org', 'o1', '--project', 'p1', '--workspace', dir])).toBe(0);
     expect(stdout).toContain('https://console.test/p1');
-    expect(await main(['pages', 'create-project', '--org', 'o1', '--name', 'Docs', '--workspace', dir, '-q'])).toBe(0);
-    expect(await main(['pages', 'create-project', '--org', 'o1', '--name', 'Docs', '--bind', '--workspace', dir, '-q'])).toBe(0);
+    expect(await main(['wiki', 'create-project', '--org', 'o1', '--name', 'Docs', '--workspace', dir, '-q'])).toBe(0);
+    expect(await main(['wiki', 'create-project', '--org', 'o1', '--name', 'Docs', '--bind', '--workspace', dir, '-q'])).toBe(0);
     expect(stdout.trim().split('\n').slice(-2)).toEqual(['p-new', 'p-new']);
 
     expect(rpcCalls().map((r) => [r.params.name, r.params.arguments])).toEqual([
@@ -445,8 +445,8 @@ describe('nim pages', () => {
     // Binding never writes a pin: the remote is what resolves the project.
     expect(fs.existsSync(path.join(dir, '.nimbalyst', 'wiki.json'))).toBe(false);
 
-    expect(await main(['pages', 'bind', '--org', 'o1', '--workspace', dir])).toBe(2);
-    expect(await main(['pages', 'create-project', '--name', 'Docs', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'bind', '--org', 'o1', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'create-project', '--name', 'Docs', '--workspace', dir])).toBe(2);
   });
 
   it('never reads the current directory\'s wiki.json when --repo or --org/--project is given', async () => {
@@ -456,14 +456,14 @@ describe('nim pages', () => {
     fs.writeFileSync(path.join(dir, '.nimbalyst', 'wiki.json'), JSON.stringify({ orgId: 'o-here', projectId: 'p-here' }));
     handlers.push((c) => (c.url === 'https://sync.test/mcp' ? toolResult({ items: [] }) : undefined));
 
-    expect(await main(['pages', 'items', '--repo', 'git@github.com:acme/other.git', '--workspace', dir, '-q'])).toBe(0);
-    expect(await main(['pages', 'items', '--org', 'o-other', '--project', 'p-other', '--workspace', dir, '-q'])).toBe(0);
+    expect(await main(['wiki', 'items', '--repo', 'git@github.com:acme/other.git', '--workspace', dir, '-q'])).toBe(0);
+    expect(await main(['wiki', 'items', '--org', 'o-other', '--project', 'p-other', '--workspace', dir, '-q'])).toBe(0);
 
     expect(rpcCalls().map((r) => r.params.arguments)).toEqual([
       { repo: 'git@github.com:acme/other.git' },
       { repo: 'git@github.com:acme/widgets.git', project: { orgId: 'o-other', projectId: 'p-other' } },
     ]);
-    expect(await main(['pages', 'items', '--project', 'p-other', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'items', '--project', 'p-other', '--workspace', dir])).toBe(2);
   });
 
   it('refreshes once on a 401 and retries with the new token', async () => {
@@ -481,7 +481,7 @@ describe('nim pages', () => {
         : undefined,
     );
 
-    expect(await main(['pages', 'status', '--workspace', dir, '--json'])).toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir, '--json'])).toBe(0);
 
     const refresh = calls.find((c) => c.url.endsWith('/oauth/token'))!;
     expect(Object.fromEntries(new URLSearchParams(refresh.body))).toEqual({
@@ -505,8 +505,8 @@ describe('nim pages', () => {
     handlers.push((c) => (c.url === 'https://sync.test/oauth/token' ? { status: 400, json: { error: 'invalid_grant' } } : undefined));
     handlers.push((c) => (c.url === 'https://sync.test/mcp' ? { status: 401, json: { error: 'invalid_token' } } : undefined));
 
-    expect(await main(['pages', 'status', '--workspace', dir])).toBe(2);
-    expect(await main(['pages', 'status', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(2);
 
     expect(calls.filter((c) => c.url.endsWith('/oauth/token'))).toHaveLength(1);
     expect(stderr).toContain("nim login");
@@ -529,8 +529,8 @@ describe('nim pages', () => {
     });
 
     const codes = await Promise.all([
-      main(['pages', 'status', '--workspace', dir, '-q']),
-      main(['pages', 'status', '--workspace', dir, '-q']),
+      main(['wiki', 'status', '--workspace', dir, '-q']),
+      main(['wiki', 'status', '--workspace', dir, '-q']),
     ]);
 
     expect(codes).toEqual([0, 0]);
@@ -546,11 +546,11 @@ describe('nim pages', () => {
     handlers.push((c) => (c.url === 'https://sync.test/mcp' ? { status: 401, json: {} } : undefined));
     const stored = () => JSON.parse(fs.readFileSync(credentialsFile(), 'utf8')).servers['https://sync.test'];
 
-    expect(await main(['pages', 'status', '--workspace', dir])).not.toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir])).not.toBe(0);
     expect(stored().refreshToken).toBe('refresh-1');
 
     tokenReply = { status: 400, json: { error: 'invalid_grant' } };
-    expect(await main(['pages', 'status', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'status', '--workspace', dir])).toBe(2);
     expect(stored().refreshToken).toBeUndefined();
   });
 
@@ -656,7 +656,7 @@ describe('nim pages', () => {
         : undefined,
     );
 
-    expect(await main(['pages', 'status', '--workspace', dir, '-q'])).toBe(0);
+    expect(await main(['wiki', 'status', '--workspace', dir, '-q'])).toBe(0);
     expect(fs.readdirSync(path.dirname(lock)).filter((f) => f.includes('.lock'))).toEqual([]);
   });
 
@@ -672,10 +672,10 @@ describe('nim pages', () => {
     const exits: number[] = [];
     for (const c of ['not_a_member', 'revision_conflict', 'repo_not_bound', 'ambiguous_project', 'project_not_accessible', 'admin_required']) {
       code = c;
-      exits.push(await main(['pages', 'item', 'i1', '--workspace', dir]));
+      exits.push(await main(['wiki', 'item', 'i1', '--workspace', dir]));
     }
     expect(exits).toEqual([5, 2, 2, 2, 5, 5]);
-    expect(stderr).toContain("repo_not_bound) Run 'nim pages status'");
+    expect(stderr).toContain("repo_not_bound) Run 'nim wiki status'");
   });
 
   it('JSON-RPC errors map to their own exit codes', async () => {
@@ -684,12 +684,12 @@ describe('nim pages', () => {
     let rpc: unknown = { jsonrpc: '2.0', id: 1, error: { code: -32602, message: 'Unknown tool: x' } };
     handlers.push((c) => (c.url === 'https://sync.test/mcp' ? { json: rpc } : undefined));
 
-    expect(await main(['pages', 'item', 'i1', '--workspace', dir])).toBe(2);
+    expect(await main(['wiki', 'item', 'i1', '--workspace', dir])).toBe(2);
     rpc = { jsonrpc: '2.0', id: 1, error: { code: -32603, message: 'Internal error' } };
-    expect(await main(['pages', 'item', 'i1', '--workspace', dir])).toBe(3);
+    expect(await main(['wiki', 'item', 'i1', '--workspace', dir])).toBe(3);
   });
 
-  it('sends a page tool with the target and prints the tree and page text; nim wiki points at nim pages', async () => {
+  it('sends a page tool with the target and prints the tree and page text; nim wiki points at nim wiki', async () => {
     writeCredentials('access-1');
     const dir = gitRepo('git@github.com:acme/widgets.git');
     handlers.push((c) => {
@@ -704,18 +704,18 @@ describe('nim pages', () => {
       return { json: { jsonrpc: '2.0', id: 1, result: { content: [{ type: 'text', text: '# Home\n\nLine two' }] } } };
     });
 
-    expect(await main(['pages', 'list', '--workspace', dir])).toBe(0);
+    expect(await main(['wiki', 'list', '--workspace', dir])).toBe(0);
     expect(stdout).toMatch(/Home\s+page\s+home\s+https:\/\/console\.test\/home/);
     expect(stdout).toMatch(/  Flagship\s+typedPage\s+CFS-2/);
     stdout = '';
-    expect(await main(['pages', 'read', 'collab://org:o1:doc:home', '--workspace', dir])).toBe(0);
+    expect(await main(['wiki', 'read', 'collab://org:o1:doc:home', '--workspace', dir])).toBe(0);
     expect(stdout).toBe('# Home\n\nLine two\n');
     expect(rpcCalls().map((r) => [r.params.name, r.params.arguments])).toEqual([
       ['listPages', { repo: 'git@github.com:acme/widgets.git', section: 'team' }],
       ['readCollabDoc', { repo: 'git@github.com:acme/widgets.git', filePath: 'collab://org:o1:doc:home' }],
     ]);
 
-    // `nim wiki` is an alias of `nim pages`.
+    // `nim wiki` is an alias of `nim wiki`.
     stdout = '';
     expect(await main(['wiki', 'read', 'collab://org:o1:doc:home', '--workspace', dir])).toBe(0);
     expect(stdout).toBe('# Home\n\nLine two\n');

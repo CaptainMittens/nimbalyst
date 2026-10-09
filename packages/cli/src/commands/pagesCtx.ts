@@ -1,5 +1,5 @@
 /**
- * What every `nim pages` subcommand shares: the resolved target, output, and
+ * What every `nim wiki` subcommand shares: the resolved target, output, and
  * the tool call that stamps the target onto each Pages tool call.
  */
 import type { ParsedArgs } from '../cli/parse.js';
@@ -25,7 +25,7 @@ export function print(ctx: PagesCtx, value: unknown, human: () => string): numbe
 
 export function operand(ctx: PagesCtx, index: number, what: string): string {
   const v = ctx.args.positionals[index];
-  if (!v) throw usageError(`'nim pages ${ctx.args.verb}' requires ${what}.`);
+  if (!v) throw usageError(`'nim wiki ${ctx.args.verb}' requires ${what}.`);
   return v;
 }
 

@@ -27,7 +27,7 @@ const TOOL_ERROR_EXIT: Record<string, (typeof ExitCode)[keyof typeof ExitCode]> 
   body_edited: ExitCode.USAGE,
 };
 
-/** Codes where `nim pages status` shows the user how this repo resolves. */
+/** Codes where `nim wiki status` shows the user how this repo resolves. */
 const STATUS_HINT_CODES = new Set(['repo_not_bound', 'ambiguous_project', 'pin_mismatch']);
 
 /**
@@ -120,7 +120,7 @@ export async function callTool<T = any>(server: string, name: string, args: Reco
   if (body?.result?.isError) {
     const code = typeof payload?.code === 'string' ? payload.code : undefined;
     const message = typeof payload === 'string' ? payload : payload?.message ?? 'tool error';
-    const hint = code && STATUS_HINT_CODES.has(code) ? " Run 'nim pages status'." : '';
+    const hint = code && STATUS_HINT_CODES.has(code) ? " Run 'nim wiki status'." : '';
     throw new PagesToolError(exitCodeForTool(code), `${name}: ${message}${code ? ` (${code})` : ''}${hint}`, code);
   }
   return payload as T;

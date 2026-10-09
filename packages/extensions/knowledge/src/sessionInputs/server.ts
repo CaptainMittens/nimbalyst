@@ -1,5 +1,5 @@
 /**
- * `nimbalyst-session`: the nimbalyst-pages plugin's local stdio MCP server.
+ * `nimbalyst-session`: the nimbalyst-wiki plugin's local stdio MCP server.
  * One tool, `list_session_inputs`, lists what the person at this terminal
  * typed in the calling Claude Code session (prompts and question answers), so
  * a page can cite their words. It reads only the transcript it can prove is
@@ -7,7 +7,7 @@
  * from the model, and sends nothing anywhere: the only text that leaves the
  * machine is a quote the agent decides to paste into a page.
  *
- * Bundled into plugins/nimbalyst-pages/scripts/session-inputs.mjs by
+ * Bundled into plugins/nimbalyst-wiki/scripts/session-inputs.mjs by
  * scripts/build-wiki-plugin.mjs. Newline-delimited JSON-RPC on stdio, no SDK.
  */
 

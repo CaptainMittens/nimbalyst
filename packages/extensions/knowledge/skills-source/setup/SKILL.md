@@ -19,6 +19,8 @@ If the workspace is shared with a team, set up the Team section of the Wiki and 
 <!-- remote-only -->
 ## 0. Which project
 
+On a local wiki, follow "On a local wiki" at the end of this skill instead of this step.
+
 Setup works on a team project's pages on the Nimbalyst server. Follow the `connect` skill first: `pages_status` must report `bound`, and every call below takes the same `repo` and `project` arguments. A project created with `pages_create_project` already has its Home page. Types defined here are always the team's.
 <!-- /remote-only -->
 
@@ -139,3 +141,15 @@ Copy the shape from `../update/references/relations.yaml`, renamed to the projec
 Read back every created or edited page and check its content, tree placement, and links against the person's intended use. Setup is complete only when Home introduces the project, links to the guide and useful starter pages, and those pages address the agreed priorities with grounded content or clearly stated gaps. Report blocked writes or missing context as incomplete; successful type creation is not a substitute.
 
 Lead the report with a link to Home and the pages created or filled. Briefly note any types or relations added, earlier-model content left in place, conflicts, and information still needed. For a check-only request, report these findings without making changes.
+<!-- local-only -->
+
+## On a local wiki
+
+When the `connect` skill chose the local wiki (or the person asked for one), set it up with the `nimbalyst-local` server's tools. Everything above applies, with these differences:
+
+- **Create it first** if there is none: `initLocalWiki`, after asking where it should live as the `connect` skill describes (default `nimbalyst-local/wiki`, kept out of git; or a checked-in folder such as `docs/wiki`). It creates the Home page.
+- **No project or `pages_status`.** Find the guide and Home with `listPages`.
+- **Links** in Home and every page are relative paths carrying the target's id, as the update skill's "On a local wiki" says, never console links.
+- **Types** are files, not a tool call: there is no `tracker_define_type` here. Write `.nimbalyst/trackers/<type>.yaml` with the same fields as the JSON above, in YAML, plus `storage: pages` (one markdown page per item, with a body) or `storage: table` (one CSV of rows, no bodies; for long uniform lists). Leave out `sharing`. Check `tracker_list_types` first and never overwrite an existing type file without the person's approval. Place a table type under a page with `moveSharedItem` (`kind: type`).
+- **Relations** are a team-wiki feature; skip step 6 on a local wiki.
+<!-- /local-only -->

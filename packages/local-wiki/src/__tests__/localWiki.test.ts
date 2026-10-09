@@ -283,7 +283,8 @@ describe('trash', () => {
     expect(await ls()).toEqual(['Home.md']);
     expect((await readdir(path.join(root, '.trash/1000-A'))).sort()).toEqual(['.trash.json', 'Acme', 'Acme.md']);
     const snap = await wiki!.snapshot();
-    expect(snap.items.find((d) => d.documentId === 'A')).toMatchObject({ trashedAt: 1000 });
+    // A markdown page is the built-in editor's, so hosts resolve it instead of showing it as unsupported.
+    expect(snap.items.find((d) => d.documentId === 'A')).toMatchObject({ trashedAt: 1000, editorId: 'builtin.lexical' });
     expect(snap.pages.some((p) => p.id === 'P')).toBe(false);
     expect(snap.issues).toEqual([]);
     await expect(wiki!.command({ type: 'remove-document', documentId: 'H', purge: true })).rejects.toMatchObject({ code: 'not-trashed' });
@@ -308,7 +309,7 @@ describe('editor pages', () => {
     const { id } = await wiki!.command({ type: 'register-document', title: 'Flow', parentFolderId: null, documentType: 'excalidraw', body: '{"elements":[]}' });
     expect(await lsAll()).toEqual(['.Flow.excalidraw.wiki.yaml', 'Archive.md', 'Flow.excalidraw', 'Home.md']);
     expect(await read('.Flow.excalidraw.wiki.yaml')).toBe(`id: ${id}\ndocumentType: excalidraw\norder: 1000\n`);
-    expect((await wiki!.snapshot()).items.find((d) => d.documentId === id)).toMatchObject({ title: 'Flow', documentType: 'excalidraw', fileExtension: '.excalidraw' });
+    expect((await wiki!.snapshot()).items.find((d) => d.documentId === id)).toMatchObject({ title: 'Flow', documentType: 'excalidraw', fileExtension: '.excalidraw', editorId: 'excalidraw' });
     await expect(wiki!.command({ type: 'set-document-type', documentId: id!, pageType: 'bug' })).rejects.toMatchObject({ code: 'invalid' });
 
     const first = await wiki!.readBody(id!);

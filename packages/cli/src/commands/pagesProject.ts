@@ -1,7 +1,7 @@
 /**
  * A repository reaches its team's pages through the team project an admin
  * bound its remote to. `status`, `pin`, `bind`, and `create-project` live
- * here, with the target resolution every other `nim pages` call uses.
+ * here, with the target resolution every other `nim wiki` call uses.
  *
  * Membership is decided in Nimbalyst Teams, never here: the pin in
  * `.nimbalyst/wiki.json` only chooses among projects the caller can already
@@ -78,7 +78,7 @@ export function teamsCtx(args: ParsedArgs, server: string, startDir: string): Pa
     // A pin lives in this checkout's wiki.json, so it can only be for this checkout's remote.
     if (args.verb === 'pin' && explicitRepo && explicitRepo !== origin) {
       throw usageError(
-        `'nim pages pin' writes ${root}/.nimbalyst/wiki.json, which is for ${origin ?? 'a checkout with no origin remote'}, not --repo ${explicitRepo}. Run it from that repository's checkout.`,
+        `'nim wiki pin' writes ${root}/.nimbalyst/wiki.json, which is for ${origin ?? 'a checkout with no origin remote'}, not --repo ${explicitRepo}. Run it from that repository's checkout.`,
       );
     }
     return { args, server, root, base: { repo: explicitRepo ?? origin } };
@@ -123,7 +123,7 @@ function renderStatus(ctx: PagesCtx, res: any): string {
       renderRows(res.projects ?? [], PROJECT_COLUMNS, opts, (p) => p.projectId),
       '',
       'Pick one and pin it (writes .nimbalyst/wiki.json; commit it so teammates resolve the same project):',
-      '  nim pages pin --org <orgId> --project <projectId>',
+      '  nim wiki pin --org <orgId> --project <projectId>',
     ].join('\n');
   }
 
@@ -145,11 +145,11 @@ function renderStatus(ctx: PagesCtx, res: any): string {
   lines.push('You can connect it to a project in a team you administer:');
   for (const t of adminOf) {
     const projects = Array.isArray(t.projects) ? t.projects : [];
-    if (projects.length === 0) lines.push(`  nim pages bind --org ${safeText(t.orgId)} --project <projectId>`);
+    if (projects.length === 0) lines.push(`  nim wiki bind --org ${safeText(t.orgId)} --project <projectId>`);
     for (const p of projects) {
-      lines.push(`  nim pages bind --org ${safeText(t.orgId)} --project ${safeText(p.projectId)}   ${dim(safeText(String(p.projectName ?? '')))}`);
+      lines.push(`  nim wiki bind --org ${safeText(t.orgId)} --project ${safeText(p.projectId)}   ${dim(safeText(String(p.projectName ?? '')))}`);
     }
-    lines.push(`  nim pages create-project --org ${safeText(t.orgId)} --name "<name>" --bind`);
+    lines.push(`  nim wiki create-project --org ${safeText(t.orgId)} --name "<name>" --bind`);
   }
   lines.push(dim('Everyone in the team who can reach that project will see its pages.'));
   return lines.join('\n');
@@ -161,7 +161,7 @@ export async function runStatus(ctx: PagesCtx): Promise<number> {
 }
 
 /**
- * `nim pages pin --org --project`: records one of the projects this repository
+ * `nim wiki pin --org --project`: records one of the projects this repository
  * actually resolves to. The status lookup deliberately omits `project`: asking
  * with the choice would only prove the user can reach it, and a pin to a
  * reachable project the repo is not connected to would send this repo's pages
@@ -169,7 +169,7 @@ export async function runStatus(ctx: PagesCtx): Promise<number> {
  */
 export async function runPin(ctx: PagesCtx): Promise<number> {
   const choice = flagPin(ctx.args);
-  if (!choice) throw usageError(`'nim pages pin' requires --org <orgId> --project <projectId>.`);
+  if (!choice) throw usageError(`'nim wiki pin' requires --org <orgId> --project <projectId>.`);
   requireRepo(ctx);
   const res = await tool(ctx, 'pages_status');
   const candidates: ProjectRef[] =
@@ -178,8 +178,8 @@ export async function runPin(ctx: PagesCtx): Promise<number> {
   if (!project) {
     throw usageError(
       candidates.length === 0
-        ? `This repository is not connected to a team project you can reach, so there is nothing to pin. Run 'nim pages status'.`
-        : `This repository is not connected to project ${pinText(choice)}. It resolves to: ${candidates.map(pinText).join(', ')}. Run 'nim pages status'.`,
+        ? `This repository is not connected to a team project you can reach, so there is nothing to pin. Run 'nim wiki status'.`
+        : `This repository is not connected to project ${pinText(choice)}. It resolves to: ${candidates.map(pinText).join(', ')}. Run 'nim wiki status'.`,
     );
   }
   writeProjectPin(ctx.root, choice);
@@ -193,7 +193,7 @@ export async function runPin(ctx: PagesCtx): Promise<number> {
 function requireRepo(ctx: PagesCtx): string {
   const repo = ctx.base.repo;
   if (typeof repo !== 'string' || !repo) {
-    throw usageError(`'nim pages ${ctx.args.verb}' needs a repository: this checkout has no origin remote. Pass --repo.`);
+    throw usageError(`'nim wiki ${ctx.args.verb}' needs a repository: this checkout has no origin remote. Pass --repo.`);
   }
   return repo;
 }
@@ -202,10 +202,10 @@ function projectOf(res: any): ProjectRef {
   return res?.project && typeof res.project === 'object' ? res.project : res ?? {};
 }
 
-/** `nim pages bind --org --project`: admin only, enforced by the server. */
+/** `nim wiki bind --org --project`: admin only, enforced by the server. */
 export async function runBind(ctx: PagesCtx): Promise<number> {
   const choice = flagPin(ctx.args);
-  if (!choice) throw usageError(`'nim pages bind' requires --org <orgId> --project <projectId>.`);
+  if (!choice) throw usageError(`'nim wiki bind' requires --org <orgId> --project <projectId>.`);
   const repo = requireRepo(ctx);
   const res = await tool(ctx, 'pages_bind_repo', { orgId: choice.orgId, projectId: choice.projectId }, { repo });
   const p = projectOf(res);
@@ -214,11 +214,11 @@ export async function runBind(ctx: PagesCtx): Promise<number> {
   );
 }
 
-/** `nim pages create-project --org --name [--bind]`: admin only, enforced by the server. */
+/** `nim wiki create-project --org --name [--bind]`: admin only, enforced by the server. */
 export async function runCreateProject(ctx: PagesCtx): Promise<number> {
   const orgId = flagStr(ctx.args, 'org');
   const name = flagStr(ctx.args, 'name');
-  if (!orgId || !name) throw usageError(`'nim pages create-project' requires --org <orgId> --name <name>.`);
+  if (!orgId || !name) throw usageError(`'nim wiki create-project' requires --org <orgId> --name <name>.`);
   const repo = flagBool(ctx.args, 'bind') ? requireRepo(ctx) : undefined;
   const res = await tool(ctx, 'pages_create_project', { orgId, name, repo }, {});
   const p = projectOf(res);

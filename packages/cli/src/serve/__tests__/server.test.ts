@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { initWiki, openWiki, type LocalWiki } from '@nimbalyst/local-wiki';
 import { startWikiServer, type WikiServer } from '../server.js';
+import { parseArgs } from '../../cli/parse.js';
+import { wantsOpen } from '../runWikiServe.js';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -43,6 +45,17 @@ function rawStatus(port: number, headers: Record<string, string>): Promise<numbe
 }
 
 describe('nim wiki serve', () => {
+  it('opens the browser for a person at a terminal, not for scripts or over SSH', () => {
+    const args = (...flags: string[]) => parseArgs(['wiki', 'serve', ...flags]);
+    expect(wantsOpen(args(), {}, true)).toBe(true);
+    expect(wantsOpen(args('--no-open'), {}, true)).toBe(false);
+    expect(wantsOpen(args(), {}, false)).toBe(false);
+    expect(wantsOpen(args(), { SSH_CONNECTION: '1.2.3.4 1 5.6.7.8 22' }, true)).toBe(false);
+    expect(wantsOpen(args('--open'), { SSH_CONNECTION: 'x' }, false)).toBe(true);
+    // A boolean flag never swallows the next argument.
+    expect(parseArgs(['wiki', 'serve', '--no-open', '--port', '0']).flags.port).toBe('0');
+  });
+
   it('refuses requests without the token and trades the URL token for a cookie', async () => {
     const { server } = await serve();
     expect((await fetch(`${server.origin}/api/snapshot`)).status).toBe(401);

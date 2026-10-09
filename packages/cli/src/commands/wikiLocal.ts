@@ -1,12 +1,12 @@
 /**
  * `nim wiki ...` over the project's local wiki folder (see localWiki/).
  *
- * `nim wiki` was first an alias of `nim pages` (the team wiki), and stays one
- * for every verb the local wiki does not have. `init`, `ls` and `write` are
- * always local. `read`, `move` and `search` are local when the project has a
- * local wiki and the call does not name a team target (a collab:// uri, a
- * console link, or --repo/--org/--project); otherwise they go to the team wiki
- * as before. `nim pages` is always the team wiki.
+ * `nim wiki` is one noun for both wikis. A verb only the team wiki has
+ * (status, edit, create, items, ...) goes to the team wiki (commands/pages.ts).
+ * `init` and `write` are local only. `list`/`ls`, `read`, `move` and `search`
+ * exist on both: they use the local wiki when the project has one and the call
+ * names no team target (a collab:// uri, a console link, or
+ * --repo/--org/--project), else the team wiki. `--team` and `--local` force it.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -14,21 +14,49 @@ import type { ParsedArgs } from '../cli/parse.js';
 import { flagBool, flagInt, flagStr } from '../cli/parse.js';
 import { CliError, ExitCode, notFoundError, usageError } from '../cli/exitCodes.js';
 import { bold, dim } from '../cli/colors.js';
+import { resolveServer } from '../cloud/config.js';
+import { loadCredentials } from '../cloud/credentials.js';
+import { resolveWikiLocation } from '../localWiki/locate.js';
 import { hasLocalWiki, initLocalWiki, openLocalWiki } from '../localWiki/open.js';
 import { buildTree, findPage, isTeamReference, positionBeside } from '../localWiki/tree.js';
 
-const ALWAYS_LOCAL = new Set(['init', 'ls', 'write']);
-const LOCAL_WHEN_PRESENT = new Set(['read', 'move', 'search']);
+/** Verbs the local wiki has; `ls` is `list`. */
+const LOCAL_VERBS = new Set(['init', 'list', 'ls', 'read', 'write', 'move', 'search']);
+/** Local verbs with no team counterpart. */
+const LOCAL_ONLY = new Set(['init', 'write']);
 
 const startDir = (args: ParsedArgs) => flagStr(args, 'workspace') ?? process.cwd();
 
 export function isLocalWikiCall(args: ParsedArgs): boolean {
-  if (!args.verb) return false;
-  if (ALWAYS_LOCAL.has(args.verb)) return true;
-  if (!LOCAL_WHEN_PRESENT.has(args.verb)) return false;
+  const verb = args.verb;
+  if (!verb) return false;
+  const team = flagBool(args, 'team');
+  const local = flagBool(args, 'local');
+  if (team && local) throw usageError('Pass --team or --local, not both.');
+  if (team) {
+    if (LOCAL_ONLY.has(verb)) {
+      throw usageError(`'nim wiki ${verb}' is for the local wiki.${verb === 'write' ? " On the team wiki, use 'nim wiki edit'." : ''}`);
+    }
+    return false;
+  }
+  if (local) {
+    if (!LOCAL_VERBS.has(verb)) throw usageError(`'nim wiki ${verb}' is for the team wiki; the local wiki has ${[...LOCAL_VERBS].join(', ')}.`);
+    return true;
+  }
+  if (!LOCAL_VERBS.has(verb)) return false;
+  if (LOCAL_ONLY.has(verb)) return true;
   if (flagStr(args, 'repo') || flagStr(args, 'org') || flagStr(args, 'project')) return false;
   if (args.positionals[0] && isTeamReference(args.positionals[0])) return false;
-  return hasLocalWiki(startDir(args), flagStr(args, 'location'));
+  if (hasLocalWiki(startDir(args), flagStr(args, 'location'))) return true;
+  // Neither wiki is reachable: say how to get each, not just "log in".
+  if (!loadCredentials(resolveServer())) {
+    const { dir } = resolveWikiLocation(startDir(args), flagStr(args, 'location'));
+    throw new CliError(
+      ExitCode.NOT_FOUND,
+      `No local wiki at ${dir}, and not signed in to a team wiki. Run 'nim wiki init' for a local wiki, or 'nim login' for the team wiki.`,
+    );
+  }
+  return false;
 }
 
 const json = (value: unknown) => process.stdout.write(JSON.stringify(value, null, 2) + '\n');
@@ -72,6 +100,7 @@ export async function runLocalWiki(args: ParsedArgs): Promise<number> {
   const { wiki } = await openLocalWiki(startDir(args), location);
   try {
     switch (args.verb) {
+      case 'list':
       case 'ls':
         return await runLs(args, wiki);
       case 'read':

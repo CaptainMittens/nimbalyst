@@ -16,7 +16,7 @@ The earlier knowledge graph stored knowledge as many small tracker items: `entit
 
 | Old | Becomes |
 | --- | --- |
-| `entity` with a label that names a kind of thing (product, technology, person, organization, subsystem) | A typed page of the project's matching type (Competitor, Technology, Person, Module). Create the type first with the setup skill (`/nimbalyst-pages:wiki-setup`) if the team wants it. |
+| `entity` with a label that names a kind of thing (product, technology, person, organization, subsystem) | A typed page of the project's matching type (Competitor, Technology, Person, Module). Create the type first with the setup skill (`/nimbalyst-wiki:setup`) if the team wants it. |
 | `entity` that is an area, topic, home or one-off page | A plain page. An area becomes a page with an empty body or a short overview; its children nest under it. |
 | `entity.parent` | Tree position: the page sits under its parent page. |
 | Label-carrying field properties (status, website, lifecycle) | A single-valued field on the type when the team wants it in the header or the table; otherwise a sentence in the body. Multi-valued properties become body text or a table, never header lists. |

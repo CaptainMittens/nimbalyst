@@ -1,5 +1,5 @@
 /**
- * Rendering for `nim pages` results. The server shapes are loose JSON, so this
+ * Rendering for `nim wiki` results. The server shapes are loose JSON, so this
  * works from a column list and an accessor rather than typed records. Every
  * value is team-written, so it goes through the same control-character and
  * spreadsheet-formula guards as `nim tracker`.

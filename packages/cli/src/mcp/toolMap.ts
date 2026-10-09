@@ -8,7 +8,7 @@
  * Tool names and input schemas are meant to come from the shared contract
  * (`@nimbalyst/collab-protocol` `pageToolContract.ts`) so the same skill text
  * reads the same against desktop, the remote server and this one. Claude Code
- * namespaces tools by server, so sharing names with `nimbalyst-pages` is fine.
+ * namespaces tools by server, so sharing names with `nimbalyst-team` is fine.
  */
 
 export interface McpToolDefinition {
@@ -31,7 +31,7 @@ export interface McpTool {
 }
 
 /** The server that owns team data. Named in refusals so the agent can retry there. */
-export const REMOTE_SERVER_NAME = 'nimbalyst-pages';
+export const REMOTE_SERVER_NAME = 'nimbalyst-team';
 
 /**
  * Thrown by a tool whose call targets team data. Team scope has one write path,

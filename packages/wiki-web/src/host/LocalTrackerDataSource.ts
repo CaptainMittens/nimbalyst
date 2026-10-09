@@ -46,6 +46,11 @@ export class LocalTrackerDataSource implements TrackerDataSource {
     return this.types.get(typeId);
   }
 
+  /** Every wiki type, by plural name. */
+  allTypes(): WikiTypeInfo[] {
+    return [...this.types.values()].sort((a, b) => a.displayNamePlural.localeCompare(b.displayNamePlural));
+  }
+
   private async load(): Promise<TrackerItem[]> {
     const snapshots = await Promise.all([...this.types.keys()].map((typeId) => wikiApi.trackerSnapshot(typeId)));
     const all: LocalTrackerItem[] = snapshots.flatMap((snapshot) => snapshot.items);

@@ -156,8 +156,11 @@ export function projectSnapshot({ state, formatVersion, tableOrders }: ProjectIn
       documentType: page.documentType,
       metadataVersion: 2,
       fileExtension: page.fileExtension,
-      // The library does not know which extension owns an editor type; hosts that do may replace this.
-      editorId: page.documentType,
+      // Markdown is the built-in Lexical editor; a host that resolves `editorId`
+      // against its type catalog shows anything it cannot match as unsupported
+      // (a lock). The library does not know which extension owns another
+      // editor type; hosts that do may replace it.
+      editorId: page.documentType === 'markdown' ? 'builtin.lexical' : page.documentType,
       createdBy: CREATED_BY,
       createdAt: page.createdAt,
       updatedAt: page.updatedAt,

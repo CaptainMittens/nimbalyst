@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -86,7 +86,10 @@ describe('nim mcp over stdio', () => {
       'not json',
       { jsonrpc: '2.0', id: 4, method: 'resources/list' },
       call(5, 'listPages', {}),
+      call(6, 'initLocalWiki', {}),
+      call(7, 'listPages', {}),
     ], empty);
+    const created = existsSync(path.join(empty, 'nimbalyst-local', 'wiki', 'Home.md'));
     rmSync(empty, { recursive: true, force: true });
 
     expect(code).toBe(0);
@@ -106,12 +109,16 @@ describe('nim mcp over stdio', () => {
       { jsonrpc: '2.0', id: 3, result: {} },
       { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } },
       { jsonrpc: '2.0', id: 4, error: { code: -32601, message: 'Method not found: resources/list' } },
-      { jsonrpc: '2.0', id: 5, result: { content: [{ type: 'text', text: expect.stringContaining('Run `nim wiki init`') }], isError: true } },
+      { jsonrpc: '2.0', id: 5, result: { content: [{ type: 'text', text: expect.stringContaining('Call `initLocalWiki`') }], isError: true } },
+      { jsonrpc: '2.0', id: 6, result: { content: [{ type: 'text', text: expect.stringContaining('"created":true') }] } },
+      { jsonrpc: '2.0', id: 7, result: { content: [{ type: 'text', text: expect.stringContaining('"title":"Home"') }] } },
     ]);
-    // The list is stable without a wiki, and every name is a contract name.
+    // The agent made the wiki itself; no `nim wiki init` step for the user.
+    expect(created).toBe(true);
+    // The list is stable without a wiki, and every name but the local-only init is a contract name.
     const names = responses[1].result.tools.map((t: { name: string }) => t.name);
-    expect(names).toEqual(LOCAL_TOOLS);
-    expect(names.every((n: string) => (PAGE_TOOL_NAMES as readonly string[]).includes(n))).toBe(true);
+    expect(names).toEqual(['initLocalWiki', ...LOCAL_TOOLS]);
+    expect(LOCAL_TOOLS.every((n: string) => (PAGE_TOOL_NAMES as readonly string[]).includes(n))).toBe(true);
     expect(stderr).toContain('nim mcp');
   });
 
@@ -158,7 +165,7 @@ describe('nim mcp over stdio', () => {
       expect(body(4).items.map((i: { title: string; status: string }) => [i.title, i.status])).toEqual([['Acme', 'active']]);
       for (const i of [5, 6]) {
         expect(results[i].isError).toBe(true);
-        expect(results[i].content[0].text).toContain('on the `nimbalyst-pages` server');
+        expect(results[i].content[0].text).toContain('on the `nimbalyst-team` server');
       }
       expect(results[7].isError).toBe(true);
       expect(results[7].content[0].text).toContain('"bug" is not a wiki type');
@@ -205,7 +212,7 @@ describe('tool calls', () => {
     const [echo, refused, unknown] = written.trim().split('\n').map((line) => JSON.parse(line));
     expect(echo.result).toEqual({ content: [{ type: 'text', text: '{"a":1}' }] });
     expect(refused.result.isError).toBe(true);
-    expect(refused.result.content[0].text).toContain('Call `tracker_update` on the `nimbalyst-pages` server');
+    expect(refused.result.content[0].text).toContain('Call `tracker_update` on the `nimbalyst-team` server');
     expect(unknown.error).toEqual({ code: -32602, message: 'Unknown tool: nope' });
   });
 

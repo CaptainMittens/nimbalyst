@@ -176,7 +176,7 @@ function loadBundled(resourcesDir: string, nativeBinding: string | undefined): S
 /**
  * better-sqlite3 is an OPTIONAL dependency on the npm channel: a host where its
  * prebuild fails to install still gets a working `nim` for everything that does
- * not read the app database (help, `nim pages`, `nim mcp`). That only holds while
+ * not read the app database (help, `nim wiki`, `nim mcp`). That only holds while
  * nothing imports it at module load -- type-only imports elsewhere, the require
  * here -- so this is where an absent package surfaces, and it should say that
  * the package is optional rather than look like a broken install.

@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * `nim pages <verb>` parses into exactly the Pages tool call a terminal agent
+ * `nim wiki <verb>` parses into exactly the Pages tool call a terminal agent
  * would make. Pure: no server, no checkout.
  */
 import * as fs from 'node:fs';
@@ -11,9 +11,9 @@ import { PAGE_TOOL_NAMES } from '@nimbalyst/collab-protocol';
 import { parseArgs } from '../../cli/parse.js';
 import { PAGES_VERBS, pagesToolCall } from '../pages.js';
 
-const call = (...argv: string[]) => pagesToolCall(parseArgs(['pages', ...argv]));
+const call = (...argv: string[]) => pagesToolCall(parseArgs(['wiki', ...argv]));
 
-describe('nim pages', () => {
+describe('nim wiki', () => {
   it('has a verb for every Pages tool', () => {
     expect([...new Set(Object.values(PAGES_VERBS))].sort()).toEqual([...PAGE_TOOL_NAMES].sort());
   });
@@ -85,6 +85,6 @@ describe('nim pages', () => {
     expect(() => call('delete', 'd1')).toThrow(/--kind/);
     expect(() => call('update-item', 'CFS-2')).toThrow(/Nothing to update/);
     expect(() => call('comments')).toThrow(/--page/);
-    expect(() => call('nope')).toThrow(/Unknown 'nim pages' subcommand/);
+    expect(() => call('nope')).toThrow(/Unknown 'nim wiki' subcommand/);
   });
 });

@@ -1,10 +1,10 @@
 /**
- * `nim wiki serve [--port N] [--open] [--location <dir>] [--assets <dir>]`:
- * show the project's local wiki in a browser. Runs until interrupted.
+ * `nim wiki serve [--port N] [--no-open] [--location <dir>] [--assets <dir>]`:
+ * show the project's local wiki in a browser, opening it. Runs until interrupted.
  */
 import { spawn } from 'node:child_process';
 import type { ParsedArgs } from '../cli/parse.js';
-import { flagInt, flagStr, parseArgs } from '../cli/parse.js';
+import { flagBool, flagInt, flagStr, parseArgs } from '../cli/parse.js';
 import { CliError, ExitCode, usageError } from '../cli/exitCodes.js';
 import { openLocalWiki } from '../localWiki/open.js';
 import { installHint, resolveWikiWebAssets } from './assets.js';
@@ -34,10 +34,15 @@ function openBrowser(url: string): void {
   }
 }
 
-/** `--open` is not a known boolean flag, so a following value may have been taken as its argument. */
-function wantsOpen(args: ParsedArgs): boolean {
-  const value = args.flags.open;
-  return value !== undefined && value !== false && value !== 'false';
+/**
+ * Opens the browser by default for a person at a terminal. Not when output is
+ * not a terminal (scripts, tests) or over SSH, where the browser would open on
+ * the other machine; `--open` forces it and `--no-open` skips it.
+ */
+export function wantsOpen(args: ParsedArgs, env: NodeJS.ProcessEnv = process.env, isTTY = Boolean(process.stdout.isTTY)): boolean {
+  if (flagBool(args, 'no-open')) return false;
+  if (flagBool(args, 'open')) return true;
+  return isTTY && !env.SSH_CONNECTION && !env.SSH_TTY && !env.CI;
 }
 
 export async function runWikiServe(argv: ParsedArgs | string[], ctx: WikiServeContext): Promise<number> {
