@@ -94,7 +94,7 @@ import { publishQueuedPromptsToSync } from './queuedPromptSyncPublisher';
 import { onWorkspaceWindowAvailable } from '../../window/workspaceWindowAvailability';
 import { dispatchQueuedPromptToClaudeCli } from './claudeCliQueueDispatch';
 import { publishQueuedPromptClaim } from './queuedPromptClaimEvents';
-import { canDispatchIntoDrain } from './drainFollowUp';
+import { canDispatchIntoDrain, isLeadTurnPending } from './drainFollowUp';
 import { ensureClaudeCliSession } from './claudeCliLauncherSingleton';
 import {
   resolveProviderWorkflowCatalog,
@@ -928,6 +928,7 @@ export class AIService {
       logInfo: (message) => logger.main.info(message),
       resolveLiveWindow: findWindowByWorkspace,
       canBypassChainGuard: () => canDispatchIntoDrain(sessionId),
+      isLeadTurnPending: () => isLeadTurnPending(sessionId),
       onAfterSettled: async () => {
         try {
           const { AISessionsRepository } = await import('@nimbalyst/runtime/storage/repositories/AISessionsRepository');

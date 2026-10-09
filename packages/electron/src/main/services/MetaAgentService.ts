@@ -1451,8 +1451,14 @@ export class MetaAgentService {
         ((session.metadata as Record<string, unknown> | undefined)?.toolScope as string | undefined) ?? null;
     }
 
-    const messages = await AgentMessagesRepository.list(sessionId, { limit: 500 });
-    const userPrompts = extractUserPrompts(messages);
+    // NIM-7428: list() is oldest-first, so reading one page of it froze the
+    // response fields mid-session once a child passed 500 rows. Results come from
+    // the newest page; the first page is read only for the prompts it adds.
+    const PAGE = 500;
+    const messages = await AgentMessagesRepository.listTail(sessionId, PAGE);
+    const firstTailId = messages[0]?.id ?? Number.POSITIVE_INFINITY;
+    const head = messages.length < PAGE ? [] : await AgentMessagesRepository.list(sessionId, { limit: PAGE });
+    const userPrompts = extractUserPrompts([...head.filter((m) => (m.id ?? 0) < firstTailId), ...messages]);
     const recentMessages = this.extractRecentMessages(messages, 3);
     const pendingPrompt = await this.getPendingInteractivePrompt(sessionId);
 

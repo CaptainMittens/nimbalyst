@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Clicking a document link to an existing file, such as the root package.json, now opens it in large workspaces where the file was missing from the scan index
 - Windows no longer hold live transcript updates for agent sessions they have not opened, which reduced memory use with several windows open
+- A coordinating session now sees a long-running child session's latest response instead of an old message from early in its transcript
 
 ### Removed
 <!-- Removed features go here -->
