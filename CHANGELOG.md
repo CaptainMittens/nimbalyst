@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 <!-- Bug fixes go here -->
-- Archiving a worktree session no longer does nothing when the git remote stops responding
+- Archiving a session now shows an error when it fails, and no longer hangs when a worktree's git remote stops responding
 
 ### Removed
 <!-- Removed features go here -->
