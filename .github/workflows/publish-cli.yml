@@ -124,15 +124,19 @@ jobs:
           WORK=$(mktemp -d)
           pnpm pack --pack-destination "$WORK"
           TARBALL=$(ls "$WORK"/*.tgz)
-          if ! tar -tzf "$TARBALL" | grep -qx 'package/dist/index.html'; then
+          # Listed to files first: under pipefail, `tar | grep -q` fails when
+          # grep exits on its first match and tar gets a write error.
+          tar -tzf "$TARBALL" > "$WORK/files.txt"
+          tar -xzOf "$TARBALL" package/package.json > "$WORK/package.json"
+          if ! grep -qx 'package/dist/index.html' "$WORK/files.txt"; then
             echo "::error::dist/index.html missing from the wiki-web tarball"
             exit 1
           fi
-          if tar -xzOf "$TARBALL" package/package.json | grep -q '"workspace:'; then
+          if grep -q '"workspace:' "$WORK/package.json"; then
             echo "::error::packed wiki-web package.json still contains a workspace: specifier"
             exit 1
           fi
-          echo "wiki-web tarball has $(tar -tzf "$TARBALL" | wc -l) files"
+          echo "wiki-web tarball has $(wc -l < "$WORK/files.txt") files"
 
       - name: Typecheck
         working-directory: packages/cli
@@ -193,7 +197,8 @@ jobs:
           WORK=$(mktemp -d)
           pnpm pack --pack-destination "$WORK"
           TARBALL=$(basename "$(ls "$WORK"/*.tgz)")
-          if tar -xzOf "$WORK/$TARBALL" package/package.json | grep -q '"workspace:'; then
+          tar -xzOf "$WORK/$TARBALL" package/package.json > "$WORK/packed-package.json"
+          if grep -q '"workspace:' "$WORK/packed-package.json"; then
             echo "::error::packed package.json still contains a workspace: specifier"
             exit 1
           fi
@@ -264,7 +269,8 @@ jobs:
           git -C "$PROJECT" init -q
 
           "$NIM" wiki init --workspace "$PROJECT"
-          "$NIM" wiki ls --workspace "$PROJECT" | grep -q '^Home'
+          "$NIM" wiki list --workspace "$PROJECT" > list.out
+          grep -q '^Home' list.out
 
           printf '%s\n' \
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{}}}' \
