@@ -24,6 +24,7 @@ import { getPersonalSessionJwt } from './StytchAuthService';
 import { hashProjectFiles } from './ProjectManifestHasher';
 import { exceedsProjectSyncLimit, OversizedFileWarnings, storedSyncIds } from './projectFileSyncLimits';
 import { keepDivergedRemoteCopy } from './projectFileSyncConflicts';
+import { isInWikiTrash, isProjectSyncPath, ProjectSyncWikiRules } from './sync/projectSyncWikiRules';
 
 interface SyncedFileState {
   syncId: string;
@@ -44,6 +45,14 @@ export class ProjectFileSyncService {
   private deferredRemoteDeletes = new Map<string, { projectId: string; workspacePath: string; syncId: string; filePath: string }>();
   private cleanUnsubscribe: (() => void) | null = null;
   private oversizedWarnings = new OversizedFileWarnings();
+  private wikiRules = new ProjectSyncWikiRules({
+    baselineHash: (projectId, syncId) => this.projectStates.get(projectId)?.get(syncId)?.contentHash,
+    forget: async (projectId, syncId, filePath) => {
+      this.suppressFileWatcherEcho(filePath);
+      this.fileMapFor(projectId)?.fileMap.delete(syncId);
+      await this.deleteBaseline(projectId, syncId);
+    },
+  });
 
   constructor() {
     // When an editor saves or closes, retry any remote write/delete we deferred
@@ -227,8 +236,7 @@ export class ProjectFileSyncService {
     // Suppress echoes from files we just wrote from remote
     if (this.recentlyWrittenFiles.has(filePath)) return;
 
-    // Only sync .md files
-    if (!filePath.endsWith('.md')) return;
+    if (!isProjectSyncPath(filePath, workspacePath)) return;
 
     try {
       const relativePath = path.relative(workspacePath, filePath);
@@ -245,10 +253,7 @@ export class ProjectFileSyncService {
       // from mobile can be applied to the right local path. The map is only
       // seeded at startup (buildManifest), so files created after the sweep
       // would otherwise be invisible to round-trip handling.
-      const cache = (this as any)._fileMapCache?.get(encryptedProjectId) as
-        | { fileMap: Map<string, string>; workspacePath: string }
-        | undefined;
-      cache?.fileMap.set(syncId, filePath);
+      this.fileMapFor(encryptedProjectId)?.fileMap.set(syncId, filePath);
 
       const outcome = await this.provider.pushFileContent(
         encryptedProjectId,
@@ -289,8 +294,7 @@ export class ProjectFileSyncService {
     if (!this.provider) return;
     this.provider.deleteFile(encryptedProjectId, syncId);
     void this.deleteBaseline(encryptedProjectId, syncId);
-    const cache = (this as any)._fileMapCache?.get(encryptedProjectId) as { fileMap: Map<string, string> } | undefined;
-    cache?.fileMap.delete(syncId);
+    this.fileMapFor(encryptedProjectId)?.fileMap.delete(syncId);
   }
 
   /**
@@ -336,7 +340,7 @@ export class ProjectFileSyncService {
     // Pushes whose ack was lost and which the server says it holds are agreed
     // content; settle them before the diff below consults the baseline.
     for (const p of response.confirmedPushes ?? []) await this.setBaseline(projectId, p.syncId, p.contentHash, p.lastModifiedAt);
-    const cache = (this as any)._fileMapCache?.get(projectId) as { fileMap: Map<string, string>; workspacePath: string } | undefined;
+    const cache = this.fileMapFor(projectId);
     if (!cache) return;
 
     const startedAt = Date.now();
@@ -425,14 +429,14 @@ export class ProjectFileSyncService {
 
   private async handleRemoteFileUpdate(_projectId: string, file: ProjectSyncFileUpdate): Promise<void> {
     // Find the workspace path for this project
-    const cache = (this as any)._fileMapCache?.get(_projectId) as { fileMap: Map<string, string>; workspacePath: string } | undefined;
+    const cache = this.fileMapFor(_projectId);
     if (!cache) return;
 
     await this.writeRemoteFileToDisk(_projectId, cache.workspacePath, file);
   }
 
   private async handleRemoteFileDelete(_projectId: string, syncId: string): Promise<void> {
-    const cache = (this as any)._fileMapCache?.get(_projectId) as { fileMap: Map<string, string>; workspacePath: string } | undefined;
+    const cache = this.fileMapFor(_projectId);
     if (!cache) return;
 
     const filePath = cache.fileMap.get(syncId);
@@ -480,6 +484,9 @@ export class ProjectFileSyncService {
    * manifest sweep. Resurrecting a file is recoverable; deleting one is not.
    */
   private async applyRemoteDelete(_projectId: string, _syncId: string, filePath: string): Promise<void> {
+    // Inside the Local wiki, a delete whose page id now lives elsewhere was a move: the stale copy goes to the wiki trash.
+    const workspacePath = this.workspacePathFor(_projectId);
+    if (workspacePath && await this.wikiRules.applyRemoteDelete(_projectId, workspacePath, _syncId, filePath)) return;
     // Keep the baseline and file-map entry: the file is still on disk, so the
     // conflict guard must keep working and the next sweep must still see it.
     logger.main.warn(
@@ -489,8 +496,12 @@ export class ProjectFileSyncService {
 
   /** Workspace root for a project, if the file-map cache knows it. */
   private workspacePathFor(projectId: string): string | undefined {
-    const cache = (this as any)._fileMapCache?.get(projectId) as { workspacePath: string } | undefined;
-    return cache?.workspacePath;
+    return this.fileMapFor(projectId)?.workspacePath;
+  }
+
+  /** syncId -> absolute path for a project, seeded by its first manifest build. */
+  private fileMapFor(projectId: string): { fileMap: Map<string, string>; workspacePath: string } | undefined {
+    return (this as any)._fileMapCache?.get(projectId);
   }
 
   /**
@@ -502,6 +513,8 @@ export class ProjectFileSyncService {
    */
   private async writeRemoteFileToDisk(projectId: string, workspacePath: string, file: ProjectSyncFileUpdate): Promise<void> {
     const filePath = path.join(workspacePath, file.relativePath);
+    // An older client may have pushed wiki trash; it is not restored into the trash here.
+    if (isInWikiTrash(filePath, workspacePath)) return;
 
     // Never overwrite an editor's unsaved buffer. Hold the remote write until the
     // editor saves or closes, then retry it through the normal guard below. A
@@ -560,6 +573,9 @@ export class ProjectFileSyncService {
           await this.repushLocalFile(projectId, workspacePath, file.syncId, filePath);
           return;
         }
+      } else if (await this.wikiRules.isMovedAwayLocally(projectId, workspacePath, file)) {
+        this.handleFileDeleted(file.syncId, projectId);
+        return;
       }
 
       // Fast-forward: remote is strictly newer and local is unchanged since the
@@ -582,10 +598,10 @@ export class ProjectFileSyncService {
 
       // Register the path so a later remote delete/update for a file created on
       // another device can resolve it before the next full manifest rebuild.
-      const cache = (this as any)._fileMapCache?.get(projectId) as { fileMap: Map<string, string> } | undefined;
-      cache?.fileMap.set(file.syncId, filePath);
+      this.fileMapFor(projectId)?.fileMap.set(file.syncId, filePath);
 
       logger.main.info(`[ProjectFileSync] Wrote remote file: ${file.relativePath}`);
+      await this.wikiRules.afterRemoteWrite(projectId, workspacePath, filePath, file.content);
     } catch (err) {
       logger.main.error(`[ProjectFileSync] Failed to write remote file: ${file.relativePath}`, err);
     }
@@ -725,8 +741,7 @@ export class ProjectFileSyncService {
     } catch {
       // File already gone locally -- nothing to delete; just clear our state.
       await this.deleteBaseline(projectId, syncId);
-      const cache = (this as any)._fileMapCache?.get(projectId) as { fileMap: Map<string, string> } | undefined;
-      cache?.fileMap.delete(syncId);
+      this.fileMapFor(projectId)?.fileMap.delete(syncId);
       return;
     }
 
@@ -785,7 +800,7 @@ export class ProjectFileSyncService {
       '.turbo', '.vercel', '.output', '__pycache__', '.venv', 'venv',
       'target', 'Pods', '.gradle', 'DerivedData',
     ]);
-    if (skipDirs.has(basename) || basename.startsWith('.build')) {
+    if (skipDirs.has(basename) || basename.startsWith('.build') || isInWikiTrash(dir, root)) {
       return;
     }
 

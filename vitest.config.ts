@@ -38,6 +38,10 @@ const alias = [
     replacement: path.resolve(__dirname, './packages/tracker-core/src'),
   },
   {
+    find: /^@nimbalyst\/local-wiki$/,
+    replacement: path.resolve(__dirname, './packages/local-wiki/src/index.ts'),
+  },
+  {
     find: '@nimbalyst/collab-protocol',
     replacement: path.resolve(__dirname, './packages/collab-protocol/src'),
   },

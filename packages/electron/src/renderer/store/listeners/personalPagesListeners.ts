@@ -23,16 +23,18 @@ let installedCleanup: (() => void) | null = null;
 
 export function initPersonalPagesListeners(): () => void {
   if (installedCleanup) return installedCleanup;
-  const unsubscribe = window.electronAPI.on(
-    'personal-pages:changed',
-    (payload: { workspacePath?: string } | undefined) => {
-      const workspacePath = payload?.workspacePath;
-      if (!workspacePath) return;
-      store.set(personalPagesRevisionAtomFamily(workspacePath), (revision) => revision + 1);
-    },
-  );
+  const bump = (payload: { workspacePath?: string } | undefined) => {
+    const workspacePath = payload?.workspacePath;
+    if (!workspacePath) return;
+    store.set(personalPagesRevisionAtomFamily(workspacePath), (revision) => revision + 1);
+  };
+  // The database pages not exported yet, and the Local wiki folder.
+  const unsubscribers = [
+    window.electronAPI.on('personal-pages:changed', bump),
+    window.electronAPI.on('local-wiki:changed', bump),
+  ];
   installedCleanup = () => {
-    unsubscribe?.();
+    for (const unsubscribe of unsubscribers) unsubscribe?.();
     installedCleanup = null;
   };
   return installedCleanup;

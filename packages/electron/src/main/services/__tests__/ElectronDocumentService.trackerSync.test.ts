@@ -572,7 +572,7 @@ describe('createTrackerItem sync status policy', () => {
   // optimistically, so without a sweep here it renders "No key yet" until the
   // next full re-list (NIM.2842).
   it('numbers a newly created personal item before returning it', async () => {
-    mockGlobalRegistryGet.mockReturnValue({ sharing: 'personal', draftByDefault: false });
+    mockGlobalRegistryGet.mockReturnValue({ sharing: 'personal', draftByDefault: false, localNumbers: true });
     mockIsTrackerSyncActive.mockReturnValue(false);
     mockAssignLocalKeysToRows.mockResolvedValue(new Map([['bug-local', 'NIM.42']]));
 
@@ -598,6 +598,30 @@ describe('createTrackerItem sync status policy', () => {
       ['bug-local'],
     );
     expect(created.localKey).toBe('NIM.42');
+  });
+
+  // Local numbers are opt-in per type; a type that says nothing gets none.
+  it('leaves a new item of a type without localNumbers unnumbered', async () => {
+    mockGlobalRegistryGet.mockReturnValue({ sharing: 'personal', draftByDefault: false });
+    mockIsTrackerSyncActive.mockReturnValue(false);
+
+    mockQuery.mockResolvedValueOnce({ rows: [{ min_key: null }] }); // kanbanSortOrder MIN
+    mockQuery.mockResolvedValueOnce({ rows: [] }); // INSERT
+    mockQuery.mockResolvedValueOnce({
+      rows: [makeTrackerRow({ id: 'bug-plain', sync_status: 'local', local_key: null })],
+    }); // read-back
+
+    const created = await service.createTrackerItem({
+      id: 'bug-plain',
+      type: 'bug',
+      title: 'Plain bug',
+      status: 'to-do',
+      priority: 'high',
+      workspace: WORKSPACE,
+    });
+
+    expect(mockAssignLocalKeysToRows).not.toHaveBeenCalled();
+    expect(created.localKey).toBeUndefined();
   });
 });
 

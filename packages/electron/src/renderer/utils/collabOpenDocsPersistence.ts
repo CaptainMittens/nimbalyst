@@ -30,8 +30,9 @@ export interface PersistedCollabEntry {
 }
 
 /**
- * A tracker item page (`tracker://<id>`), a type page (`type://<id>`) or a
- * local personal page (`personal://<documentId>`) open in Pages mode. It shares
+ * A tracker item page (`tracker://<id>`), a type page (`type://<id>`), a
+ * database personal page (`personal://<documentId>`) or a Local wiki page's
+ * markdown file (`file`, by absolute path) open in Pages mode. It shares
  * the doc entries array so tab order survives across kinds, and deliberately
  * carries no `documentId` / `documentType`: every doc-only reader (older
  * builds, the main-process type resolver) filters on those two strings and so
@@ -41,7 +42,8 @@ export interface PersistedCollabPageEntry {
   kind: PersistedCollabPageKind;
   /**
    * Tracker item id for `tracker`, type id for `type`, document id for
-   * `personal`, and the section (`team` / `personal`) for `search` and `types`.
+   * `personal`, the absolute path for `file`, and the section (`team` /
+   * `personal`) for `search` and `types`.
    */
   artifactId: string;
   /** Last-known tab title, shown until the live title resolves. */
@@ -49,10 +51,10 @@ export interface PersistedCollabPageEntry {
   isPinned?: boolean;
 }
 
-export type PersistedCollabPageKind = 'tracker' | 'type' | 'personal' | 'search' | 'types';
+export type PersistedCollabPageKind = 'tracker' | 'type' | 'personal' | 'file' | 'search' | 'types';
 
 function isPageKind(kind: unknown): kind is PersistedCollabPageKind {
-  return kind === 'tracker' || kind === 'type' || kind === 'personal' || kind === 'search' || kind === 'types';
+  return kind === 'tracker' || kind === 'type' || kind === 'personal' || kind === 'file' || kind === 'search' || kind === 'types';
 }
 
 export type PersistedCollabTabEntry = PersistedCollabEntry | PersistedCollabPageEntry;

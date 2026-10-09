@@ -24,6 +24,7 @@ import { getRecordTitle } from '../trackerRecordAccessors';
 import { navigateToTrackerReference } from '../../TrackerLinkPlugin/trackerReferenceData';
 import { detectTrackerFromFrontmatter, updateTrackerInFrontmatter } from './frontmatterUtils';
 import { FrontmatterWriteError } from './frontmatterSource';
+import { detectFlatTypedPage, updateFlatTypedPageFields } from './flatTypedPage';
 import type { DocumentHeaderComponentProps } from './DocumentHeaderRegistry';
 
 function normalizeDocumentPath(path: string): string {
@@ -72,12 +73,16 @@ export const TrackerDocumentHeader: React.FC<DocumentHeaderComponentProps> = ({
   const [writeError, setWriteError] = useState<string | null>(null);
   const { chipFields } = useTrackerChipFieldSections(dataModel?.type ?? '');
 
-  // Get fresh tracker data when contentVersion changes
+  // Get fresh tracker data when contentVersion changes. A Local wiki page
+  // keeps its type and fields flat at the top of the frontmatter.
   const trackerData = useMemo(() => {
     const content = getContent();
-    return detectTrackerFromFrontmatter(content);
+    const wrapped = detectTrackerFromFrontmatter(content);
+    if (wrapped) return { ...wrapped, flatId: undefined };
+    const flat = detectFlatTypedPage(content, filePath);
+    return flat ? { type: flat.type, data: flat.data, flatId: flat.id } : null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [getContent, contentVersion]);
+  }, [getContent, contentVersion, filePath]);
 
   // Load data model when tracker type changes (or on mount)
   useEffect(() => {
@@ -116,7 +121,9 @@ export const TrackerDocumentHeader: React.FC<DocumentHeaderComponentProps> = ({
     const currentContent = getContent();
     let updatedContent: string;
     try {
-      updatedContent = updateTrackerInFrontmatter(currentContent, trackerData.type, updates);
+      updatedContent = trackerData.flatId !== undefined
+        ? updateFlatTypedPageFields(currentContent, updates)
+        : updateTrackerInFrontmatter(currentContent, trackerData.type, updates);
     } catch (error) {
       // The writer refuses a header it cannot rewrite without losing the
       // author's YAML (#1552). Say so and leave the document alone -- silently
@@ -138,6 +145,8 @@ export const TrackerDocumentHeader: React.FC<DocumentHeaderComponentProps> = ({
 
   const associatedItem = useMemo(() => {
     if (!trackerData) return null;
+    // A Local wiki page is its own record, under the id in its frontmatter.
+    if (trackerData.flatId !== undefined) return trackerData.flatId ? trackerItems.get(trackerData.flatId) ?? null : null;
     return findAssociatedTrackerItem(trackerItems.values(), filePath, trackerData.type);
   }, [filePath, trackerData, trackerItems]);
   const relationshipCandidates = useTrackerRelationshipCandidates(associatedItem, chipFields);
@@ -243,6 +252,5 @@ export function shouldRenderTrackerHeader(content: string, filePath: string): bo
   if (lowerPath && !lowerPath.endsWith('.md') && !lowerPath.endsWith('.mdx')) {
     return false;
   }
-  const detected = detectTrackerFromFrontmatter(content);
-  return detected !== null;
+  return detectTrackerFromFrontmatter(content) !== null || detectFlatTypedPage(content, filePath) !== null;
 }

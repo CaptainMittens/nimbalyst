@@ -11,6 +11,7 @@ import {describe, expect, it} from 'vitest';
 import {$getRoot, $isElementNode, type LexicalEditor, type LexicalNode} from 'lexical';
 
 import {agentEditsApplyDirectly} from '../../../../../ai/agentEditPolicy';
+import {setLocalWikiRoot} from '../../../../../core/localWikiRoots';
 import {DiffExtension} from '../../../../extensions/builtin/DiffExtension';
 import {$convertFromEnhancedMarkdownString, $convertToEnhancedMarkdownString} from '../../../../markdown';
 import {APPLY_MARKDOWN_REPLACE_COMMAND, type ApplyMarkdownReplaceResult} from '../../DiffCommands';
@@ -100,6 +101,22 @@ describe('agent edits by document kind', () => {
 
     expect(diffStates(editor)).toEqual([]);
     expect(markdown(editor)).toContain('Ship the beta on Monday.');
+  });
+
+  // The wiki folder is wherever the host resolved it, not a fixed path.
+  it('a page file inside the registered Local wiki folder gets final text; a file beside it does not', () => {
+    setLocalWikiRoot('/workspace', '/workspace/docs/my-wiki/');
+    try {
+      const page = applyAgentEdit('/workspace/docs/my-wiki/Plans/Q3 goals.md');
+      expect(diffStates(page)).toEqual([]);
+      expect(markdown(page)).toContain('Ship the beta on Monday.');
+
+      expect(agentEditsApplyDirectly('/workspace/docs/my-wiki-old/Plan.md')).toBe(false);
+      expect(agentEditsApplyDirectly('/workspace/nimbalyst-local/wiki/Plan.md')).toBe(false);
+    } finally {
+      setLocalWikiRoot('/workspace', null);
+    }
+    expect(agentEditsApplyDirectly('/workspace/docs/my-wiki/Plans/Q3 goals.md')).toBe(false);
   });
 
   it('a markdown file on disk still gets pending diff nodes for review', () => {

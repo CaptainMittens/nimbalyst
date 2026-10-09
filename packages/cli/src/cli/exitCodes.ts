@@ -14,6 +14,8 @@ export const ExitCode = {
    * returns it now. Kept so the number is never given another meaning.
    */
   PARTIAL_WRITE: 6,
+  /** A write based on a version that is no longer current (`nim wiki write --expected-version`). */
+  CONFLICT: 7,
 } as const;
 
 export type ExitCodeValue = (typeof ExitCode)[keyof typeof ExitCode];

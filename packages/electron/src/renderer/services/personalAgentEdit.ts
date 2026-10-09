@@ -3,7 +3,9 @@
  * an agent edit lands as final text with no review step; the page's local
  * history is how a person reverts it.
  *
- *   personal://<documentId>              Personal page body (`personal-pages:*` IPC)
+ *   personal://<documentId>              Local page body: the page's markdown file in the
+ *                                        wiki folder (`local-wiki:*` IPC), or a database
+ *                                        Personal page not exported yet (`personal-pages:*`)
  *   personal://tracker-content/<itemId>  Personal typed-page body (the tracker item's content)
  *
  * A page open in a tab is edited through its mounted editor, which saves
@@ -28,6 +30,8 @@ import { parsePersonalPageUri, personalTypedPageHistoryKey } from '../../shared/
 const PERSONAL_DOC_EDITOR_PREFIX = 'personal-doc://';
 
 type BodyWrite = { version: number } | { conflict: true; version: number; content: string };
+/** A Local wiki page: its body (frontmatter excluded), body version and markdown file. */
+type WikiPageBody = { content: string; version: string; filePath: string };
 type TypedPageBodyWrite = { written: true } | { conflict: true; version: number };
 
 /** A typed page's body editor while it is mounted. */
@@ -41,6 +45,10 @@ export interface LiveTypedPageEditor {
 export interface PersonalPageIo {
   getBody(workspacePath: string, documentId: string): Promise<{ content: string; version: number } | null>;
   updateBody(workspacePath: string, documentId: string, content: string, expectedVersion?: number): Promise<BodyWrite>;
+  /** The page in the Local wiki folder; null when it is not there (a database page, or unknown). */
+  getWikiPage?(workspacePath: string, documentId: string): Promise<WikiPageBody | null>;
+  /** Writes a Local wiki page's body if it is still at `expectedVersion`. */
+  writeWikiPage?(workspacePath: string, documentId: string, content: string, expectedVersion: string): Promise<{ ok: boolean }>;
   /** Keep text in a page's local history under its history key. */
   keepInHistory(historyKey: string, content: string, description: string): Promise<void>;
   /** The body with its `body_version`; version null when it cannot be read together with the text. */
@@ -92,6 +100,14 @@ const rendererIo: PersonalPageIo = {
     window.electronAPI.invoke('personal-pages:get-body', workspacePath, documentId),
   updateBody: (workspacePath, documentId, content, expectedVersion) =>
     window.electronAPI.invoke('personal-pages:update-body', workspacePath, documentId, content, expectedVersion),
+  getWikiPage: async (workspacePath, documentId) => {
+    const filePath = await window.electronAPI.invoke('local-wiki:page-path', workspacePath, documentId) as string | null;
+    if (!filePath) return null;
+    const body = await window.electronAPI.invoke('local-wiki:read-body', workspacePath, documentId) as { markdown: string; version: string };
+    return { content: body.markdown, version: body.version, filePath };
+  },
+  writeWikiPage: (workspacePath, documentId, content, expectedVersion) =>
+    window.electronAPI.invoke('local-wiki:write-body', workspacePath, documentId, content, expectedVersion),
   keepInHistory: async (historyKey, content, description) => {
     await window.electronAPI.invoke('history:create-snapshot', historyKey, content, 'pre-apply', description);
   },
@@ -155,12 +171,32 @@ export async function readPersonalPageForAgent(
     if (live) return live.getContent();
     return markdownOf((await io.getTypedPageBody(target.itemId)).content, `The typed page ${target.itemId}`);
   }
+  const wikiPage = workspacePath && io.getWikiPage ? await io.getWikiPage(workspacePath, target.documentId) : null;
+  if (wikiPage) {
+    // An open file tab may hold edits not saved yet; its editor has the text the person sees.
+    return io.mountedEditor.has(wikiPage.filePath) ? io.mountedEditor.getContent(wikiPage.filePath) : wikiPage.content;
+  }
   const editorPath = personalDocEditorPath(target.documentId);
   if (io.mountedEditor.has(editorPath)) return io.mountedEditor.getContent(editorPath);
   if (!workspacePath) throw new Error(`No workspace is open to read ${uri}.`);
   const body = await io.getBody(workspacePath, target.documentId);
   if (!body) throw new Error(`Unknown Personal page '${target.documentId}'.`);
   return body.content;
+}
+
+/**
+ * A Local page's stored body: the wiki file's body, or a database page's body
+ * with its version. Mounted editors are not consulted.
+ */
+export async function readLocalPageBody(
+  workspacePath: string,
+  documentId: string,
+  io: PersonalPageIo = rendererIo,
+): Promise<{ markdown: string; version?: number }> {
+  const wikiPage = io.getWikiPage ? await io.getWikiPage(workspacePath, documentId) : null;
+  if (wikiPage) return { markdown: wikiPage.content };
+  const body = await io.getBody(workspacePath, documentId);
+  return { markdown: body?.content ?? '', ...(body ? { version: body.version } : {}) };
 }
 
 /** The edit lands as final text in the mounted editor; its autosave stores it. */
@@ -191,6 +227,24 @@ async function editStoredTypedPage(itemId: string, replacements: TextReplacement
     knownVersion = written.version;
   }
   throw new Error(`The typed page '${itemId}' kept changing while the edit was applied. Read it again and retry.`);
+}
+
+async function editStoredWikiPage(
+  workspacePath: string,
+  documentId: string,
+  first: WikiPageBody,
+  replacements: TextReplacement[],
+  io: PersonalPageIo,
+): Promise<void> {
+  let body: WikiPageBody | null = first;
+  for (let attempt = 0; attempt < 2 && body; attempt++) {
+    const next = applyTextReplacementsToString(body.content, replacements);
+    if (next === body.content) return;
+    if (attempt === 0) await io.keepInHistory(body.filePath, body.content, 'Before agent edit');
+    if ((await io.writeWikiPage!(workspacePath, documentId, next, body.version)).ok) return;
+    body = await io.getWikiPage!(workspacePath, documentId);
+  }
+  throw new Error(`The Local page '${documentId}' kept changing while the edit was applied. Read it again and retry.`);
 }
 
 async function editStoredPersonalPage(
@@ -235,6 +289,15 @@ export async function applyPersonalPageAgentEdit(
       return { success: true };
     }
 
+    const wikiPage = options.workspacePath && io.getWikiPage ? await io.getWikiPage(options.workspacePath, target.documentId) : null;
+    if (wikiPage) {
+      if (io.mountedEditor.has(wikiPage.filePath)) {
+        const result = await io.mountedEditor.applyReplacements(wikiPage.filePath, replacements, options.requestId);
+        return result ?? { success: false, error: 'No result returned from the open Local page.' };
+      }
+      await editStoredWikiPage(options.workspacePath!, target.documentId, wikiPage, replacements, io);
+      return { success: true };
+    }
     const editorPath = personalDocEditorPath(target.documentId);
     if (io.mountedEditor.has(editorPath)) {
       const result = await io.mountedEditor.applyReplacements(editorPath, replacements, options.requestId);

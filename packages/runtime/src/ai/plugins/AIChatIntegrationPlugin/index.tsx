@@ -155,8 +155,10 @@ export function AIChatIntegrationPlugin(): null {
       return;
     }
 
-    // Shared documents take agent edits as final text; disk files get a diff.
-    const appliesDirectly = agentEditsApplyDirectly(filePath);
+    // Shared documents and wiki pages take agent edits as final text; other
+    // disk files get a diff. Asked per edit: the host can register the Local
+    // wiki folder after this editor mounts (a restored tab).
+    const appliesDirectly = () => agentEditsApplyDirectly(filePath);
     const instanceId = `${filePath}::${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     const isEditorVisible = (): boolean => {
@@ -230,7 +232,7 @@ export function AIChatIntegrationPlugin(): null {
 
             // Dispatch the command with requestId attached to the replacements
             // LiveNodeKeyState is set automatically by applyMarkdownReplace via parallel traversal
-            const commandPayload = { replacements, requestId, acceptChanges: appliesDirectly };
+            const commandPayload = { replacements, requestId, acceptChanges: appliesDirectly() };
             console.log('[AIChatIntegrationPlugin] Dispatching APPLY_MARKDOWN_REPLACE_COMMAND', commandPayload);
             console.log('[AIChatIntegrationPlugin] Command object:', APPLY_MARKDOWN_REPLACE_COMMAND);
             const commandSuccess = editor.dispatchCommand(APPLY_MARKDOWN_REPLACE_COMMAND, commandPayload);
@@ -304,7 +306,7 @@ export function AIChatIntegrationPlugin(): null {
           startingNodeKey,
           mode,
           (node) => {
-            if (appliesDirectly) return;
+            if (appliesDirectly()) return;
             // Mark the streamed node as 'added' in the diff infrastructure
             $setDiffState(node, 'added');
             // console.log('[editor] Node created during streaming and marked as added:', node.getKey());

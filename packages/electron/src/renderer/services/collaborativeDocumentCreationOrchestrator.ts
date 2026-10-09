@@ -30,6 +30,7 @@ import {
   type SharedFolder,
 } from '../store/atoms/collabDocuments';
 import { setWindowModeAtom } from '../store/atoms/windowMode';
+import { isTypePageDocumentId } from './localWikiCommands';
 import {
   getCollaborativeDocumentTypeCatalog,
   normalizeSuffix,
@@ -339,13 +340,26 @@ function defaultDependencies(): CollaborativeDocumentCreationDependencies {
         current.filter((document) => document.documentId !== documentId));
     },
     writePersonalBody: async (scope, documentId, content) => {
+      if (isTypePageDocumentId(documentId)) {
+        // A type page's description stays in the database store (see localWikiCommands).
+        const stored = await window.electronAPI.invoke(
+          'personal-pages:update-body',
+          workspacePathFromPersonalScopeKey(scope.scopeKey),
+          documentId,
+          content,
+        ) as { version?: number; conflict?: boolean } | null;
+        if (!stored || stored.conflict) throw new Error('The page body was not saved.');
+        return;
+      }
+      // A new Local page is a file in the wiki folder; nobody else has written it yet.
       const result = await window.electronAPI.invoke(
-        'personal-pages:update-body',
+        'local-wiki:write-body',
         workspacePathFromPersonalScopeKey(scope.scopeKey),
         documentId,
         content,
-      ) as { version?: number; conflict?: boolean } | null;
-      if (!result || result.conflict) throw new Error('The page body was not saved.');
+        null,
+      ) as { ok?: boolean } | null;
+      if (!result?.ok) throw new Error('The page body was not saved.');
     },
     trashPersonal: async (scope, documentId) => {
       await getElectronCollabDocsSession(scope).trashDocument(documentId);
@@ -813,10 +827,12 @@ export class CollaborativeDocumentCreationOrchestrator {
     }
     // A team page is seeded from `sourceContent` in its room; a Personal page's
     // body is a separate local write. Without it, content handed in (an agent's
-    // initialContent, a moved page) came back as an empty page.
-    if (input.sourceContent) {
+    // initialContent, a moved page) came back as an empty page. A new editor
+    // page (drawing, mockup...) starts from its type's default file.
+    const seed = input.sourceContent || descriptor.creation?.defaultContent;
+    if (seed) {
       try {
-        const body = typeof input.sourceContent === 'string' ? input.sourceContent : new TextDecoder().decode(input.sourceContent);
+        const body = typeof seed === 'string' ? seed : new TextDecoder().decode(seed);
         await this.dependencies.writePersonalBody(input.scope, documentId, body);
       } catch (cause) {
         // Recoverable from Trash, not a blank page that reads as a success.

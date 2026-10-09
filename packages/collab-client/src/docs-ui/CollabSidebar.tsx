@@ -48,7 +48,7 @@ import {
   type CollabRowDrop,
 } from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from '../ui-primitives/useFloatingMenu';
-import { CollabSectionMenu, CollabTreeEmptyState } from './CollabSectionRoot';
+import { CollabSectionMenu, CollabTreeEmptyState, type CollabSectionMenuItem } from './CollabSectionRoot';
 import { CollabSidebarTrashEntry } from './CollabTrash';
 import { revealKeysFor } from './collabTreeReveal';
 import { usePageActionRequest, type CollabPageActionRequest } from './usePageActionRequest';
@@ -136,6 +136,8 @@ export interface CollabSidebarProps {
   scopeName?: React.ReactNode;
   scopePath?: React.ReactNode;
   headerActions?: React.ReactNode;
+  /** Host entries appended to the section's right-click menu. */
+  extraSectionMenuItems?: readonly CollabSectionMenuItem[];
   /**
    * Hosts where a folder is an addressable surface (the browser console routes
    * `/docs/folder/:folderId`). Desktop leaves this unset, so a folder click
@@ -202,6 +204,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   scopeName,
   scopePath,
   headerActions,
+  extraSectionMenuItems,
   onSelectFolder,
   registerCreateMenu,
   typeResolver,
@@ -1740,6 +1743,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         if (collapsed) onToggleCollapsed?.();
         setPlaceTypeMenu({ ...sectionMenu, parentFolderId: null });
       } : undefined}
+      extraItems={extraSectionMenuItems}
       onClose={() => setSectionMenu(null)}
     />
   );

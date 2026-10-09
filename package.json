@@ -35,7 +35,7 @@
     "test:unit:coverage": "vitest --coverage",
     "test:provider:integration": "cross-env RUN_AI_PROVIDER_TESTS=true vitest --run",
     "prepare": "node scripts/remove-stale-npm-lockfile.mjs && node scripts/install-git-hooks.mjs && pnpm run build:tracker-packages",
-    "build:tracker-packages": "pnpm --filter @nimbalyst/tracker-core run build && pnpm --filter @nimbalyst/tracker-schema run build && pnpm --filter @nimbalyst/tracker-engine run build",
+    "build:tracker-packages": "pnpm --filter @nimbalyst/tracker-core run build && pnpm --filter @nimbalyst/tracker-schema run build && pnpm --filter @nimbalyst/tracker-engine run build && pnpm --filter @nimbalyst/local-wiki run build",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "check:override-sync": "node scripts/check-override-sync.mjs",
     "build:wiki-plugin": "node scripts/build-wiki-plugin.mjs",

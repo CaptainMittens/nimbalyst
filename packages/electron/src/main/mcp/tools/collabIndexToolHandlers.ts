@@ -31,7 +31,7 @@ const SLOW_ROUND_TRIP_TIMEOUT_MS = 60000;
 const SECTION = {
   type: "string",
   enum: ["team", "personal"],
-  description: "Wiki section. Default 'team'. 'personal' is local and works with no account.",
+  description: "Wiki section. Default 'team'. 'personal' is the Local section: markdown files in this project's wiki folder (nimbalyst-local/wiki unless .nimbalyst/local-wiki.json names another), with no account needed.",
 };
 const PARENT_KIND = {
   type: "string",
@@ -81,7 +81,7 @@ export function getCollabIndexToolSchemas() {
           documentType: {
             type: "string",
             description:
-              "The page's editor. Defaults to 'markdown'. Team pages can also be 'excalidraw' (a drawing), 'mindmap', 'datamodel' (Prisma schema), 'mockup.html', 'canvas', 'csv', 'calc.md', 'slides.md', 'ipynb', 'namenym' or 'code', when that editor's extension is installed. Personal pages can be any of these but 'code'.",
+              "The page's editor. Defaults to 'markdown'. Team pages can also be 'excalidraw' (a drawing), 'mindmap', 'datamodel' (Prisma schema), 'mockup.html', 'canvas', 'csv', 'calc.md', 'slides.md', 'ipynb', 'namenym' or 'code', when that editor's extension is installed. Local (personal) pages are markdown only.",
           },
           parentFolderId: { type: "string", description: "Parent page id, or typed page id / issue key. Omit for the top of the section." },
           parentKind: PARENT_KIND,

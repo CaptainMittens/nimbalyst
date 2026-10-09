@@ -74,6 +74,8 @@ describe('agent edits to Personal pages', () => {
             return service.updateBody(args[0], args[1], args[2], args[3]);
           }
           if (channel === 'history:create-snapshot') return history.createSnapshot(args[0], args[1], args[2], args[3]);
+          // Not in the Local wiki folder: a database page not exported yet.
+          if (channel === 'local-wiki:page-path') return null;
           throw new Error(`unexpected channel ${channel}`);
         },
       },

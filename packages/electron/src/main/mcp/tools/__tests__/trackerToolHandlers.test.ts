@@ -1038,6 +1038,7 @@ describe('handleTrackerCreate issue-key timing', () => {
   // unpublished item reports its uuid to the agent: it has no team key, and
   // its number was only minted by a later list (NIM.2842).
   it('reports the local number as the ref for an unpublished item', async () => {
+    mockGlobalRegistry.get.mockImplementation((type?: string) => type === 'bug' ? { localNumbers: true } : undefined);
     vi.mocked(isTrackerSyncActive).mockReturnValue(false);
     vi.mocked(shouldSyncTrackerItem).mockReturnValue(false);
     const numbered = makeRow({
@@ -1073,6 +1074,22 @@ describe('handleTrackerCreate issue-key timing', () => {
     // Sync is inactive here, so "publish it" is not advice this workspace can
     // act on and must not appear.
     expect(summary).not.toContain('until it is published');
+  });
+
+  // Local numbers are opt-in per type; a type that says nothing gets none.
+  it('does not number an item whose type has not opted in to local numbers', async () => {
+    vi.mocked(isTrackerSyncActive).mockReturnValue(false);
+    vi.mocked(shouldSyncTrackerItem).mockReturnValue(false);
+    const plain = makeRow({ id: 'bug_test', workspace: '/tmp/ws', issue_key: null, issue_number: null, local_key: null });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })       // INSERT
+      .mockResolvedValueOnce({ rows: [plain] })  // resolve created
+      .mockResolvedValueOnce({ rows: [plain] }); // notifyTrackerItemAdded
+
+    const { structured } = parseResult(await handleTrackerCreate({ type: 'bug', title: 'Plain bug' }, '/tmp/ws'));
+
+    expect(assignLocalKeysToRows).not.toHaveBeenCalled();
+    expect(structured.item.localKey).toBeUndefined();
   });
 
   it('leaves a team draft without any key', async () => {

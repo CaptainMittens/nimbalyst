@@ -423,11 +423,13 @@ importers:
         version: 0.28.2
 
   packages/cli:
-    dependencies:
-      better-sqlite3:
-        specifier: 13.0.3
-        version: 13.0.3
     devDependencies:
+      '@nimbalyst/collab-protocol':
+        specifier: workspace:*
+        version: link:../collab-protocol
+      '@nimbalyst/local-wiki':
+        specifier: workspace:*
+        version: link:../local-wiki
       '@nimbalyst/tracker-core':
         specifier: workspace:*
         version: link:../tracker-core
@@ -452,6 +454,10 @@ importers:
       vitest:
         specifier: 4.1.11
         version: 4.1.11(@types/node@20.19.43)(@vitest/ui@4.1.11)(happy-dom@20.9.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(jsdom@26.1.0(bufferutil@4.1.0)(supports-color@10.2.2)(utf-8-validate@5.0.10))(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(terser@5.46.1)(yaml@2.8.3))
+    optionalDependencies:
+      better-sqlite3:
+        specifier: 13.0.3
+        version: 13.0.3
 
   packages/cloudflare-sandbox:
     dependencies:
@@ -650,6 +656,9 @@ importers:
       '@nimbalyst/extension-datamodellm':
         specifier: workspace:*
         version: link:../extensions/datamodellm
+      '@nimbalyst/local-wiki':
+        specifier: workspace:*
+        version: link:../local-wiki
       '@nimbalyst/mockuplm':
         specifier: workspace:*
         version: link:../extensions/mockuplm
@@ -1883,6 +1892,25 @@ importers:
         specifier: ^7.3.6
         version: 7.3.6(@types/node@20.19.43)(jiti@2.7.0)(terser@5.46.1)(yaml@2.8.3)
 
+  packages/local-wiki:
+    dependencies:
+      js-yaml:
+        specifier: ^4.3.2
+        version: 4.3.2
+    devDependencies:
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
+      '@types/node':
+        specifier: ^20.0.0
+        version: 20.19.43
+      typescript:
+        specifier: ^5.0.0
+        version: 5.9.3
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@20.19.43)(@vitest/ui@4.1.11)(happy-dom@20.9.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(jsdom@26.1.0(bufferutil@4.1.0)(supports-color@10.2.2)(utf-8-validate@5.0.10))(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(terser@5.46.1)(yaml@2.8.3))
+
   packages/markdown-ydoc:
     devDependencies:
       esbuild:
@@ -2240,6 +2268,117 @@ importers:
       typescript:
         specifier: ^5.0.0
         version: 5.9.3
+
+  packages/wiki-web:
+    devDependencies:
+      '@lexical/code':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/code-core':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/extension':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/hashtag':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/headless':
+        specifier: 0.44.0
+        version: 0.44.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
+      '@lexical/history':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/html':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/link':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/list':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/mark':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/markdown':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/overflow':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/react':
+        specifier: 0.44.0
+        version: 0.44.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(yjs@13.6.32)
+      '@lexical/rich-text':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/selection':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/table':
+        specifier: 0.44.0
+        version: 0.44.0(patch_hash=1461ba4b547df2d1b471b66a34343fe66a9225ac3767a0dbbeb6d3953ad40838)
+      '@lexical/utils':
+        specifier: 0.44.0
+        version: 0.44.0
+      '@lexical/yjs':
+        specifier: 0.44.0
+        version: 0.44.0(patch_hash=81c6b5edf6a448a1b58989a2f66ee89f52e78871c1dba49750e93b7739de3020)(yjs@13.6.32)
+      '@nimbalyst/collab-bundle':
+        specifier: workspace:*
+        version: link:../collab-bundle
+      '@nimbalyst/local-wiki':
+        specifier: workspace:*
+        version: link:../local-wiki
+      '@revolist/react-datagrid':
+        specifier: 4.21.4
+        version: 4.21.4
+      '@revolist/revogrid':
+        specifier: 4.21.4
+        version: 4.21.4(patch_hash=c1fbe0323c46436ce9bf37b5f96fbeff48a5755ed400b4452b80555a92e728dd)
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: ^19.2.3
+        version: 19.2.3(@types/react@19.2.17)
+      '@vitejs/plugin-react':
+        specifier: ^5.1.2
+        version: 5.2.0(supports-color@10.2.2)(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(terser@5.46.1)(yaml@2.8.3))
+      autoprefixer:
+        specifier: ^10.5.0
+        version: 10.5.0(postcss@8.5.26)
+      lexical:
+        specifier: 0.44.0
+        version: 0.44.0
+      postcss:
+        specifier: ^8.5.6
+        version: 8.5.26
+      react:
+        specifier: ^19.2.7
+        version: 19.2.7
+      react-dom:
+        specifier: ^19.2.7
+        version: 19.2.7(react@19.2.7)
+      tailwindcss:
+        specifier: ^3.4.19
+        version: 3.4.19(yaml@2.8.3)
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+      vite:
+        specifier: ^7.3.6
+        version: 7.3.6(@types/node@20.19.43)(jiti@2.7.0)(terser@5.46.1)(yaml@2.8.3)
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@20.19.43)(@vitest/ui@4.1.11)(happy-dom@20.9.0(bufferutil@4.1.0)(utf-8-validate@5.0.10))(jsdom@26.1.0(bufferutil@4.1.0)(supports-color@10.2.2)(utf-8-validate@5.0.10))(vite@7.3.6(@types/node@20.19.43)(jiti@2.7.0)(terser@5.46.1)(yaml@2.8.3))
+      y-protocols:
+        specifier: ^1.0.7
+        version: 1.0.7(yjs@13.6.32)
+      yjs:
+        specifier: 13.6.32
+        version: 13.6.32
 
 packages:
 

@@ -44,14 +44,15 @@ export interface PagesTabNavigation {
 type PersonalPageRow = { documentId: string; trashedAt?: number | null };
 
 /**
- * The Personal page list as the local database has it now, trashed rows
- * included; null when it cannot be read. Read per step rather than from the
- * session, whose list says nothing until its first snapshot lands, so a purged
- * last page reads as gone and not as "not loaded yet".
+ * The database Personal pages not exported to the Local wiki yet (the only
+ * pages that open as `personal://` tabs), trashed rows included; null when it
+ * cannot be read. Read per step rather than from the session, whose list says
+ * nothing until its first snapshot lands, so a purged last page reads as gone
+ * and not as "not loaded yet".
  */
 async function readPersonalPages(workspacePath: string): Promise<PersonalPageRow[] | null> {
   try {
-    const snapshot = await window.electronAPI.invoke('personal-pages:snapshot', workspacePath) as { items?: PersonalPageRow[] } | null;
+    const snapshot = await window.electronAPI.invoke('local-wiki:legacy-snapshot', workspacePath) as { items?: PersonalPageRow[] } | null;
     return snapshot?.items ?? [];
   } catch (error) {
     console.warn('[usePagesTabNavigation] Could not read Personal pages; Back and Forward will not skip any:', error);

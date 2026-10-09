@@ -117,4 +117,32 @@ describe('createDesktopTrackerDataSource', () => {
     await expect(source.command({ type: 'update-items', input: { entries: [{ itemId: 'a', storeUpdates: { title: 'B' } }] } }))
       .rejects.toThrow('Row refused');
   });
+
+  it('sends a Local wiki item\'s edits and a wiki type\'s new items to the library, never to the database', async () => {
+    const store = createStore();
+    const registry = new TrackerDataModelRegistry();
+    registry.register({ ...entityModel('personal'), storage: 'pages' } as TrackerDataModel);
+    const wikiItem = { ...item('w', 'Wiki'), source: 'local-wiki', system: { ...item('w', 'Wiki').system, documentPath: '/ws/nimbalyst-local/wiki/Wiki.md' } } as TrackerRecord;
+    store.set(replaceAllTrackerItemsAtom, [item('a', 'Alpha'), wikiItem]);
+    const command = vi.fn(async () => ({ ok: true as const, result: { success: true, results: [] } }));
+    const ipc = { invoke: vi.fn(async () => ({ ok: true, id: 'n' })) };
+    const source = createDesktopTrackerDataSource({ workspacePath: '/ws', store, registry, ipc, writer: { command, getItemRevision: vi.fn() } });
+
+    await source.command({ type: 'update-item', input: { itemId: 'w', updates: { status: 'done' } } } as never);
+    expect(ipc.invoke).toHaveBeenLastCalledWith('local-wiki:tracker-command', '/ws', 'entity', { type: 'update-item', input: { itemId: 'w', updates: { status: 'done' } } });
+    await source.command({ type: 'delete-item', itemId: 'w' });
+    expect(ipc.invoke).toHaveBeenLastCalledWith('local-wiki:tracker-command', '/ws', 'entity', { type: 'delete-item', itemId: 'w' });
+    await expect(source.command({ type: 'archive-item', itemId: 'w', archive: true })).rejects.toThrow(/Local wiki/);
+    await source.command({ type: 'create-item', item: { id: 'n', type: 'entity', title: 'New', status: 'open', priority: '', workspace: '/ws' } });
+    expect(ipc.invoke).toHaveBeenLastCalledWith('local-wiki:tracker-command', '/ws', 'entity', { type: 'create-item', item: { id: 'n', title: 'New', fields: { status: 'open' } } });
+
+    await source.command({ type: 'update-items', input: { entries: [
+      { itemId: 'a', storeUpdates: { title: 'A' } },
+      { itemId: 'w', storeUpdates: { title: 'W' } },
+    ] } });
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command).toHaveBeenLastCalledWith({ type: 'update-items', input: { entries: [
+      { itemId: 'a', storeUpdates: { title: 'A' }, sharing: 'personal', draftByDefault: false },
+    ] } });
+  });
 });

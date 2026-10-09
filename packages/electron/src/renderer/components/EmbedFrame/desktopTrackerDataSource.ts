@@ -21,7 +21,10 @@
  *  - each item is written in its own type's lane, whatever lane the caller
  *    assumed;
  *  - a write the main process refused (`{ success: false }` inside an `ok`
- *    IPC answer) is thrown, so no consumer mistakes it for a saved change.
+ *    IPC answer) is thrown, so no consumer mistakes it for a saved change;
+ *  - a Local wiki item (`source: 'local-wiki'`) and a new item of a wiki type
+ *    (one whose YAML declares `storage`) go to the wiki library, never to the
+ *    database or a room.
  */
 
 import type {
@@ -40,6 +43,7 @@ import { trackerDataLoadedAtom, trackerItemsMapAtom } from '@nimbalyst/runtime/p
 import type { store as runtimeStore } from '@nimbalyst/runtime/store';
 import { serializeSharedSavedView, type TrackerSavedViewRecord } from '@nimbalyst/collab-client/trackers';
 import { allTrackerSavedViewsAtom } from '../../store/atoms/trackers';
+import { isLocalWikiRecord, isLocalWikiType, localWikiItemUpdate } from '../../services/localWikiTrackerRecords';
 
 type JotaiStore = typeof runtimeStore;
 
@@ -150,7 +154,44 @@ export function createDesktopTrackerDataSource({
     return outcome;
   };
 
+  /** A Local wiki item's command, sent to the library; null for anything else. */
+  const dispatchLocalWiki = async (command: TrackerDataCommand): Promise<TrackerDataCommandResult | null> => {
+    const send = async (typeId: string, libraryCommand: unknown) => ({
+      ok: true as const,
+      result: { success: true, ...(await (ipc ?? window.electronAPI).invoke('local-wiki:tracker-command', workspacePath, typeId, libraryCommand) as object) },
+    });
+    if (command.type === 'create-item') {
+      if (!registry.get(command.item.type)?.storage && !isLocalWikiType(command.item.type)) return null;
+      const { title, status, priority, owner, tags, description, customFields } = command.item;
+      const fields = Object.fromEntries(Object.entries({ status, priority, owner, tags, description, ...customFields })
+        .filter(([, value]) => value !== undefined && value !== null && value !== ''));
+      return send(command.item.type, { type: 'create-item', item: { id: command.item.id, title, fields } });
+    }
+    const itemId = command.type === 'update-item' ? command.input.itemId
+      : command.type === 'delete-item' || command.type === 'archive-item' || command.type === 'update-item-content' ? command.itemId
+        : null;
+    const record = itemId ? store.get(trackerItemsMapAtom).get(itemId) : undefined;
+    if (!record || !isLocalWikiRecord(record)) return null;
+    if (command.type === 'update-item') {
+      return send(record.primaryType, { type: 'update-item', input: { itemId: record.id, updates: localWikiItemUpdate(record, command.input.updates) } });
+    }
+    if (command.type === 'delete-item') return send(record.primaryType, { type: 'delete-item', itemId: record.id });
+    throw new Error(`"${record.fields.title ?? record.id}" is a file in the Local wiki; open it to change ${command.type === 'archive-item' ? 'whether it is archived' : 'its text'}.`);
+  };
+
   const dispatch = async (command: TrackerDataCommand): Promise<TrackerDataCommandResult> => {
+    const local = await dispatchLocalWiki(command);
+    if (local) return local;
+    if (command.type === 'update-items' && command.input.entries.some((entry) => isLocalWikiRecord(store.get(trackerItemsMapAtom).get(entry.itemId)))) {
+      // One by one: wiki items go to the library, the rest to the database in one call.
+      const items = store.get(trackerItemsMapAtom);
+      const [wiki, rest] = [command.input.entries.filter((entry) => isLocalWikiRecord(items.get(entry.itemId))), command.input.entries.filter((entry) => !isLocalWikiRecord(items.get(entry.itemId)))];
+      for (const entry of wiki) {
+        await dispatchLocalWiki({ type: 'update-item', input: { itemId: entry.itemId, updates: { ...entry.fileUpdates, ...entry.storeUpdates } } as never });
+      }
+      if (rest.length > 0) return dispatchBatch({ ...command.input, entries: rest });
+      return { ok: true, result: { success: true } };
+    }
     if (command.type === 'create-item') {
       const sharing = laneOf(command.item.type, command.item.sharing);
       return writer.command({ ...command, item: { ...command.item, ...(sharing ? { sharing } : {}) } });

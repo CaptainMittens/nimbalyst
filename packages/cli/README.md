@@ -96,7 +96,7 @@ nim tracker import resnapshot github://owner/repo#42
 
 `0` ok · `1` not found · `2` usage · `3` connection (incl. importers in offline
 mode) · `4` schema-incompatible · `5` write-not-permitted (a live app owns the
-DB, or a live-only command in offline mode). `6` is retired.
+DB, or a live-only command in offline mode). `6` is retired. `7` conflict (`nim wiki write --expected-version` on a page that changed).
 
 ### Env
 
@@ -105,7 +105,7 @@ DB, or a live-only command in offline mode). `6` is retired.
 
 ## Team wiki
 
-The `pages` commands (or `nim wiki`, an alias) work on a Nimbalyst team project's Wiki on the sync server with your Nimbalyst Teams sign-in, not through a running Nimbalyst app. Each one calls the same wiki tool a terminal agent uses through the `nimbalyst-pages` Claude Code plugin, with the same arguments, so a script and an agent see the same results. A repository reaches its pages through the team project a team admin connected its remote to; who belongs is decided in Nimbalyst Teams. Only team pages are reachable; Personal pages live in the desktop app.
+The `pages` commands (`nim wiki` too, for every verb except the local wiki ones below) work on a Nimbalyst team project's Wiki on the sync server with your Nimbalyst Teams sign-in, not through a running Nimbalyst app. Each one calls the same wiki tool a terminal agent uses through the `nimbalyst-pages` Claude Code plugin, with the same arguments, so a script and an agent see the same results. A repository reaches its pages through the team project a team admin connected its remote to; who belongs is decided in Nimbalyst Teams. Only team pages are reachable; Personal pages live in the desktop app.
 
 ```sh
 nim login                      # device code, approved in the Nimbalyst console
@@ -128,15 +128,45 @@ nim pages comments --page <uri>                           # citable comments
 
 `nim --help` lists every verb: `list`, `read`, `edit`, `create`, `create-folder`, `move`, `rename`, `delete`, `set-type`, `members`, `types`, `define-type`, `items`, `item`, `create-item`, `update-item`, `comments`. Edits land directly, as an agent's do; each page's history is how a person reverts one.
 
-`repo` is `git remote get-url origin`. `.nimbalyst/wiki.json` holds an optional `{ orgId, projectId }` pin, sent as `project` to choose among projects you can already reach; it grants nothing. `--repo`, or `--org` with `--project`, targets something else and ignores the current directory's wiki.json. `nim pages pin` only accepts a project the repository actually resolves to (one of an ambiguous match, or its bound project), and only for the current checkout. Tokens live in `credentials.json` (mode 0600, directory 0700) under the user config dir, are written under a lock, and refresh on their own; `nim logout` revokes the session on the server before deleting them. `nim wiki <verb>` is the same command as `nim pages <verb>`.
+`repo` is `git remote get-url origin`. `.nimbalyst/wiki.json` holds an optional `{ orgId, projectId }` pin, sent as `project` to choose among projects you can already reach; it grants nothing. `--repo`, or `--org` with `--project`, targets something else and ignores the current directory's wiki.json. `nim pages pin` only accepts a project the repository actually resolves to (one of an ambiguous match, or its bound project), and only for the current checkout. Tokens live in `credentials.json` (mode 0600, directory 0700) under the user config dir, are written under a lock, and refresh on their own; `nim logout` revokes the session on the server before deleting them. `nim wiki <verb>` is the same command as `nim pages <verb>` except for the local wiki verbs.
 
 Env: `NIM_SERVER` (default `https://sync.nimbalyst.com`; `http://` only for localhost), `NIM_CONFIG_DIR` (credentials location), `NIM_GITHUB_NATIVE=on` (the earlier GitHub sign-in for `nim login`, off by default; `NIM_GITHUB_CLIENT_ID` configures its device flow).
+
+## Local wiki
+
+A local wiki is a folder of markdown pages (and CSV tables for table types) in the project, with no account or running app needed. The format is `@nimbalyst/local-wiki`'s `FORMAT.md`; the desktop app reads and writes the same files.
+
+```sh
+nim wiki init                                  # nimbalyst-local/wiki, a Home page, .gitignore entry
+nim wiki init --location docs/wiki             # a checked-in folder instead; .gitignore untouched
+nim wiki ls [--json]
+nim wiki read <id|path|title> [--json]         # --json includes the body version
+nim wiki write <id|path|title> [--file F] [--expected-version V] [--create [--parent P]]
+nim wiki move <page> [--parent P | --root | --before P | --after P] [--title T]
+nim wiki search <words> [--limit N] [--json]
+```
+
+- The folder is `--location`, else `location` in `.nimbalyst/local-wiki.json` (relative to the project root; `init` writes it), else `nimbalyst-local/wiki`. In a git worktree the project root is the main checkout, so worktrees share one wiki.
+- `init` adds `nimbalyst-local/` to `.gitignore` only when the wiki is under it and git does not already ignore it.
+- `write` reads the body from `--file` or stdin. With `--expected-version` (from `read --json`) it refuses to overwrite a page that changed since, with exit code `7` and nothing written.
+- `nim tracker list/get/show/create/update` use the local wiki for wiki types: a type whose `.nimbalyst/trackers/<type>.yaml` declares `storage: pages` or `storage: table` (list and create, from its first item), a type that already has typed pages in the wiki (list), or the id of a typed page or table row there (get, show, update). `--local` forces the wiki. New items of a type without `storage:` are refused in the wiki (its items live in the app database). Everything else goes to the app database as before.
+- `read`, `move` and `search` use the local wiki when the project has one; a `collab://` uri, a console link or `--repo/--org/--project` sends them to the team wiki, as does `nim pages`.
+
+## `nim mcp`
+
+`nim mcp` runs an MCP server on stdio for agents such as Claude Code: newline-delimited JSON-RPC (`initialize`, `tools/list`, `tools/call`, `ping`), with stdout reserved for protocol messages and all logging on stderr. It exits when stdin closes.
+
+```sh
+claude mcp add nimbalyst-local -- nim mcp
+```
+
+It serves the local wiki under the same tool names as the team wiki server: `listPages`, `searchPages`, `readCollabDoc`, `applyCollabDocEdit` (exact replacements, or `content` for the whole body, with an optional `expectedVersion`), `createSharedDoc`, `createSharedFolder`, `moveSharedItem`, `renameSharedItem`, `deleteSharedItem` (to the wiki's `.trash/`), `setPageType`, `setPageFields`, and `tracker_list_types`, `tracker_list`, `tracker_get`, `tracker_create`, `tracker_update` for types placed in the wiki. Pages are addressed as `local-wiki://<id>`, by id, or by path. The list does not change during a session: without a wiki each tool answers that `nim wiki init` creates one. Team data is never read or written here: a call with `section: 'team'`, a `collab://` uri, a console link or a team issue key is refused and names the tool to call on the `nimbalyst-pages` server instead. `--workspace` and `--location` choose the wiki as for `nim wiki`.
 
 ## Notes for maintainers
 
 - Pure tracker record, key, release, status, and readiness semantics come from `@nimbalyst/tracker-core`, the same built package consumed by the runtime. Direct mode injects materialized type models alongside the full item corpus.
 - `src/gateway/trackerWrite.ts` owns only host-specific offline write helpers (activity mutation, the stored comment shape, git-config identity, and local ID generation). `DirectGateway` deliberately mirrors the app handlers rather than using `recordToDbParams`, and the cross-host regression test requires their stored activity bytes to remain identical.
-- `better-sqlite3` is a native dependency and must match the version the app ships. Version 13 uses Node-API prebuilds shared by supported Node and Electron hosts; the CLI's Node 22 floor matches its upstream engine requirement.
+- `better-sqlite3` is an optional native dependency and must match the version the app ships. It is loaded only when a command opens the database (`src/db/nativeBinding.ts`); never import it at module top level, or every command fails on hosts where it did not install. Version 13 uses Node-API prebuilds shared by supported Node and Electron hosts; the CLI's Node 22 floor matches its upstream engine requirement.
 - `MAX_KNOWN_SCHEMA` in `src/gateway/schema.ts` pins the newest tracker schema
   this build was verified against; bump it as the app's schema advances.
 

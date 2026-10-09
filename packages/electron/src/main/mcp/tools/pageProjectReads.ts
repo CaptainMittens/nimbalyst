@@ -146,7 +146,7 @@ export async function routePageRead<T>(
   const { project, ...rest } = args ?? {};
   const named = isNamed(project);
   if (named && rest.section === "personal") {
-    return errorResult(`${tool}: \`project\` names a team project; Personal pages belong to this workspace only.`);
+    return errorResult(`${tool}: \`project\` names a team project; Local (personal) pages belong to this project only.`);
   }
   // Only a team listPages names its projects; anything else unnamed is a plain local read.
   if (!named && (tool !== "listPages" || rest.section === "personal")) return readLocal(rest);

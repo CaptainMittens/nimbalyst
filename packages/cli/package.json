@@ -37,17 +37,19 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "node scripts/build.mjs",
+    "build": "pnpm --filter @nimbalyst/local-wiki run build && node scripts/build.mjs",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "pnpm --filter @nimbalyst/local-wiki run build && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepublishOnly": "pnpm run build"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "better-sqlite3": "13.0.3"
   },
   "devDependencies": {
+    "@nimbalyst/collab-protocol": "workspace:*",
+    "@nimbalyst/local-wiki": "workspace:*",
     "@nimbalyst/tracker-core": "workspace:*",
     "@types/better-sqlite3": "^7.6.12",
     "@types/js-yaml": "^4.0.9",

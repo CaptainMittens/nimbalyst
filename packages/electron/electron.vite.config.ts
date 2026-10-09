@@ -121,6 +121,7 @@ const trackerSchemaSrcDir = resolve(__dirname, '../tracker-schema/src');
 const trackerEngineSrcDir = resolve(__dirname, '../tracker-engine/src');
 const trackerCoreSrcDir = resolve(__dirname, '../tracker-core/src');
 const collabProtocolSrcDir = resolve(__dirname, '../collab-protocol/src');
+const localWikiEntry = resolve(__dirname, '../local-wiki/src/index.ts');
 const runtimeSrcDir = resolve(__dirname, '../runtime/src');
 const configRequire = createRequire(resolve(__dirname, 'package.json'));
 
@@ -335,6 +336,8 @@ const config = {
         { find: '@nimbalyst/tracker-schema', replacement: trackerSchemaSrcDir },
         { find: '@nimbalyst/tracker-engine', replacement: trackerEngineSrcDir },
         { find: '@nimbalyst/collab-protocol', replacement: collabProtocolSrcDir },
+        // The Local wiki library, from source like the other workspace packages.
+        { find: /^@nimbalyst\/local-wiki$/, replacement: localWikiEntry },
         // The public SDK barrel includes renderer hooks which import the public
         // runtime barrel. Main only needs validation and protocol helpers.
         { find: /^@nimbalyst\/extension-sdk$/, replacement: extensionSdkElectronMainEntry },

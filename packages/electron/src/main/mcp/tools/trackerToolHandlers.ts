@@ -21,6 +21,7 @@ import { pinCitedRevisions } from '../../services/tracker/citationPins';
 import { appendActivity } from '../../services/tracker/trackerActivity';
 import { pushSharedTrackerItem, sharedTrackerItemTooLarge, trackerItemTooLargeForRoom } from '../../services/tracker/trackerItemShareGate';
 import { assignLocalKeysToRows } from '../../services/tracker/localKeyAllocator';
+import { typeHasLocalNumbers } from '../../services/tracker/localNumberTypes';
 import { workspaceLocalKeyStore } from '../../services/tracker/workspaceLocalKeyStore';
 import { extractItemCustomFields } from '../../services/tracker/trackerRowCustomFields';
 import { nestRelationshipFieldsIntoCustomFields, readStoredFieldValue, writeStoredFieldValue } from '../../services/tracker/relationshipFieldStorage';
@@ -2083,7 +2084,7 @@ export async function handleTrackerCreate(
     // its key in this tool's own result rather than only after the next list
     // sweep. Failure is not fatal -- an unnumbered item still works, and the
     // list will pick it up.
-    if (workspacePath) {
+    if (workspacePath && typeHasLocalNumbers(args.type)) {
       try {
         await assignLocalKeysToRows(db, workspaceLocalKeyStore, workspacePath, [id]);
       } catch (error) {

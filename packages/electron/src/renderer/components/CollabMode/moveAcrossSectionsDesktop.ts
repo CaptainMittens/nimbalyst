@@ -22,6 +22,9 @@ import { requestConfirmation } from '../../dialogs/requestConfirmation';
 import { getElectronCollabDocsSession, getElectronCollabHost, getPersonalCollabDocsSession, getPersonalCollabHost } from '../../store/atoms/collabDocuments';
 import type { useTabsActions } from '../../contexts/TabsContext';
 import { flushPageEditor, pageUnchangedSince, readPageMarkdown, type SetPageTypeContext } from './useSetPageType';
+import { readLocalPageBody } from '../../services/personalAgentEdit';
+import { isLocalWikiPage } from '../../services/localWikiSetType';
+import { flushLocalWikiPageEditor } from '../../services/localWikiPageFlush';
 
 export interface MoveAcrossSectionsRequest {
   from: PageTypeLane;
@@ -36,6 +39,11 @@ const sectionName = (lane: PageTypeLane) => (lane === 'team' ? 'Team' : 'Persona
 
 function countPages(node: MovePageNode): number {
   return 1 + node.children.reduce((total, child) => total + countPages(child), 0);
+}
+
+function* pagesOf(node: MovePageNode): Generator<MovePageNode> {
+  yield node;
+  for (const child of node.children) yield* pagesOf(child);
 }
 
 function hasFields(node: MovePageNode): boolean {
@@ -73,6 +81,18 @@ export async function movePageAcrossSections(request: MoveAcrossSectionsRequest)
   });
   if (!accepted) return null;
 
+  // An open Local page's unsaved edits go to its file before the file is copied.
+  if (from === 'personal') {
+    for (const node of pagesOf(tree.root)) {
+      if (!isLocalWikiPage(workspacePath, node.documentId)) continue;
+      try {
+        await flushLocalWikiPageEditor(workspacePath, node.documentId, node.title);
+      } catch (error) {
+        return { ok: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  }
+
   const deps: MoveAcrossSectionsDependencies = {
     readTree: () => tree,
     readSource: async (id) => {
@@ -97,8 +117,7 @@ export async function movePageAcrossSections(request: MoveAcrossSectionsRequest)
     },
     readDestination: async (id) => {
       if (to === 'team') return readHeadlessCollabDocContent(buildCollabUri(teamScope.orgId, id), workspacePath);
-      const body = (await window.electronAPI.invoke('personal-pages:get-body', workspacePath, id)) as { content: string } | null;
-      return body?.content ?? '';
+      return (await readLocalPageBody(workspacePath, id)).markdown;
     },
     trashDestination: async (id) => {
       await destination.removePage(id);

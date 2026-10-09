@@ -313,6 +313,19 @@ export interface TrackerDataModel {
    * Read-only is the only behavioral consequence.
    */
   archived?: boolean;
+  /**
+   * Give items of this type machine-private local numbers (`NIM.75`). Off
+   * unless the type opts in. Team issue keys (`NIM-123`) are unaffected, and a
+   * number already issued stays readable and resolvable after opting out.
+   */
+  localNumbers?: boolean;
+  /**
+   * Where the type's items live in a Local wiki (`@nimbalyst/local-wiki`
+   * FORMAT.md): one markdown page per item, or one CSV for the type. Only a
+   * type that declares it is a wiki type; without it the items stay in the app
+   * database. Kept as written so the `nim` CLI and the app agree.
+   */
+  storage?: 'pages' | 'table';
   /** If false, items of this type cannot be created via tracker_create. Defaults to true. */
   creatable?: boolean;
   /**

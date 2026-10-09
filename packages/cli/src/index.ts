@@ -15,12 +15,20 @@ import { runSession, runDoc } from './commands/sessionDoc.js';
 import { runRelease } from './commands/release.js';
 import { runLogin, runLogout, runWhoami } from './commands/login.js';
 import { runPages } from './commands/pages.js';
+import { runMcp } from './commands/mcp.js';
+import { isLocalWikiCall, runLocalWiki } from './commands/wikiLocal.js';
+import { runWikiServe } from './serve/runWikiServe.js';
 
-export const VERSION = '0.1.0';
+/**
+ * Set from package.json by the build (scripts/build.mjs) and the cli test
+ * config, so it cannot drift. The repo-root test run has no such define.
+ */
+declare const __NIM_VERSION__: string;
+export const VERSION: string = typeof __NIM_VERSION__ === 'string' ? __NIM_VERSION__ : '0.0.0-dev';
 
 const PAGES_HELP = `Team wiki (Nimbalyst Teams sign-in; server = NIM_SERVER, default https://sync.nimbalyst.com):
   nim login / nim logout / nim whoami
-  nim wiki ...                               (same as nim pages ...)
+  nim wiki ...                               (same as nim pages ..., except the local wiki verbs below)
   nim pages status                           (unbound, bound, or ambiguous, with your teams)
   nim pages bind --org <id> --project <id>   (team admins: connect this repo's remote)
   nim pages create-project --org <id> --name <n> [--bind]   (team admins)
@@ -64,6 +72,7 @@ Nouns:
   doc         workspace documents (read-only in v1)
   workspace   list / show workspaces
   status      what nim is connected to (live or direct), schema, workspaces
+  mcp         MCP server on stdio for agents: local wiki pages and typed pages (stdout is protocol only)
 
 Tracker (read):
   nim tracker ready  [--type T] [--limit N | --all] [--json|--csv|-q]
@@ -99,6 +108,20 @@ Release (live mode for writes):
   nim release notes [<id|KEY>] [--json]    (markdown from the release's members)
 
 ${PAGES_HELP}
+Local wiki (a folder of markdown pages in this project; no account needed):
+  nim wiki init [--location <path>]          (default nimbalyst-local/wiki; saved in .nimbalyst/local-wiki.json)
+  nim wiki ls [--json]                       (the page tree)
+  nim wiki read <id|path|title> [--json]     (--json includes the version for write)
+  nim wiki write <id|path|title> [--file F] [--expected-version V] [--create [--parent P]]
+                                             (body from --file or stdin; exit 7 if the page changed since V)
+  nim wiki move <page> [--parent P | --root | --before P | --after P] [--title T]
+  nim wiki search <words> [--limit N] [--json]
+  nim wiki serve [--port N] [--open]         (browse and edit the wiki in a browser; loopback only)
+  nim tracker list/get/show/create/update   use the local wiki for wiki types (storage: pages|table
+                                             in the type's YAML) and items already there; --local forces it
+  read, move and search use the local wiki when the project has one; give a collab:// uri
+  or --repo/--org/--project (or use nim pages) for the team wiki. --location overrides the folder.
+
 Cross-cutting flags:
   --workspace <path>   target workspace (default: resolve from cwd)
   --db <file>          direct mode against an explicit SQLite file
@@ -108,7 +131,7 @@ Cross-cutting flags:
   --quiet, -q          ids only
   --no-color           disable ANSI color (also honors NO_COLOR)
 
-Exit codes: 0 ok · 1 not found · 2 usage · 3 connection · 4 schema · 5 write-not-permitted
+Exit codes: 0 ok · 1 not found · 2 usage · 3 connection · 4 schema · 5 write-not-permitted · 7 conflict
 `;
 
 export async function main(argv: string[]): Promise<number> {
@@ -151,9 +174,13 @@ export async function main(argv: string[]): Promise<number> {
         return await runLogout(args);
       case 'whoami':
         return await runWhoami(args);
-      case 'pages':
       case 'wiki':
+        if (args.verb === 'serve') return await runWikiServe(args, { version: VERSION });
+        return isLocalWikiCall(args) ? await runLocalWiki(args) : await runPages(args);
+      case 'pages':
         return await runPages(args);
+      case 'mcp':
+        return await runMcp(VERSION, args);
       default:
         process.stderr.write(`nim: unknown command '${args.noun}'. Run 'nim --help'.\n`);
         return ExitCode.USAGE;

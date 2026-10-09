@@ -44,6 +44,32 @@ export function selectWorkspaces(dirs, script, readManifest) {
   });
 }
 
+/**
+ * Workspaces whose script rewrites files other workspaces read. collab-bundle's
+ * typecheck rebuilds `types/` (deleting it first), so a consumer such as
+ * wiki-web type-checked in parallel reads a half-written tree and fails.
+ */
+export const OUTPUT_PRODUCERS = new Set(['packages/collab-bundle']);
+
+/**
+ * For each target, the producer targets it must wait for: producers it lists
+ * in dependencies or devDependencies. Also returns the targets reordered so
+ * producers start first, which keeps a full pool of waiters from deadlocking.
+ */
+export function orderForProducers(targets, readManifest, producers = OUTPUT_PRODUCERS) {
+  const nameOf = new Map();
+  for (const dir of targets) if (producers.has(dir)) nameOf.set(readManifest(dir)?.name, dir);
+  const waitsFor = new Map();
+  for (const dir of targets) {
+    const manifest = readManifest(dir) ?? {};
+    const deps = { ...manifest.dependencies, ...manifest.devDependencies };
+    const wait = Object.keys(deps).map(name => nameOf.get(name)).filter(p => p && p !== dir);
+    if (wait.length > 0) waitsFor.set(dir, wait);
+  }
+  const ordered = [...targets.filter(dir => producers.has(dir)), ...targets.filter(dir => !producers.has(dir))];
+  return { ordered, waitsFor };
+}
+
 /** Bounded worker pool. Resolves to every task's result, in input order. */
 export async function runPool(items, limit, run) {
   const results = new Array(items.length);
@@ -111,8 +137,16 @@ async function main() {
   console.log(`Running "${script}" in ${targets.length} workspaces, ${jobs} at a time`);
 
   const started = Date.now();
-  const results = await runPool(targets, jobs, async dir => {
+  const { ordered, waitsFor } = orderForProducers(targets, readManifest);
+  const finished = new Map(ordered.map(dir => {
+    let done;
+    const promise = new Promise(resolve => { done = resolve; });
+    return [dir, { promise, done }];
+  }));
+  const results = await runPool(ordered, jobs, async dir => {
+    await Promise.all((waitsFor.get(dir) ?? []).map(producer => finished.get(producer).promise));
     const result = await runScriptIn(dir, script, rootDir);
+    finished.get(dir).done();
     console.log(`${result.code === 0 ? 'ok  ' : 'FAIL'} ${dir}`);
     return result;
   });

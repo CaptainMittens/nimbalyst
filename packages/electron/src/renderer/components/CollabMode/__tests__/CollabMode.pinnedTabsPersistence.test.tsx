@@ -32,6 +32,8 @@ const PERSONAL_SCOPE: CollabScope = {
   indexConfig: { serverUrl: '', teamMemberId: asTeamMemberId('local'), teamProjectId: null },
 };
 
+// No item here is a Local wiki file.
+vi.mock('../../../services/localWikiTrackerRecords', () => ({ localWikiFilePathForItem: () => null }));
 vi.mock('@nimbalyst/runtime/store', () => ({
   store: { get: vi.fn(() => []), set: vi.fn() },
 }));
@@ -70,6 +72,7 @@ vi.mock('../../../store/atoms/collabDocuments', async () => {
         hostMocks.personalAdapter = adapter;
         return () => undefined;
       }),
+      source: () => ({ filePathsById: () => new Map(), documentIdForFile: () => null }),
     }),
     getPersonalCollabDocsSession: () => personalSession,
     getElectronCollabDocsSession: () => teamSession,
@@ -115,7 +118,7 @@ vi.mock('../../../stores/editorContextStore', () => ({
 
 vi.mock('@nimbalyst/collab-client/docs-ui', () => ({
   CollabSidebar: ({ sectionTitle }: { sectionTitle?: string }) => (
-    <div data-testid={sectionTitle === 'Personal' ? 'collab-sidebar-personal' : 'collab-sidebar'} />
+    <div data-testid={sectionTitle === 'Local' ? 'collab-sidebar-personal' : 'collab-sidebar'} />
   ),
   PagesSectionEntries: () => null,
 }));

@@ -26,6 +26,7 @@ import { destroyProviderForArchivedSession } from '../services/ai/archiveSession
 import { resolveSessionModelSelection } from '../services/ai/sessionModelSelection';
 import { inheritedOwnership, stripOwnerControlledMetadata } from '../services/extensionSessions/sessionOwnership';
 import { readSessionSubtree } from '../services/sessionHierarchy';
+import { isLocalWikiItemId } from '../services/localWiki/localWikiItemIds';
 
 // Initialize session manager
 const sessionManager = new SessionManager();
@@ -1117,6 +1118,10 @@ export async function registerSessionHandlers() {
     // Link a tracker item or file to a session
     // trackerId can be a DB tracker item ID or "file:path/to/file.md" for file-based items
     safeHandle('tracker:link-session', async (_event, payload: { trackerId: string; sessionId: string }) => {
+        // A Local wiki item is a file in the wiki folder, not a tracker row.
+        if (isLocalWikiItemId(payload?.trackerId)) {
+            return { success: false, error: 'Local wiki pages cannot be linked to sessions yet' };
+        }
         try {
             if (payload.trackerId.startsWith('file:')) {
                 // File-based link: only write to session metadata (no tracker_items row to update)

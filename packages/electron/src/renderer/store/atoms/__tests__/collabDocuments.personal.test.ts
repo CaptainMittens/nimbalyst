@@ -20,7 +20,8 @@ let invoke: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   invoke = vi.fn(async (channel: string) => {
-    if (channel === 'personal-pages:snapshot') return { items: [page], containers: [] };
+    if (channel === 'local-wiki:snapshot') return { items: [page], containers: [], pages: [] };
+    if (channel === 'local-wiki:legacy-snapshot') return { items: [] };
     if (channel === 'workspace:get-state') return {};
     return { ok: true };
   });
@@ -47,7 +48,7 @@ describe('Personal pages state', () => {
     invalidateElectronCollabScopes();
 
     expect(teamScopeChanges).toHaveBeenCalledWith(null);
-    expect(invoke).not.toHaveBeenCalledWith('personal-pages:snapshot', WORKSPACE);
+    expect(invoke).not.toHaveBeenCalledWith('local-wiki:snapshot', WORKSPACE);
     expect(store.get(documents).map((document) => document.documentId)).toEqual(['p1']);
     expect(store.get(getPersonalCollabDocsSession(WORKSPACE).atoms.syncStatus)).toBe('connected');
   });

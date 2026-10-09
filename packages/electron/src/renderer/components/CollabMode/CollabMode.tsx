@@ -43,6 +43,7 @@ import { composePagesCreateMenu } from './pagesCreateMenu';
 import { PagesTabHistoryButtons, usePagesTabNavigation } from './usePagesTabNavigation';
 import { PagesSwipeNavigation } from './PagesSwipeNavigation';
 import { useCollabTabPersistence } from './useCollabTabPersistence';
+import { useLocalWikiFileTabs } from './useLocalWikiFileTabs';
 import { usePublishPagesTabStrip } from '../../services/pageTreeTools/pagesTabStrip';
 import { PagesSidebarSections, useSectionHomeId } from './PagesSidebarSections';
 import { pageHeaderRequestPendingAtom } from './pageTypeRequest';
@@ -589,10 +590,10 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
     if (document) void handleDocumentSelect(document, undefined, source, options);
   }) : undefined, [teamScope, linkableDocuments, handleDocumentSelect, addTabFor]);
 
-  // Personal pages open as `personal://` tabs; their items and types open as
-  // pages, the same as the team's.
+  // Local pages open as their markdown files, database pages not exported yet
+  // as `personal://` tabs; items and types open as pages, the same as the team's.
   useEffect(() => getPersonalCollabHost(workspacePath).setOpenArtifactAdapter((target, _source, options) => {
-    if (target.kind === 'personal-page') {
+    if (target.kind === 'personal-page' || target.kind === 'local-file') {
       addTabFor(options)(target.path, '', true, target.title);
       return;
     }
@@ -614,6 +615,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
       if (title && tab.fileName !== title) tabsActions.updateTab(tab.id, { fileName: title });
     }
   }, [personalDocuments, tabs, tabsActions]);
+  useLocalWikiFileTabs(workspacePath, personalDocuments, tabs, tabsActions);
 
   // Relationship clicks on an item page, and row clicks on a type page.
   const handleOpenTrackerPage = useCallback((trackerItemId: string, options?: CollabOpenOptions) => {
@@ -631,7 +633,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
   }, [activeTabPath]);
   const activePersonalDocumentId = activeTabPath && isPersonalPageTabPath(activeTabPath)
     ? activeTabPath.slice(PERSONAL_PAGE_TAB_PREFIX.length)
-    : null;
+    : activeTabPath ? getPersonalCollabHost(workspacePath).source().documentIdForFile(activeTabPath) : null;
   const activeRow = useMemo(() => activePageRow(activeTabPath), [activeTabPath]);
 
   useEffect(() => {

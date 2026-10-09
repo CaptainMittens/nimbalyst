@@ -69,6 +69,7 @@
     "@nimbalyst/extension-calc-sheets": "workspace:*",
     "@nimbalyst/extension-csv-spreadsheet": "workspace:*",
     "@nimbalyst/extension-datamodellm": "workspace:*",
+    "@nimbalyst/local-wiki": "workspace:*",
     "@nimbalyst/mockuplm": "workspace:*",
     "@nimbalyst/runtime": "workspace:*",
     "@nimbalyst/tracker-engine": "workspace:*",

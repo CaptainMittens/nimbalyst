@@ -17,6 +17,9 @@ import type { CollabScope } from '@nimbalyst/collab-client/core';
 import type { CollabDocsSession, SharedDocument } from '@nimbalyst/collab-client/docs';
 import { PERSONAL_PAGE_TAB_PREFIX, useTabsActions, type TabData } from '../../contexts/TabsContext';
 import { readHeadlessCollabDocContent } from '../../services/HeadlessCollabDocument';
+import { readLocalPageBody } from '../../services/personalAgentEdit';
+import { isLocalWikiPage, setLocalWikiPageType } from '../../services/localWikiSetType';
+import { flushLocalWikiPageEditor } from '../../services/localWikiPageFlush';
 import {
   buildDocumentReplicaCacheKey,
   getDocumentReplicaCache,
@@ -82,6 +85,11 @@ const OPEN_EDITOR_FLUSH_TIMEOUT_MS = 8_000;
  */
 export async function flushPageEditor(context: SetPageTypeContext, pageId: string): Promise<void> {
   if (context.lane === 'personal') {
+    if (isLocalWikiPage(context.workspacePath, pageId)) {
+      const page = store.get(context.session.atoms.allSharedDocuments).find((doc) => doc.documentId === pageId);
+      await flushLocalWikiPageEditor(context.workspacePath, pageId, page?.title.trim() || 'Untitled');
+      return;
+    }
     await flushPersonalPageBody(context.workspacePath, pageId);
     return;
   }
@@ -111,9 +119,7 @@ export async function flushPageEditor(context: SetPageTypeContext, pageId: strin
 
 export async function readPageMarkdown(context: SetPageTypeContext, pageId: string): Promise<PageCopy> {
   if (context.lane === 'personal') {
-    const body = (await window.electronAPI.invoke('personal-pages:get-body', context.workspacePath, pageId)) as
-      { content: string; version: number } | null;
-    return { markdown: body?.content ?? '', version: body?.version };
+    return readLocalPageBody(context.workspacePath, pageId);
   }
   if (!context.teamScope) throw new Error('This project is not connected to its team.');
   return {
@@ -226,6 +232,17 @@ export function useSetPageType(workspacePath: string, teamScope: CollabScope | n
   ): Promise<boolean> => {
     setRunning(true);
     try {
+      if (lane === 'personal' && isLocalWikiPage(workspacePath, page.documentId)) {
+        try {
+          // Unsaved edits first: the editor's next save would otherwise drop the new `type:`.
+          await flushLocalWikiPageEditor(workspacePath, page.documentId, page.title.trim() || 'Untitled');
+          await setLocalWikiPageType(workspacePath, page.documentId, typeId);
+          return true;
+        } catch (error) {
+          errorNotificationService.showWarning('Cannot set the type', error instanceof Error ? error.message : String(error), { allowDuplicate: true });
+          return false;
+        }
+      }
       const title = page.title.trim() || 'Untitled';
       const outcome = await setPageType(
         {

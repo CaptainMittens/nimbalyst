@@ -154,6 +154,8 @@ import { initWorkspaceActivationListeners } from './store/listeners/workspaceAct
 import { initWindowFullScreenListener } from './store/listeners/windowFullScreenListeners';
 import { initThemeFallbackListener } from './store/listeners/themeFallbackListeners';
 import { initTrackerSyncListeners } from './store/listeners/trackerSyncListeners';
+import { installLocalWikiTrackerWriter } from './services/localWikiTrackerWrites';
+import { createTrackerItem } from './services/localWikiTrackerRecords';
 import { initPullRequestListeners } from './store/listeners/pullRequestListeners';
 import { initGithubIssueListeners } from './store/listeners/githubIssueListeners';
 import { initReadReceiptListeners } from './store/listeners/readReceiptListeners';
@@ -429,6 +431,7 @@ export default function App() {
     const cleanupTheme = initThemeListener();
     const cleanupThemeFallback = initThemeFallbackListener();
     const cleanupTrackerSync = initTrackerSyncListeners();
+    const cleanupLocalWikiTrackerWriter = installLocalWikiTrackerWriter();
     const cleanupWorktree = initWorktreeListeners();
     const cleanupPullRequest = initPullRequestListeners();
     const cleanupGithubIssue = initGithubIssueListeners();
@@ -478,6 +481,7 @@ export default function App() {
       cleanupTheme?.();
       cleanupThemeFallback?.();
       cleanupTrackerSync?.();
+      cleanupLocalWikiTrackerWriter();
       cleanupWorktree?.();
       cleanupPullRequest?.();
       cleanupGithubIssue?.();
@@ -2222,7 +2226,8 @@ export default function App() {
       try {
         const prefix = (item.type || 'itm').substring(0, 3);
         const id = `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).substring(2, 8)}`;
-        const result = await window.electronAPI.documentService.createTrackerItem({
+        // A wiki type's item is a file in the Local wiki; any other stays in the app database.
+        const result = await createTrackerItem({
           id,
           type: item.type,
           title: item.title || `New ${item.type}`,

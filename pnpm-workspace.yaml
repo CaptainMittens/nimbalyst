@@ -13,6 +13,8 @@ packages:
   - packages/collab-bundle
   - packages/collab-adapters
   - packages/markdown-ydoc
+  - packages/local-wiki
+  - packages/wiki-web
   - packages/ios
   - packages/android
   - packages/extension-sdk
