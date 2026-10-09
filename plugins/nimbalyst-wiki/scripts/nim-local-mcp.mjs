@@ -7214,7 +7214,7 @@ async function runMcp(version, args) {
 
 // packages/cli/src/mcp/pluginEntry.ts
 var workspace = process.env.CLAUDE_PROJECT_DIR || process.cwd();
-runMcp("0.1.0", { noun: "mcp", positionals: [], flags: { workspace } }).catch((err) => {
+runMcp("0.2.0", { noun: "mcp", positionals: [], flags: { workspace } }).catch((err) => {
   process.stderr.write(`nimbalyst-local: ${err.stack ?? err}
 `);
   process.exit(1);
