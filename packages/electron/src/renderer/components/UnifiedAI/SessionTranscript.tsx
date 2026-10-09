@@ -107,6 +107,7 @@ import {
 import { streamCompletionSignalAtom } from '../../store/atoms/sessionTranscript';
 import { sessionBackgroundTasksAtom } from '../../store/atoms/sessionBackgroundTasks';
 import { sessionPromptAdditionsAtom, sessionLastSubmitAtAtom, sessionDraftLocalModifiedAtAtom, nextOptimisticId } from '../../store/atoms/sessions';
+import { sessionViewRetention } from '../../store/sessionViewRetention';
 import { clearAIInputHistoryAtom } from '../../store/atoms/aiInputUndo';
 import {
   cliTerminalExpandedAtom,
@@ -771,6 +772,9 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
   // ============================================================
   // Load session data on mount
   // ============================================================
+  // Keep this session's messages resident while it is shown.
+  useEffect(() => (sessionId ? sessionViewRetention.acquire(sessionId) : undefined), [sessionId]);
+
   useEffect(() => {
     if (!sessionId || !workspacePath) return;
     if (!hasSessionData) {
@@ -1465,7 +1469,14 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
     return !!registration?.supportsTranscriptEmbed;
   }, []);
 
+  // Read through a ref so handleCompact keeps its identity across message
+  // updates; it is threaded down to every transcript row, and a new identity
+  // per streamed frame would defeat the row memoization.
+  const compactStateRef = useRef({ sessionData, messages });
+  compactStateRef.current = { sessionData, messages };
+
   const handleCompact = useCallback(async () => {
+    const { sessionData, messages } = compactStateRef.current;
     if (!sessionData) return;
 
     // Phase 4: the provider's declared capability chooses the mechanism. This
@@ -1513,7 +1524,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
     } catch (error) {
       console.error('[SessionTranscript] Failed to send /compact command:', error);
     }
-  }, [sessionId, sessionData, messages, getEffectiveDocumentContext, aiMode, workspacePath, updateSessionStore, compactionSupport]);
+  }, [sessionId, getEffectiveDocumentContext, aiMode, workspacePath, updateSessionStore, compactionSupport]);
 
   const handleTodoClick = useCallback((todo: TodoItem) => {
     onTodoClick?.(todo);

@@ -480,24 +480,27 @@ describe('TranscriptStreamAccumulator', () => {
     });
   });
 
-  describe('in-place patch fast path', () => {
-    it('reuses the same view message object across pure-text updates within a frame', () => {
+  describe('text patch fast path', () => {
+    it('publishes a new object for the patched message only, so memoized rows see the text', () => {
       const h = createHarness();
+      h.acc.apply(makeUserEvent(9, 'prompt'));
       const seed = makeAssistantEvent(10, 'a');
       h.acc.apply(seed);
       h.tickFrame();
-      const firstMessage = h.lastEmit?.messages.find((m) => m.id === 10);
+      const firstArray = h.lastEmit!.messages;
+      const [firstUser, firstMessage] = firstArray;
       expect(firstMessage?.text).toBe('a');
 
-      // Ten incremental text updates. After the next flush, the view
-      // message identity should be preserved (in-place patch path).
       for (let i = 0; i < 10; i++) {
         h.acc.apply({ ...seed, searchableText: 'a'.repeat(i + 2) });
       }
       h.tickFrame();
-      const patchedMessage = h.lastEmit?.messages.find((m) => m.id === 10);
-      expect(patchedMessage?.text).toBe('a'.repeat(11));
-      expect(patchedMessage).toBe(firstMessage);
+      const [user, patchedMessage] = h.lastEmit!.messages;
+      expect(patchedMessage.text).toBe('a'.repeat(11));
+      expect(patchedMessage).not.toBe(firstMessage);
+      expect(firstMessage.text).toBe('a');
+      expect(h.lastEmit!.messages).not.toBe(firstArray);
+      expect(user).toBe(firstUser);
     });
   });
 

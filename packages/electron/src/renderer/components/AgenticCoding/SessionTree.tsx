@@ -158,8 +158,12 @@ export function SessionTreeRow(props: SessionTreeRowHandlers & VisibleSessionTre
   );
   const expanded = status.expanded;
   const indent = treeIndent(node.depth - baseDepth);
+  const hasChildren = node.children.length > 0;
+  const hiddenCount = node.ids.length - 1;
+  // SessionListItem's memo compares these by reference; build them only when
+  // their inputs change so an unrelated list render does not repaint every row.
   // Inline on the metadata line; a separate row per parent cost a line of height each.
-  const details = node.children.length > 0 && (
+  const details = useMemo(() => hasChildren && (
     <span className="session-tree-rollup inline-flex shrink-0 gap-1.5 whitespace-nowrap text-[10px] text-[var(--nim-text-muted)]">
       {status.running > 0 && <span className="text-[var(--nim-primary)]">{status.running} running</span>}
       {status.unread > 0 && <span>{status.unread} unread</span>}
@@ -167,9 +171,26 @@ export function SessionTreeRow(props: SessionTreeRowHandlers & VisibleSessionTre
       {node.uncommittedCount > 0 && (
         <span className="text-[var(--nim-warning)]">{node.uncommittedCount} uncommitted</span>
       )}
-      {!expanded && <span>{node.ids.length - 1} sessions</span>}
+      {!expanded && <span>{hiddenCount} sessions</span>}
     </span>
-  );
+  ), [hasChildren, status.running, status.unread, status.review, node.uncommittedCount, expanded, hiddenCount]);
+  const leading = useMemo(() => (
+    hasChildren ? (
+      <button
+        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${row.title}`}
+        aria-expanded={expanded}
+        className={`session-tree-chevron shrink-0 flex items-center p-0 leading-none ${compact ? "" : "mt-1"}`}
+        onClick={(e) => {
+          e.stopPropagation();
+          setState({ treeExpanded: !expanded });
+        }}
+      >
+        <MaterialSymbol icon={expanded ? 'expand_more' : 'chevron_right'} size={14} />
+      </button>
+    ) : (
+      <span className="w-3.5 shrink-0" />
+    )
+  ), [hasChildren, expanded, row.title, compact, setState]);
   return (
     <div
       className="session-tree-row"
@@ -188,24 +209,8 @@ export function SessionTreeRow(props: SessionTreeRowHandlers & VisibleSessionTre
         isActive={row.id === activeSessionId}
         treeContext
         projectPath={props.projectPath || row.workspaceId}
-        isWorkstream={node.children.length > 0}
-        treeLeading={
-          node.children.length > 0 ? (
-            <button
-              aria-label={`${expanded ? 'Collapse' : 'Expand'} ${row.title}`}
-              aria-expanded={expanded}
-              className={`session-tree-chevron shrink-0 flex items-center p-0 leading-none ${compact ? "" : "mt-1"}`}
-              onClick={(e) => {
-                e.stopPropagation();
-                setState({ treeExpanded: !expanded });
-              }}
-            >
-              <MaterialSymbol icon={expanded ? 'expand_more' : 'chevron_right'} size={14} />
-            </button>
-          ) : (
-            <span className="w-3.5 shrink-0" />
-          )
-        }
+        isWorkstream={hasChildren}
+        treeLeading={leading}
         treeDetails={details}
         compact={compact}
         uncommittedCount={node.children.length ? undefined : row.uncommittedCount}

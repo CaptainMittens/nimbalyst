@@ -16,7 +16,7 @@ import {selectedMachineAtom, machineSessionSelectionsAtom} from './remoteMachine
  * 4. Use addSessionAtom/removeSessionAtom for optimistic updates
  */
 
-import { atom, type Getter } from 'jotai';
+import { atom, type Getter, type Setter } from 'jotai';
 import { atomFamily } from '../debug/atomFamilyRegistry';
 import { store } from '@nimbalyst/runtime/store';
 import { ModelIdentifier, type ChatAttachment, type SessionData } from '@nimbalyst/runtime/ai/server/types';
@@ -950,8 +950,13 @@ export const sessionTokenUsageAtom = atomFamily((sessionId: string) =>
 );
 
 export const sessionLoadedAtom = atomFamily((sessionId: string) =>
-  atom((get) => get(sessionStoreAtom(sessionId)) !== null)
+  atom((get) => isSessionDataResident(get(sessionStoreAtom(sessionId))))
 );
+
+/** Messages are in memory: the store is loaded and has not been evicted. */
+export function isSessionDataResident(data: SessionData | null): boolean {
+  return data !== null && !data.messagesEvicted;
+}
 
 export const sessionUpdatedAtAtom = atomFamily((sessionId: string) =>
   atom((get) => get(sessionStoreAtom(sessionId))?.updatedAt ?? null)
@@ -1736,22 +1741,39 @@ function canReleaseSessionData(get: Getter, sessionId: string): boolean {
   return !get(sessionProcessingAtom(sessionId)) && !get(sessionHasPendingInteractivePromptAtom(sessionId));
 }
 
+function releaseSessionData(get: Getter, set: Setter, sessionId: string, next: SessionData | null): void {
+  set(sessionStoreAtom(sessionId), next);
+  for (const release of get(sessionDataReleaseListenersAtom)) release(sessionId);
+  // Unmounted derived atoms can otherwise keep their last large value cached.
+  for (const family of [sessionMessagesAtom, sessionCurrentTeammatesAtom, sessionCurrentTodosAtom, sessionDocumentContextAtom]) {
+    for (const id of family.getParams()) {
+      if (id === sessionId) { get<unknown>(family(sessionId)); break; }
+    }
+  }
+}
+
 /** Drop full history only. Drafts and atom identities survive close/reopen. */
 export const pruneClosedSessionDataAtom = atom(null, (get, set) => {
   const closed = get(closedSessionWorkspacesAtom);
   if (closed.size === 0) return;
-  const derivedCaches = [sessionMessagesAtom, sessionCurrentTeammatesAtom, sessionCurrentTodosAtom, sessionDocumentContextAtom]
-    .map(family => ({ family, ids: new Set(family.getParams()) }));
   for (const sessionId of sessionStoreAtom.getParams()) {
     const data = get(sessionStoreAtom(sessionId));
     if (!data?.workspacePath || !closed.has(data.workspacePath) || !canReleaseSessionData(get, sessionId)) continue;
-    set(sessionStoreAtom(sessionId), null);
-    for (const release of get(sessionDataReleaseListenersAtom)) release(sessionId);
-    // Unmounted derived atoms can otherwise keep their last large value cached.
-    for (const { family, ids } of derivedCaches) {
-      if (ids.has(sessionId)) get<unknown>(family(sessionId));
-    }
+    releaseSessionData(get, set, sessionId, null);
   }
+});
+
+/**
+ * Drop a session's messages but keep its metadata (title, archived, worktree,
+ * token usage), which the workstream tabs and panels read without a viewer.
+ * Returns false when the session is busy and must stay resident.
+ */
+export const evictSessionMessagesAtom = atom(null, (get, set, sessionId: string): boolean => {
+  if (!canReleaseSessionData(get, sessionId)) return false;
+  const data = get(sessionStoreAtom(sessionId));
+  if (!isSessionDataResident(data) || isSessionLoadInFlight(sessionId)) return true;
+  releaseSessionData(get, set, sessionId, { ...data!, messages: [], messagesEvicted: true });
+  return true;
 });
 
 export const setSessionWorkspaceOpenAtom = atom(
@@ -1986,6 +2008,10 @@ export const reloadSessionDataAtom = atom(
     }
 
     if (get(closedSessionWorkspacesAtom).has(workspacePath) && canReleaseSessionData(get, sessionId)) return;
+    // Background triggers (message-logged, completion) refresh a session this
+    // window holds; they must not load the full history of one nobody is
+    // viewing. A viewer mounting calls loadSessionDataAtom instead.
+    if (!isSessionDataResident(get(sessionStoreAtom(sessionId))) && !isSessionLoadInFlight(sessionId)) return;
 
     // Create a new version for this reload request
     const existingPending = pendingReloads.get(sessionId);

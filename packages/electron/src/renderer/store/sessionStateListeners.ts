@@ -41,6 +41,7 @@ import {
   sessionChildrenAtom,
   sessionStoreAtom,
   isSessionLoadInFlight,
+  isSessionDataResident,
   sessionDraftInputAtom,
   sessionLastSubmitAtAtom,
   sessionDraftLocalModifiedAtAtom,
@@ -58,6 +59,7 @@ import {
 } from './atoms/sessionActivity';
 import type { TranscriptEvent } from '@nimbalyst/runtime/ai/server/transcript/types';
 import { TranscriptStreamAccumulator } from './transcriptStreamAccumulator';
+import { sessionViewRetention } from './sessionViewRetention';
 import { resolveOwnedWorkspacePath } from '../../shared/sessionWorkspaceRouting';
 import type { SessionNotificationNavigationTarget } from '../../shared/sessionNotificationNavigation';
 import { navigateToNotificationSession } from './actions/sessionNotificationNavigation';
@@ -74,7 +76,7 @@ import { navigateToNotificationSession } from './actions/sessionNotificationNavi
 const transcriptAccumulator = new TranscriptStreamAccumulator({
   emit: ({ sessionId, messages }) => {
     const currentSession = store.get(sessionStoreAtom(sessionId));
-    if (!currentSession) return;
+    if (!currentSession || !isSessionDataResident(currentSession)) return;
     store.set(sessionStoreAtom(sessionId), {
       ...currentSession,
       messages,
@@ -86,7 +88,7 @@ const transcriptAccumulator = new TranscriptStreamAccumulator({
   },
   // Keep events while a load is in flight: its snapshot may predate them.
   isSessionTracked: (sessionId) =>
-    store.get(sessionStoreAtom(sessionId)) != null || isSessionLoadInFlight(sessionId),
+    isSessionDataResident(store.get(sessionStoreAtom(sessionId))) || isSessionLoadInFlight(sessionId),
   // requestAnimationFrame caps flushes at the display refresh rate (~60 Hz)
   // and gives the JS thread a chance to do other work between frames.
   // Falls back to setTimeout in non-DOM environments (Vitest, headless).
@@ -320,6 +322,7 @@ export function initSessionStateListeners(): () => void {
       // leaving it stuck until the user clicks the child.
       scheduleProcessingReconcile?.();
       store.set(pruneClosedSessionDataAtom);
+      sessionViewRetention.sweep();
     }
 
     if (!ownedWorkspacePath) {

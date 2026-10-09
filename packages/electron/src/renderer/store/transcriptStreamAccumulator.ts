@@ -9,8 +9,8 @@
  *
  * Semantics
  *  - Each chunk that lands as a "pure text update" (same event id, no
- *    structural change) is applied as an in-place patch to the cached
- *    projected message: O(1) work per chunk.
+ *    structural change) replaces just that projected message with a copy
+ *    carrying the new text; the array is copied once per frame, not per chunk.
  *  - Any structural change (new event id, payload thinking/model added,
  *    eventType/parent/subagent change) marks the session for a full
  *    re-projection on the next flush.
@@ -43,13 +43,13 @@ export type Scheduler = (cb: () => void) => void;
 
 interface SessionState {
   transcriptGeneration?: number;
-  /** Array identity changes on snapshot loads, not per-token in-place patches. */
+  /** The atom array last seen; differs from our own publication only on snapshot loads. */
   observedSnapshot?: TranscriptViewMessage[];
   /** Live canonical events keyed by id for O(1) lookup. */
   eventsById: Map<number, TranscriptEvent>;
   /** Last published merged messages array (DB messages + live messages, sorted by sequence). */
   currentMessages: TranscriptViewMessage[];
-  /** Index of each event id in `currentMessages`, for O(1) in-place patches. */
+  /** Index of each event id in `currentMessages`, for O(1) text patches. */
   messageIndexById: Map<number, number>;
   /** True when a structural change requires a full re-projection on next flush. */
   needsRebuild: boolean;
@@ -57,6 +57,8 @@ interface SessionState {
   flushScheduled: boolean;
   /** True when at least one apply() call has been made since the last flush. */
   dirty: boolean;
+  /** `currentMessages` was already copied for this frame's text patches. */
+  patchedSinceFlush: boolean;
 }
 
 export interface AccumulatorOptions {
@@ -112,7 +114,13 @@ export class TranscriptStreamAccumulator {
       state.eventsById.set(event.id, event);
       const idx = state.messageIndexById.get(event.id);
       if (idx !== undefined && state.currentMessages[idx]?.id === event.id) {
-        applyTextPatch(state.currentMessages[idx], event);
+        // Replace, don't mutate: transcript rows are memoized on message
+        // identity, and the published array must change for the atom to fire.
+        if (!state.patchedSinceFlush) {
+          state.currentMessages = state.currentMessages.slice();
+          state.patchedSinceFlush = true;
+        }
+        state.currentMessages[idx] = withPatchedText(state.currentMessages[idx], event);
       } else {
         // The event id is known to the accumulator but isn't represented
         // as a 1:1 view message -- e.g. the projector fused two adjacent
@@ -166,6 +174,7 @@ export class TranscriptStreamAccumulator {
         needsRebuild: false,
         flushScheduled: false,
         dirty: false,
+        patchedSinceFlush: false,
       };
       this.sessions.set(sessionId, state);
     }
@@ -184,6 +193,7 @@ export class TranscriptStreamAccumulator {
     state.flushScheduled = false;
     if (!state.dirty) return;
     state.dirty = false;
+    state.patchedSinceFlush = false;
     this.observeSnapshot(sessionId, state);
 
     if (state.needsRebuild || state.currentMessages.length === 0) {
@@ -262,12 +272,9 @@ export class TranscriptStreamAccumulator {
 }
 
 /**
- * Update the projected message in-place to reflect the new event's text
- * and any payload metadata that the projector's per-event mapping would
- * have copied from the assistant_message payload.
+ * A copy of the projected message carrying the new event's text. The other
+ * payload fields are unchanged by definition of canPatchInPlace.
  */
-function applyTextPatch(message: TranscriptViewMessage, event: TranscriptEvent): void {
-  message.text = event.searchableText ?? undefined;
-  // mode/thinking/model are unchanged by definition of canPatchInPlace,
-  // so we don't touch them here.
+function withPatchedText(message: TranscriptViewMessage, event: TranscriptEvent): TranscriptViewMessage {
+  return { ...message, text: event.searchableText ?? undefined };
 }

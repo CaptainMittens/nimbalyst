@@ -439,6 +439,8 @@ export interface SessionData {
   agentRole?: AgentRole;
   createdBySessionId?: string | null;
   messages: TranscriptViewMessage[];
+  /** Renderer-only: messages were dropped from memory; metadata is still current. */
+  messagesEvicted?: boolean;
   documentContext?: DocumentContext;
   workspacePath?: string;
   title?: string;
