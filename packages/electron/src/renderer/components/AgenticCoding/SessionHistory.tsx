@@ -26,6 +26,7 @@ import { requestConfirmation } from '../../dialogs/requestConfirmation';
 import { getTimeGroupKey, TimeGroupKey } from '../../utils/dateFormatting';
 import { getFileName } from '../../utils/pathUtils';
 import { saveSessionArchived } from '../../utils/saveSessionArchived';
+import { withSlowCheckNotice } from '../../utils/withSlowCheckNotice';
 import { KeyboardShortcuts, getShortcutDisplay } from '../../../shared/KeyboardShortcuts';
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import {
@@ -1559,7 +1560,8 @@ const SessionHistoryComponent: React.FC = () => {
     }
 
     // Fetch status for each worktree to check for warnings
-    const worktreeStatuses = await Promise.all(
+    // One notice covers the whole batch if the checks run long (#282).
+    const worktreeStatuses = await withSlowCheckNotice(Promise.all(
       allWorktreeIds.map(async worktreeId => {
         const worktreeData = worktreeCache.get(worktreeId);
         if (!worktreeData?.path) {
@@ -1588,6 +1590,9 @@ const SessionHistoryComponent: React.FC = () => {
         // Conservative: treat as dirty on error so dialog shows
         return { worktreeId, clean: false, hasUncommittedChanges: false, uncommittedFileCount: 0, hasUnmergedChanges: true, unmergedCommitCount: 0 };
       })
+    ),
+      'Checking for unsaved work',
+      `Checking ${allWorktreeIds.length} worktree${allWorktreeIds.length === 1 ? '' : 's'} before archiving...`,
     );
 
     const dirtyWorktrees = worktreeStatuses.filter(s => !s.clean);
