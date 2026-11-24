@@ -21,9 +21,9 @@ The two research documents hold the full record. This section is the short form.
 - Problem: answered: Nimbalyst agents repeat the same tool failures, and nothing measures whether a fix works. 2,207 failed tool results in 14 days; Edit failed 516 of 5,347 calls (9.7%).
 - Target user: answered: the owner, on this machine, through Claude Code sessions in one workspace.
 - Why now: answered: the gap review (2026-11-23) measured the failures and closed the first gap (a failure reader is possible for Claude Code). Source: `docs/research/2026-11-23-hermes-atlas-evolution-adaptation.md`, "Gap review".
-- Scope (IN/OUT): answered. IN: a failure reader, a sorter, and a lessons extension (v1). OUT: the core prompt hook, Codex failure reading, a dashboard.
-- Success test: answered: after 30 days, at least 5 lessons have a verdict (`effective` or `ineffective`; `inconclusive` does not count), Edit failures drop from 9.7% to under 5%, and every hook that blocked 20+ times has a proposal in the tracker.
-- Kill condition: none given by the owner. DM fallback: if after 30 days fewer than 2 lessons have a verdict (`effective` or `ineffective`), stop and review the thresholds before building the core prompt hook. See Settled during spec review.
+- Scope (IN/OUT): answered. IN: a failure reader, a sorter, and a lessons extension (v1). OUT: the core prompt hook, a dashboard. Codex failure reading is IN (owner, Q11; see D3).
+- Success test: answered: after 30 days, at least 5 lessons have a final verdict (`effective` or `ineffective`; `inconclusive` does not count), Edit failures drop from 9.7% to under 5%, and every hook that blocked 20+ times has a proposal in the tracker.
+- Kill condition: none given by the owner. DM fallback: if after 30 days fewer than 2 lessons have a final verdict (`effective` or `ineffective`), stop and review the thresholds before building the core prompt hook. See Settled during spec review.
 - Biggest worry: answered: lessons add noise to the prompt, or verdicts retire good lessons because workload changed. See Risks.
 - Feature flag: answered: none added. The built-in extension is the switch. The owner turns it off in the extension list, and the daily automation is a normal automation that the owner can disable.
 
@@ -39,8 +39,8 @@ The two research documents hold the full record. This section is the short form.
 | New automations start off | `createDefaultAutomationStatus` sets `enabled: false`. The create tool accepts `enabled`. | `packages/extensions/automations/src/frontmatter/types.ts:113`; `packages/extensions/automations/src/index.tsx:219,230` |
 | Tool name lists | Each first-party MCP tool name sits in a topology list. Session-context tools sit in `HOST_TOOLS`. | `packages/runtime/src/ai/server/services/mcpTopology.ts:128`, `:147-152` |
 | Table columns | `ai_agent_messages` has `session_id`, `created_at`, `content`, `metadata`, `hidden`. `ai_sessions` has `created_at` (indexed). | `packages/electron/src/main/database/sqlite/schemas/0001_initial.sql:157-165`, `:61`, `:66` |
-| Failure counts | 2,207 failures in 14 days; hook blocks 842; Edit 516 of 5,347; 31 ExitPlanMode `planFilePath` failures are all hook blocks. | `docs/research/2026-11-23-hermes-atlas-evolution-adaptation.md` "Gap 1"; `docs/research/2026-11-23-evolution-loop-approaches.md` fold row 8. Not re-run in this session. |
-| Codex volume | 27 Codex tool rows in 14 days. | `docs/research/2026-11-23-hermes-atlas-evolution-adaptation.md` "Gap 1". Not re-run in this session. |
+| Failure counts | 2,207 failures in 14 days; blocked calls 842; Edit 516 of 5,347; 31 ExitPlanMode `planFilePath` failures are all blocked calls. | `docs/research/2026-11-23-hermes-atlas-evolution-adaptation.md` "Gap 1"; `docs/research/2026-11-23-evolution-loop-approaches.md` fold row 8. Not re-run in this session. |
+| Codex volume | The research doc said 27 Codex tool rows in 14 days. `database_query` on 2026-11-24 found 152 Codex tool rows in all (see D3). | `docs/research/2026-11-23-hermes-atlas-evolution-adaptation.md` "Gap 1"; `database_query`, 2026-11-24. |
 | Docstring record in repo `docs/` | The repo records no TSDoc `Args::type` adaptation. Search for `docstring`, `tsdoc`, `jsdoc` in `docs`, `.claude`, and the three `CLAUDE.md` files returned no file. A control search for `IPC` in `docs/IPC_GUIDE.md` returned 26, so the search works. | `rg -il "docstring\|tsdoc\|jsdoc"`, this session |
 | Existing TS doc style | Mixed. `sessionCoachingSignals.ts` uses prose JSDoc. `mcpImageCompression.ts:14-15` uses `@param`. | `packages/electron/src/main/mcp/` |
 
@@ -50,28 +50,28 @@ The two research documents hold the full record. This section is the short form.
 
 *Expands the Idea Brief's Problem row.*
 
-Agents in Nimbalyst fail the same tool calls again and again. Most failures are not agent habits. Hook blocks make up 38% of failures (842 of 2,207), and some tools fail on every call. A lesson that repeats a hook message adds prompt text and fixes nothing. No part of Nimbalyst counts these failures per cause, writes a lesson for a real habit, or checks 14 days later whether the lesson helped. `memory-spike learn` writes lessons but never measures them.
+Agents in Nimbalyst fail the same tool calls again and again. Most failures are not agent habits. Blocked calls make up 38% of failures (842 of 2,207), and some tools fail on every call. A lesson that repeats a hook message adds prompt text and fixes nothing. No part of Nimbalyst counts these failures per cause, writes a lesson for a real habit, or checks 14 days later whether the lesson helped. `memory-spike learn` writes lessons but never measures them.
 
 ---
 
 ## User Goal Anchor
 
 - user-request: "look up the hermes plugin hermes-atlas-evolution and see how we can adapt it to nimbalyst" (user-message: 2026-11-23; session id not recorded; quote from the Nimbalyst session of 2026-11-23)
-- target-artifact: `docs/research/2026-11-23-hermes-atlas-evolution-adaptation.md` (the gap review, which holds the measured baselines: Edit 516 of 5,347 = 9.7%, 842 hook blocks, 3 tools that failed on every call)
+- target-artifact: `docs/research/2026-11-23-hermes-atlas-evolution-adaptation.md` (the gap review, which holds the measured baselines: Edit 516 of 5,347 = 9.7%, 842 blocked calls, 3 tools that failed on every call)
 - convergence-test:
 
 | Target element | Delivered by | Acceptance test |
 |----------------|--------------|-----------------|
-| At least 5 lessons have a verdict (`effective` or `ineffective`; `inconclusive` does not count) after 30 days | Units U3 and U4 (skill and first run), reading from U1 and U2 | `jq '[.lessons[] | select(.verdict == "effective" or .verdict == "ineffective")] | length' nimbalyst-local/evolution/lessons.json` prints 5 or more. `nimbalyst-local/` is in the root of the workspace the automation runs in, as the automations extension's own `nimbalyst-local/automations/` is. Live-session-only: needs 30 days of real runs. |
+| At least 5 lessons have a final verdict (`effective` or `ineffective`; `inconclusive` does not count) after 30 days | Units U3 and U4 (skill and first run), reading from U1 and U2 | `jq '[.lessons[] | select(.verdict == "effective" or .verdict == "ineffective")] | length' nimbalyst-local/evolution/lessons.json` prints 5 or more. `nimbalyst-local/` is in the root of the workspace the automation runs in, as the automations extension's own `nimbalyst-local/automations/` is. Live-session-only: needs 30 days of real runs. |
 | Edit failures fall from 9.7% to under 5% | Units U1, U2, U3 | Call `get_tool_failures` with `since` set 14 days back. The Edit failures divided by Edit calls over that window is under 0.05. Live-session-only: needs 30 days. |
-| Every hook that blocked 20+ times has a proposal in the tracker | Unit U3 (skill step for `hook-block` keys) | For each `hook-block` key with `failures >= 20` over 30 days in the `get_tool_failures` output, a tracker item titled "clarify hook message" names that key. Live-session-only. |
+| Every hook that blocked 20+ times has a proposal in the tracker | Unit U3 (skill step for `blocked` keys) | For each `blocked` key with `failures >= 20` over 30 days in the `get_tool_failures` output, a tracker item titled "Clarify block message" names that key. Live-session-only. |
 | Atlas rules adopted: 3+ hits on 2+ days; 14-day before and after windows; retire on `ineffective` | Unit U1 (math) and U3 (skill) | `pnpm --filter @nimbalyst/electron exec vitest run src/main/mcp/__tests__/toolFailures.test.ts` passes. |
 
 ---
 
 ## User Stories
 
-1. As the owner, I want every failed tool call sorted into one bucket, so that a hook block never turns into a lesson.
+1. As the owner, I want every failed tool call sorted into one bucket, so that a blocked call never turns into a lesson.
 2. As the owner, I want a clearer hook message proposed in the tracker when a hook blocks the agent often, so that the fix lands in the hook and not in the prompt.
 3. As the owner, I want a "fix tool setup" tracker item when a tool fails on nearly every call, so that a broken tool gets fixed and is not worked around.
 4. As the owner, I want a short "when X, do Y" lesson for a real agent habit that repeats on 3+ hits across 2+ days, so that the agent stops repeating it.
@@ -92,7 +92,7 @@ Agents in Nimbalyst fail the same tool calls again and again. Most failures are 
 19. As a Claude Code agent, I want the live lessons in my memory file at session start, so that I avoid a known failure before my first call.
 20. As the owner, I want one state file for lessons (`nimbalyst-local/evolution/lessons.json`), so that there is one place to read and one place to reset.
 21. As an upstream maintainer, I want the core change to be one module and one MCP tool with tests, so that the pull request is small.
-22. As the owner, I want no Codex reading in v1, so that v1 stays small. Codex has 27 tool rows in 14 days.
+22. As the owner, I want Codex sessions counted too, with their own pairing function (D3), so that a blocked call or broken tool in Codex gets a tracker item. Codex habit keys get no lessons until the core prompt hook ships, because Codex sessions do not read `MEMORY.md`.
 
 ---
 
@@ -106,12 +106,12 @@ Agents in Nimbalyst fail the same tool calls again and again. Most failures are 
 4. `get_tool_failures` returns at most 3 sample details per key and at most 3 unmatched `other` samples per day.
 5. `packages/extensions/evolution/manifest.json` declares a `claudePlugin` with `enabledByDefault` set to `true`, and `packages/extensions/evolution/claude-plugin/skills/evolution-pass/SKILL.md` exists. The extension holds no backend module.
 6. After the watched first run, the folder `nimbalyst-local/automations/` holds an automation for `evolution-pass` with `enabled: true`.
-7. `nimbalyst-local/evolution/lessons.json` holds a `cursor`, a `filed` array, a `passSessionIds` array, a `lessons` array and, for each lesson in `lessons`, the fields `id`, `signature`, `tool`, `klass`, `text`, `status`, `activatedAt`, `verdict`, `rateBefore`, `rateAfter`, `evaluatedAt`.
+7. `nimbalyst-local/evolution/lessons.json` holds a `cursor`, a `filed` array, a `passSessionIds` array, a `lessons` array and, for each lesson in `lessons`, the fields `id`, `habitKey`, `tool`, `klass`, `text`, `status`, `activatedAt`, `verdict`, `rateBefore`, `rateAfter`, `evaluatedAt`.
 8. A lesson reaches status `live` only when its key has 3 or more hits on 2 or more distinct UTC days.
 9. A lesson at day 15 with verdict `ineffective` has status `retired` and its text is absent from `MEMORY.md`.
 10. The text between `<!-- evolution:lessons:start -->` and `<!-- evolution:lessons:end -->` is 1,400 characters or fewer, and every other line of `MEMORY.md` is unchanged by a pass.
 11. A key with fewer than 20 calls in either window, or fewer than 5 failures in the before-window, gets verdict `inconclusive`.
-12. After 30 days: at least 5 lessons have a verdict (`effective` or `ineffective`), the Edit failure rate is under 5%, and every `hook-block` key with 20 or more blocks has a tracker item.
+12. After 30 days: at least 5 lessons have a final verdict (`effective` or `ineffective`), the Edit failure rate is under 5%, and every `blocked` key with 20 or more blocks has a tracker item.
 
 ---
 
@@ -120,7 +120,7 @@ Agents in Nimbalyst fail the same tool calls again and again. Most failures are 
 *Expands the Idea Brief's Scope (OUT) row.*
 
 - Not the core prompt hook. Making `registerContextProvider` work, so Codex gets lessons, is a later sub-project.
-- Not Codex failure reading. Codex has 27 tool rows in 14 days.
+- Not Codex lessons. Codex failures are read and counted (D3), but Codex habit keys get no lessons until the core prompt hook ships (owner, Q14).
 - Not a dashboard or settings panel.
 - Not a new database table or schema migration.
 - Not `nimbalyst-memory` facts. `lessons.json` is the single store.
@@ -130,7 +130,7 @@ Agents in Nimbalyst fail the same tool calls again and again. Most failures are 
 - Not a replacement for `memory-spike learn` or `get_session_coaching_signals`. Both stay as they are.
 - Not a run while no Nimbalyst window is open (accepted).
 
-Decomposition status: decomposed: v1 is sub-project 1 of 3; the core prompt hook and the Codex reader are later sub-projects.
+Decomposition status: decomposed: v1 is sub-project 1 of 3; the core prompt hook is a later sub-project. The Codex reader is part of v1 (D3).
 
 ---
 
@@ -146,7 +146,7 @@ Decomposition status: decomposed: v1 is sub-project 1 of 3; the core prompt hook
 | Delivery | Marked section of the workspace auto-memory `MEMORY.md`, 1,400 characters at most | `user` |
 | Memory folder path | The skill writes to the memory folder that Claude Code names in its own context. No path encoding. If the skill sees no memory folder path, it stops and changes nothing. The Claude Code docs do not promise that the path is shown (Augur, `docs/research/2026-11-24-evolution-loop-augur.md`). | `user` |
 | Automation creation | The skill's setup step calls the automations create tool with `enabled: true` | `user` |
-| Codex | Not read in v1 | `user` |
+| Codex | Read in v1, with its own pairing function (D3) | `user` |
 | Test framework | vitest, `// @vitest-environment node` first | `derived: nimbalyst/CLAUDE.md` (Tests and the gate) |
 | Handler test file | Extend `sessionContextServer.lastAssistantResponse.test.ts` | `derived: nimbalyst/CLAUDE.md` ("Extend an existing test file before creating one") |
 | Effective and ineffective cut-offs | Adopt Atlas's: effective when the after rate is at most 50% of the before rate; ineffective when the after-window has 3+ failures and the after rate is at least 90% of the before rate | `derived: ~/.hermes/plugins/hermes-atlas-evolution/hermes_atlas_evolution/lessons.py:794-796` |
@@ -243,10 +243,10 @@ graph TD
   S --> T[get_tool_failures since=14 days back, excludeSessionIds=passSessionIds]
   T --> R{Tool error or nonsense counts?}
   R -- yes --> X[Change nothing, file nothing, report the error]
-  R -- no --> H[hook-block key not in filed: tracker item clarify hook message, then append to filed]
-  R -- no --> U[setup key not in filed: tracker item fix tool setup, then append to filed]
-  R -- no --> L[agent-habit key, 3+ hits on 2+ days, no lesson: draft text, status live]
-  L --> E[Live lessons at day 15: get_tool_failures signatures, then verdict]
+  R -- no --> H[blocked key not in filed: tracker item Clarify block message, then append to filed]
+  R -- no --> U[broken-tool key not in filed: tracker item fix tool setup, then append to filed]
+  R -- no --> L[habit key, 3+ hits on 2+ days, no lesson: draft text, status live]
+  L --> E[Live lessons at day 15: get_tool_failures habitKeys, then verdict]
   E --> Z[ineffective: status retired]
   Z --> M[Rewrite MEMORY.md between the evolution:lessons markers, 1,400 characters max]
   M --> W[Save lessons.json with the new cursor, filed, and passSessionIds]
@@ -276,25 +276,25 @@ The pairing skips rows with `hidden` set, the same as `deriveCoachingSignals` (`
 
 One failure goes into exactly one bucket. The rules run in this order:
 
-1. `hook-block`. The result text matches the hook pattern list. The list lives in one exported constant in `toolFailures.ts`. It starts with `PreToolUse:<Tool> hook error:`, `[plan-gate] BLOCKED`, `[commander-rule] BLOCKED`, `Hook PreToolUse`, and Claude Code's own `<tool_use_error>Blocked:` (key `claude-code-builtin`). Key: the hook's name, taken from the text in this order: the script file name in `["$HOME/.claude/hooks/<name>.py"]` gives `<name>`; a bracket tag such as `[plan-gate]` gives `plan-gate`; the word after a leading `RPG ` such as `RPG destructive-guard` gives `destructive-guard`; otherwise the first 40 characters after `hook error: `. Output: a tracker item "clarify hook message". For a `hook-block` key, `calls` counts the calls of the tool the hook blocked.
-2. `setup`. Over the window, non-hook failures are 90% or more of a tool's calls, and the tool has at least 10 calls. Key: the tool. A result that starts `<tool_use_error>Error: No such tool available:` goes to `setup` at once, keyed by the tool, with no rate check: the tool cannot run in this setup. Output: a tracker item "fix tool setup". Hook blocks are not counted here, so a tool blocked only by a hook stays in bucket 1. All 31 ExitPlanMode `planFilePath` failures are hook blocks, so ExitPlanMode lands in `hook-block`. The tool computes the `setup` keys, not the skill. The 90% denominator is all calls of the tool, hook-blocked calls included.
-3. `agent-habit`. Everything else. Key: tool plus failure class. The classes are `exit-code`, `edit-precondition`, `missing-file`, `bad-input`, `timeout`, `denied`, and `other`. Output: a lesson candidate when the key has 3+ hits on 2+ days and no lesson of any status. A retired key is never drafted again.
+1. `blocked`. The result text matches the hook pattern list. The list lives in one exported constant in `toolFailures.ts`. It starts with `PreToolUse:<Tool> hook error:`, `[plan-gate] BLOCKED`, `[commander-rule] BLOCKED`, `Hook PreToolUse`, and Claude Code's own `<tool_use_error>Blocked:` (key `claude-code-builtin`). Key: the hook's name, taken from the text in this order: the script file name in `["$HOME/.claude/hooks/<name>.py"]` gives `<name>`; a bracket tag such as `[plan-gate]` gives `plan-gate`; the word after a leading `RPG ` such as `RPG destructive-guard` gives `destructive-guard`; otherwise the first 40 characters after `hook error: `. Output: a tracker item "Clarify block message". For a `blocked` key, `calls` counts the calls of the tool the hook blocked.
+2. `broken-tool`. Over the window, non-blocked failures are 90% or more of a tool's calls, and the tool has at least 10 calls. Key: the tool. A result that starts `<tool_use_error>Error: No such tool available:` goes to `broken-tool` at once, keyed by the tool, with no rate check: the tool cannot run in this setup. Output: a tracker item "fix tool setup". Blocked calls are not counted here, so a tool blocked only by a hook stays in bucket 1. All 31 ExitPlanMode `planFilePath` failures are blocked calls, so ExitPlanMode lands in `blocked`. The tool computes the `broken-tool` keys, not the skill. The 90% denominator is all calls of the tool, blocked calls included.
+3. `habit`. Everything else. Key: tool plus failure class. The classes are `exit-code`, `edit-precondition`, `missing-file`, `bad-input`, `timeout`, `denied`, and `other`. Output: a lesson candidate when the key has 3+ hits on 2+ days and no lesson of any status. A retired key is never drafted again.
 
 The class patterns sit beside the hook list in the same file. Tests pin each pattern with a fixture copied from a real row. The first list, with counts from `database_query` on 2026-11-24 for rows since 2026-11-10 (result text start, `is_error` true):
 
 | Match (start of the result text) | Bucket or class | Rows |
 |:--|:--|--:|
 | `<tool_use_error>File has not been read yet` | `edit-precondition` | 373 |
-| `PreToolUse:Bash hook error: RPG destructive-guard` | `hook-block`, key `destructive-guard` | 296 |
-| `PreToolUse:Bash hook error: ["$HOME/.claude/hooks/...` | `hook-block`, key from the script name (for example `model-gate-git`, `paper-gate`) | 142 |
-| `PreToolUse:Bash hook error: Recursive grep block` | `hook-block`, key `recursive-grep` | 80 |
+| `PreToolUse:Bash hook error: RPG destructive-guard` | `blocked`, key `destructive-guard` | 296 |
+| `PreToolUse:Bash hook error: ["$HOME/.claude/hooks/...` | `blocked`, key from the script name (for example `model-gate-git`, `paper-gate`) | 142 |
+| `PreToolUse:Bash hook error: Recursive grep block` | `blocked`, key `recursive-grep` | 80 |
 | `<tool_use_error>File has been modified since read` | `edit-precondition` | 72 |
 | `File does not exist.` | `missing-file` | 36 |
-| `<tool_use_error>Error: No such tool available:` | `setup` (see rule 2) | 109 |
+| `<tool_use_error>Error: No such tool available:` | `broken-tool` (see rule 2) | 109 |
 | `Exit code <n>` | `exit-code` | 27+ |
 | `<tool_use_error>String to replace not found`, `<tool_use_error>No changes to make` | `edit-precondition` | 19 |
 | `The user doesn't want to take this action`, `Permission for this command was denied` | `denied` | 18 |
-| `<tool_use_error>Blocked:` | `hook-block`, key `claude-code-builtin` | 38 |
+| `<tool_use_error>Blocked:` | `blocked`, key `claude-code-builtin` | 38 |
 | `<tool_use_error>InputValidationError`, `This tool's input schema` | `bad-input` | 11 |
 | text containing `timed out` | `timeout` | few |
 | anything else | `other` | rest |
@@ -303,7 +303,7 @@ A call whose `tool_use` has no matching `tool_result` row is not counted, as a c
 
 ### D3 — The tool `get_tool_failures`
 
-Inputs: `{ since: ISO string, signatures?: { signature: string; activatedAt: string }[], excludeSessionIds?: string[] }`. `since` is cut down to 00:00 UTC of its day, so each window holds whole UTC days.
+Inputs: `{ since: ISO string, habitKeys?: { habitKey: string; activatedAt: string }[], excludeSessionIds?: string[] }`. `since` is cut down to 00:00 UTC of its day, so each window holds whole UTC days.
 
 The handler:
 - takes the workspace path from the caller, as `handleGetSessionCoachingSignals` does, and reads only sessions of that workspace;
@@ -313,10 +313,10 @@ The handler:
 
 It returns:
 - bucketed daily counts: for each UTC day, each bucket, each key, `{ calls, failures }`. `calls` is the number of calls of that key's tool on that day;
-- for each `agent-habit` key, `hits` and `distinctDays` over the window. `hits` counts the failures of that key. `distinctDays` counts the UTC days with at least one failure. The tool owns the habit gate, and the skill only reads `hits >= 3 && distinctDays >= 2`;
+- for each `habit` key, `hits` and `distinctDays` over the window. `hits` counts the failures of that key. `distinctDays` counts the UTC days with at least one failure. The tool owns the habit gate, and the skill only reads `hits >= 3 && distinctDays >= 2`;
 - up to 3 sample details per key (session id and a short text);
 - up to 3 unmatched `other` samples per day, so the pattern lists can grow;
-- for each given signature, the before and after counts and the verdict (D4). The tool computes the verdict; the skill only saves it in `lessons.json`.
+- for each given habit key, the before and after counts and the verdict (D4). The tool computes the verdict; the skill only saves it in `lessons.json`.
 - a `truncated` flag, as `get_session_coaching_signals` has. It is true when a cap is hit: each sample text is cut to 200 characters, and at most 200 keys are returned, most failures first;
 - `callerSessionId`, the id of the session that made the call, so the skill can record it in `passSessionIds`.
 
@@ -334,14 +334,16 @@ The plan checks `= ANY($3)` on both PGLite and SQLite (`packages/electron/DATABA
 
 Both the `tool_use` and the `tool_result` rows have `message_kind = 'tool'`: `database_query` on 2026-11-24 found 43,427 such rows since 2026-11-20, all with that kind, `direction = 'output'` and `source = 'claude-code'`. The filter keeps both halves of each pair.
 
+Codex rows (`source = 'openai-codex'`) have another shape, so `toolFailures.ts` has a second pairing function. Each call is an `item/started` row and an `item/completed` row with the same `params.item.id`. The tool name is `params.item.tool` for an `mcpToolCall` item (with `params.item.server`) and `Bash` for a `commandExecution` item. A call failed when `status` is `failed` or `declined`, or the exit code is not 0. `database_query` on 2026-11-24: 152 Codex tool rows in all, 14 with a failed or declined status, 77 with an exit code (71 of them 0). The SQL keeps both sources; the handler picks the pairing function by `source`. A Codex `declined` call counts as class `denied`. Every Codex key starts with `codex:` (for example `codex:Bash:exit-code`, `codex:destructive-guard`), so Codex and Claude Code counts never mix (owner, Q15). Codex `habit` keys are counted and returned, but the skill drafts no lesson for a key that starts with `codex:` (owner, Q14).
+
 ```ts
 interface ToolFailuresResult {
-  days: { day: string; bucket: 'hook-block' | 'setup' | 'agent-habit'; key: string; calls: number; failures: number }[];
-  habitKeys: { key: string; hits: number; distinctDays: number }[];
-  setupKeys: { key: string; calls: number; failures: number }[];
+  days: { day: string; bucket: 'blocked' | 'broken-tool' | 'habit'; key: string; calls: number; failures: number }[];
+  habitCounts: { key: string; hits: number; distinctDays: number }[];
+  brokenToolKeys: { key: string; calls: number; failures: number }[];
   samples: { key: string; sessionId: string; text: string }[];
   otherSamples: { day: string; sessionId: string; text: string }[];
-  verdicts: { signature: string; before: { calls: number; failures: number }; after: { calls: number; failures: number }; verdict: 'effective' | 'ineffective' | 'inconclusive' }[];
+  verdicts: { habitKey: string; before: { calls: number; failures: number }; after: { calls: number; failures: number }; verdict: 'effective' | 'ineffective' | 'inconclusive' }[];
   truncated: boolean;
   callerSessionId: string;
 }
@@ -351,7 +353,7 @@ The handler body is an exported function `fetchToolFailures(db: MessageRowDb, wo
 
 ### D4 — Verdict math
 
-A signature is the agent-habit key written as `<tool>:<klass>`. The rate for a signature is its failures divided by the calls of its tool in the window.
+A habit key is written as `<tool>:<klass>`. The rate for a habit key is its failures divided by the calls of its tool in the window.
 
 | Window | Definition |
 |--------|------------|
@@ -368,7 +370,7 @@ Rules 2 and 3 are Atlas's cut-offs (`lessons.py:794-796`). Rule 1 is the owner-a
 
 Verdict timing: the pass judges a live lesson when 15 or more days have passed since `activatedAt` and its verdict is `null` or `inconclusive`. Day 15 is the first day after the 14-day after-window ends. An `inconclusive` lesson is judged again on each later pass until day 45. After day 45, an `inconclusive` lesson stays live and the pass does not judge it again. (Day 45 is a DM default from the spec review on 2026-11-24, not an owner decision or an Atlas rule.) `evaluatedAt` is the time of the latest verdict.
 
-"Has a verdict" means a verdict of `effective` or `ineffective`. `inconclusive` does not count.
+"Has a final verdict" means a verdict of `effective` or `ineffective` (a final verdict). `inconclusive` does not count.
 
 Call arguments for the verdict call: `since` is the earliest `activatedAt` among the lessons being judged, minus 14 days. `excludeSessionIds` is `passSessionIds`. The handler also always excludes `currentSessionId`.
 
@@ -379,13 +381,13 @@ One file. It holds a cursor, a list of filed keys, a list of pass session ids, a
 | Field | Meaning |
 |-------|---------|
 | `id` | Lesson id |
-| `signature` | `<tool>:<klass>` |
+| `habitKey` | `<tool>:<klass>` |
 | `tool` | Tool name |
 | `klass` | Failure class |
 | `text` | The lesson, a short "when X, do Y" |
 | `status` | `live` or `retired` |
 | `activatedAt` | ISO time the lesson went live |
-| `verdict` | `effective`, `ineffective`, `inconclusive`, or `null`. "Has a verdict" means `effective` or `ineffective`. |
+| `verdict` | `effective`, `ineffective`, `inconclusive`, or `null`. "Has a final verdict" means `effective` or `ineffective` (a final verdict). |
 | `rateBefore`, `rateAfter` | Rates from the tool |
 | `evaluatedAt` | ISO time of the last verdict |
 
@@ -394,22 +396,27 @@ The file also holds these top-level fields:
 | Field | Meaning |
 |-------|---------|
 | `cursor` | The last UTC day a pass finished. It marks progress and does not limit the read. |
-| `filed` | Array of `{ key, bucket, trackerItemId, filedAt }`, one entry for each tracker item the skill filed. The skill files an item only for a key that is not in `filed`, then appends to it. It runs no tracker search. |
+| `filed` | Array of `{ key, bucket, trackerItemId, filedAt, resolvedCommentAt? }`, one entry for each tracker item the skill filed. The skill files an item only for a key that is not in `filed`, then appends to it. It runs no tracker search. |
 | `passSessionIds` | The last 30 run session ids, newest first. The skill passes them as `excludeSessionIds` and adds its own id from the tool result field `callerSessionId`. |
 | `lessons` | The list of lessons, each with the fields above. |
+
+The owner may reword a live lesson's `text` by hand. The pass keeps `activatedAt` and the 14-day clock; a hand edit is better wording, not a new lesson.
 
 `nimbalyst-local/` is a local folder that git must never commit (`nimbalyst/CLAUDE.md`, Data and safety).
 
 ### D6 — The `evolution-pass` skill
 
-Setup step. The skill first calls `mcp__nimbalyst-automations__automations_list`. If an automation titled "Evolution pass" exists, setup is done. If not, the skill creates it through `mcp__nimbalyst-automations__automations_create` (the extension registers it as `automations.create`) with `enabled: true`, a daily schedule at 06:00 local time, and the prompt "Run the evolution-pass skill." A manifest cannot register an automation, and new automations start off, so the skill must pass `enabled`. The extension manifest sets `enabledByDefault: true`. Turning the extension on runs nothing by itself. The daily automation exists only after this setup step. Setup also records the memory folder path from its own context as `memoryDir` in `lessons.json`. A later run uses the path in its own context, or `memoryDir` when its context shows none; with neither, it stops (D6 failure handling).
+Setup step. The skill first calls `mcp__nimbalyst-automations__automations_list`. If an automation titled "Evolution pass" exists, setup is done. If not, the skill creates it through `mcp__nimbalyst-automations__automations_create` (the extension registers it as `automations.create`) with `enabled: true`, a daily schedule at 06:00 local time, and the prompt "Run the evolution-pass skill." A manifest cannot register an automation, and new automations start off, so the skill must pass `enabled`. The extension manifest sets `enabledByDefault: true`. Turning the extension on runs nothing by itself. The daily automation exists only after this setup step. Each workspace runs its own setup step, keeps its own `lessons.json` and counts only its own sessions. Turning the extension on in a new workspace runs nothing there until the setup step runs. Setup also records the memory folder path from its own context as `memoryDir` in `lessons.json`. A later run uses the path in its own context, or `memoryDir` when its context shows none; with neither, it stops (D6 failure handling).
+
+No notices: the pass sends no message when a lesson goes live or retires. `lessons.json`, the marked `MEMORY.md` section and the tracker items are the record (owner, Q16). To stop the loop, the owner turns off the 'Evolution pass' automation. The lessons stay in `MEMORY.md` until the owner deletes the marked section; turning off the extension does not remove it (owner, Q17).
 
 Daily steps:
 1. Read `lessons.json`. Take `filed` and `passSessionIds`. The cursor only marks the last finished day.
-2. Call `get_tool_failures` with `since` set 14 days back and `excludeSessionIds` set to `passSessionIds`. The habit and setup counts use this 14-day read. Keep `callerSessionId` from the result.
-3. For each `hook-block` key not in `filed`, file a tracker item "clarify hook message". For each `setup` key not in `filed`, file a tracker item "fix tool setup". After each filing, append `{ key, bucket, trackerItemId, filedAt }` to `filed`. The skill does not search the tracker. Filing uses `mcp__nimbalyst-trackers__tracker_create` with `type: "task"`, `title` ("Clarify hook message: <key>" or "Fix tool setup: <key>"), `description` (the counts and the 3 samples), and `labels: ["evolution", "<bucket>"]`. The returned id is the `trackerItemId` in `filed`. Tool schema checked on 2026-11-24 with ToolSearch.
-4. For each `agent-habit` key with `hits >= 3 && distinctDays >= 2` in the tool result and no lesson of any status in `lessons.json` (a `retired` lesson counts, so a retired key is not drafted again), write the lesson text and add the lesson with status `live` and `activatedAt` set to now. The skill does not count hits or days itself.
-5. For each live lesson with 15 or more days since `activatedAt` and a verdict that is `null` or `inconclusive` (and no more than 45 days since `activatedAt`), call `get_tool_failures` with `since` set to the earliest `activatedAt` among the lessons being judged minus 14 days, `excludeSessionIds` set to `passSessionIds`, and `signatures` set to each lesson's signature and `activatedAt`. The handler also always excludes `currentSessionId`. Save the verdict, the rates, and `evaluatedAt`. When the verdict is `ineffective`, set status `retired`.
+2. Call `get_tool_failures` with `since` set 14 days back and `excludeSessionIds` set to `passSessionIds`. The habit and broken-tool counts use this 14-day read. Keep `callerSessionId` from the result.
+3. For each `blocked` key not in `filed`, file a tracker item "Clarify block message". For each `broken-tool` key not in `filed`, file a tracker item "fix tool setup". After each filing, append `{ key, bucket, trackerItemId, filedAt, resolvedCommentAt? }` to `filed`. The skill does not search the tracker. Filing uses `mcp__nimbalyst-trackers__tracker_create` with `type: "task"`, `title` ("Clarify block message: <key>" or "Fix tool setup: <key>"), `description` (the counts and the 3 samples), and `labels: ["evolution", "<bucket>"]`. The returned id is the `trackerItemId` in `filed`. Tool schema checked on 2026-11-24 with ToolSearch.
+3a. For each item in `filed` with bucket `blocked` or `broken-tool` whose key had 0 failures in the last 14 days, add one comment to that tracker item with the counts (`tracker_add_comment`), once per item: record `resolvedCommentAt` on its `filed` entry. The owner closes the item.
+4. For each `habit` key that does not start with `codex:`, with `hits >= 3 && distinctDays >= 2` in the tool result and no lesson of any status in `lessons.json` (a `retired` lesson counts, so a retired key is not drafted again), write the lesson text and add the lesson with status `live` and `activatedAt` set to now. The skill does not count hits or days itself.
+5. For each live lesson with 15 or more days since `activatedAt` and a verdict that is `null` or `inconclusive` (and no more than 45 days since `activatedAt`), call `get_tool_failures` with `since` set to the earliest `activatedAt` among the lessons being judged minus 14 days, `excludeSessionIds` set to `passSessionIds`, and `habitKeys` set to each lesson's `habitKey` and `activatedAt`. The handler also always excludes `currentSessionId`. Save the verdict, the rates, and `evaluatedAt`. When the verdict is `ineffective`, set status `retired`. When a lesson retires, the pass files one tracker item 'Lesson did not help: <habitKey>' through the same tracker_create call as the other items (labels `["evolution", "lesson-retired"]`), and adds it to `filed` with bucket `lesson-retired`. The habit then needs a hook or a tool fix, which the owner decides.
 6. Rewrite the lessons section of `MEMORY.md` (D7).
 7. Save `lessons.json` with the new cursor, the updated `filed`, and `passSessionIds` with `callerSessionId` added at the front and the list cut to 30.
 
@@ -448,8 +455,8 @@ Claude Code loads this file at session start, up to 200 lines or 25 KB. The Clau
 
 | Seam | New or existing | What crosses it | What gets tested here |
 |------|-----------------|-----------------|-----------------------|
-| `toolFailures.ts` exported functions | NEW | rows in; buckets, daily counts, and rates out | pairing, hidden rows skipped, each bucket, the ExitPlanMode hook case, the setup threshold, the habit gate (`hits`, `distinctDays`), before and after math, the `inconclusive` limits |
-| `MessageRowDb` | existing (`sessionContextServer.ts:78`) | a fake database on one side, `fetchToolFailures` on the other | workspace scope, `since` filter, `excludeSessionIds`, the caller's own session left out, `callerSessionId` in the result, sample caps, signature input |
+| `toolFailures.ts` exported functions | NEW | rows in; buckets, daily counts, and rates out | pairing, hidden rows skipped, each bucket, the ExitPlanMode hook case, the broken-tool threshold, the habit gate (`hits`, `distinctDays`), before and after math, the `inconclusive` limits |
+| `MessageRowDb` | existing (`sessionContextServer.ts:78`) | a fake database on one side, `fetchToolFailures` on the other | workspace scope, `since` filter, `excludeSessionIds`, the caller's own session left out, `callerSessionId` in the result, sample caps, habit key input |
 | First watched run of the skill | existing (a live session) | the agent session, `MEMORY.md`, the tracker | no permission prompt on the memory write, foreign sections survive, a worktree session loads the lessons, `filed` and `passSessionIds` are saved |
 
 The skill is markdown. It has no automated seam, so a live check covers it. The owner approved this test list on 2026-11-24. The DM added the `currentSessionId`, `callerSessionId`, `filed`, and `passSessionIds` checks during spec review.
@@ -482,7 +489,7 @@ In code, `get_session_coaching_signals` appears only in `mcpTopology.ts`, `sessi
 
 Fixtures use real row shapes: the user row `{type:'user', message:{content:[{type:'tool_result', tool_use_id, is_error, content}]}}` and the assistant `tool_use` row. The `tool_result` shape is verified (see Verified API Surface). The handler tests also pin that the handler leaves out `currentSessionId` and returns `callerSessionId`. Each test file starts with `// @vitest-environment node`. The new test file is new because no existing file tests `toolFailures.ts`. The handler test extends the existing `sessionContextServer` test file, as the repo asks. The file name says `lastAssistantResponse`, so the plan may add a sibling file named for the handler if the owner prefers.
 
-**What a passing test proves here:** a failed `Edit` call that a hook blocked counts in `hook-block` and never in `agent-habit`, and a lesson's verdict follows from two windows of counts and nothing else.
+**What a passing test proves here:** a failed `Edit` call that a hook blocked counts in `blocked` and never in `habit`, and a lesson's verdict follows from two windows of counts and nothing else.
 
 Unit tests for U1 also cover: a row with `hidden` set is skipped by the pairing, and the habit gate (2 hits on 2 days: no; 3 hits on 1 day: no; 3 hits on 2 days: yes).
 
@@ -503,9 +510,9 @@ Build order. A row depends only on rows above it or on paths that exist today.
 | Path | What it does | Public interface | Depends on | How you'd know it works |
 |------|--------------|------------------|------------|-------------------------|
 | `docs/TSDOC_ARGS_LAYOUT.md` (new, in `nimbalyst/`) — U0 | Copies the owner's `Args::type` layout from `~/.claude/rules/docstrings.md` into the repo as its TSDoc form, so the build needs no file outside the repo | none | `~/.claude/rules/docstrings.md` | `rg -n "Args::" docs/TSDOC_ARGS_LAYOUT.md` prints at least 1 line |
-| `packages/electron/src/main/mcp/toolFailures.ts` (new) and `packages/electron/src/main/mcp/__tests__/toolFailures.test.ts` (new) — U1 | Pairs `tool_use` and `tool_result`, sorts failures into one bucket, counts per key per UTC day, computes before and after rates and the verdict | `deriveToolFailures`, `evaluateSignatures`, `HOOK_BLOCK_PATTERNS`, `ToolFailureRow` (a row that extends `CoachingMessageRow` with `session_id` and `created_at`) | `packages/electron/src/main/mcp/sessionCoachingSignals.ts` (exists) | `pnpm --filter @nimbalyst/electron exec vitest run src/main/mcp/__tests__/toolFailures.test.ts` ends with all tests passing and 0 failed. The tests include the hidden-row case and the habit gate cases (2 hits on 2 days: no; 3 hits on 1 day: no; 3 hits on 2 days: yes). |
+| `packages/electron/src/main/mcp/toolFailures.ts` (new) and `packages/electron/src/main/mcp/__tests__/toolFailures.test.ts` (new) — U1 | Pairs `tool_use` and `tool_result`, sorts failures into one bucket, counts per key per UTC day, computes before and after rates and the verdict | `deriveToolFailures`, `evaluateHabitKeys`, `BLOCKED_PATTERNS`, `ToolFailureRow` (a row that extends `CoachingMessageRow` with `session_id` and `created_at`) | `packages/electron/src/main/mcp/sessionCoachingSignals.ts` (exists) | `pnpm --filter @nimbalyst/electron exec vitest run src/main/mcp/__tests__/toolFailures.test.ts` ends with all tests passing and 0 failed. The tests include the hidden-row case and the habit gate cases (2 hits on 2 days: no; 3 hits on 1 day: no; 3 hits on 2 days: yes), a Codex pair with status `failed`, a Codex `commandExecution` with a non-zero exit code, Codex keys carry the `codex:` prefix. |
 | `packages/electron/src/main/mcp/sessionContextServer.ts` (edit), `packages/runtime/src/ai/server/services/mcpTopology.ts` (edit), `packages/runtime/src/ai/server/providers/claudeCode/toolPolicy.ts` (edit), `packages/electron/src/main/mcp/__tests__/sessionContextServer.lastAssistantResponse.test.ts` (edit), `packages/runtime/src/ai/server/providers/claudeCode/__tests__/immediateToolDecision.test.ts` (edit, one case), `docs/THE_HARNESS.md` (edit, one line) — U2 | Registers the tool `get_tool_failures`, adds `fetchToolFailures` (it leaves out `currentSessionId` and returns `callerSessionId`), lists the tool name in `HOST_TOOLS`, adds `mcp__nimbalyst-host__get_tool_failures` to `INTERNAL_MCP_TOOLS` beside the other host session-context reads (`toolPolicy.ts:44-46`; a read-only tool like its siblings, so auto-allow matches them and adds no restriction), adds handler tests, and adds the tool to the harness doc | tool `get_tool_failures`; export `fetchToolFailures(db, workspaceId, args)` | U1 | `pnpm --filter @nimbalyst/electron exec vitest run src/main/mcp/__tests__/sessionContextServer.lastAssistantResponse.test.ts` passes; `pnpm --filter @nimbalyst/runtime exec vitest run src/ai/server/services/__tests__/mcpTopologyConfig.test.ts` passes; `pnpm --filter @nimbalyst/electron exec vitest run src/main/mcp/__tests__/mcpEndpointRouting.test.ts` passes; `pnpm --filter @nimbalyst/runtime exec vitest run src/ai/server/providers/claudeCode/__tests__/immediateToolDecision.test.ts` passes, with the new case; after the code exists, `rg -c "get_tool_failures" packages/runtime/src/ai/server/services/mcpTopology.ts` prints 1; `rg -c "get_tool_failures" packages/runtime/src/ai/server/providers/claudeCode/toolPolicy.ts` prints 1 |
-| `packages/extensions/evolution/manifest.json`, `packages/extensions/evolution/package.json`, `packages/extensions/evolution/claude-plugin/.claude-plugin/plugin.json`, `packages/extensions/evolution/claude-plugin/skills/evolution-pass/SKILL.md` (all new), `pnpm-lock.yaml` (edit) — U3 | Ships the extension and the skill `evolution-pass`. No backend module. The manifest sets `enabledByDefault: true`. The lock file gains an importer entry for the new package: `pnpm-lock.yaml:1765` has `packages/extensions/planning: {}` for each extension, and `.github/workflows/ci.yml:105` runs `pnpm install --frozen-lockfile`. | extension id `com.nimbalyst.evolution` (matches the `com.nimbalyst.planning` form); skill `evolution-pass` | U2 | `jq -e '.contributions.claudePlugin.path == "claude-plugin"' packages/extensions/evolution/manifest.json` prints `true`; `jq -e '.contributions.claudePlugin.enabledByDefault == true' packages/extensions/evolution/manifest.json` prints `true`; `rg -n "^name: evolution-pass" packages/extensions/evolution/claude-plugin/skills/evolution-pass/SKILL.md` prints 1 line; `pnpm install` from the repo root, then `rg -n "packages/extensions/evolution" pnpm-lock.yaml` returns one line |
+| `packages/extensions/evolution/manifest.json`, `packages/extensions/evolution/package.json`, `packages/extensions/evolution/claude-plugin/.claude-plugin/plugin.json`, `packages/extensions/evolution/claude-plugin/skills/evolution-pass/SKILL.md` (all new), `pnpm-lock.yaml` (edit) — U3 | Ships the extension and the skill `evolution-pass`. No backend module. The manifest sets `enabledByDefault: true`. The lock file gains an importer entry for the new package: `pnpm-lock.yaml:1765` has `packages/extensions/planning: {}` for each extension, and `.github/workflows/ci.yml:105` runs `pnpm install --frozen-lockfile`. | extension id `com.nimbalyst.evolution` (matches the `com.nimbalyst.planning` form); skill `evolution-pass` | U2 | `jq -e '.contributions.claudePlugin.path == "claude-plugin"' packages/extensions/evolution/manifest.json` prints `true`; `jq -e '.contributions.claudePlugin.enabledByDefault == true' packages/extensions/evolution/manifest.json` prints `true`; `rg -n "^name: evolution-pass" packages/extensions/evolution/claude-plugin/skills/evolution-pass/SKILL.md` prints 1 line; `pnpm install` from the repo root, then `rg -n "packages/extensions/evolution" pnpm-lock.yaml` returns one line; the skill drafts no lesson for a `codex:` habit key |
 | `docs/superpowers/specs/2026-11-24-evolution-loop-first-run.md` (new) — U4 | Holds the watched-run checklist. Each check has an expected result. The run itself is a watched manual run of `evolution-pass` in the dev app (`pnpm run dev:user2` in `packages/electron`). It creates the automation, writes `lessons.json` and the `MEMORY.md` section, and checks the five watched items | none | U3 | `rg -l "evolution-pass" nimbalyst-local/automations` lists 1 file; `jq '.cursor' nimbalyst-local/evolution/lessons.json` prints a date; `jq '.passSessionIds | length' nimbalyst-local/evolution/lessons.json` prints 1; `rg -c "evolution:lessons:(start|end)" ~/.claude/projects/-Volumes-josh-external-Projects-Nimbalyst/memory/MEMORY.md` prints 2 (the concrete path for this workspace; for a session in the `nimbalyst/` repo folder the folder name differs, so the check records which file the run named); the `Memory-Spike Learned Patterns` heading is still there in that file |
 
 Before a push, run the gate once for the whole batch: `/Volumes/josh_external/Projects/Nimbalyst/scripts/nim-gate pnpm typecheck:prepush`, then `nim-gate pnpm test:prepush`.
@@ -549,11 +556,11 @@ Before a push, run the gate once for the whole batch: `/Volumes/josh_external/Pr
 | The `MEMORY.md` section collides with `memory-spike learn`, which rewrites the same file | Each tool owns a separately marked section. The pass edits only between its markers and runs at a different hour. The first run checks that the foreign section survives. |
 | A worktree session runs at a different path and loads a different `MEMORY.md`, so it misses lessons | Named check in the first run. The core prompt hook (later sub-project) is the full fix. |
 | The automation runs only while a Nimbalyst window is open on the workspace | Accepted. Every pass reads the last 14 days, so the next run covers the skipped day. |
-| Hook message text drifts, so a new hook falls into `agent-habit` or `other` | One pattern list in one file. The tool returns up to 3 unmatched `other` samples per day, so the list can grow. |
+| Hook message text drifts, so a new hook falls into `habit` or `other` | One pattern list in one file. The tool returns up to 3 unmatched `other` samples per day, so the list can grow. |
 | A permission prompt on the memory write hangs an unattended run | The first run is manual and watched. |
 | The pass's own sessions feed the counts | The handler always leaves out the calling session (`currentSessionId`). The skill passes `passSessionIds` as `excludeSessionIds` and adds its own `callerSessionId`. The after-window excludes them. |
 | The same tracker item is filed twice | `lessons.json` holds a `filed` array. The skill files only keys that are not in `filed`. It runs no tracker search. |
-| No kill condition from the owner | None given by the owner. DM fallback: if after 30 days fewer than 2 lessons have a verdict (`effective` or `ineffective`), stop and review the thresholds before building the core prompt hook. |
+| No kill condition from the owner | None given by the owner. DM fallback: if after 30 days fewer than 2 lessons have a final verdict (`effective` or `ineffective`), stop and review the thresholds before building the core prompt hook. |
 | Running sessions keep a frozen prompt | The after-window counts only sessions created after activation. |
 | Plugins are skipped when `explicitOnly` is true | A deliberate user choice (`sdkOptionsBuilder.ts:387`). The pass then does not run. This is correct. |
 
@@ -563,17 +570,31 @@ Before a push, run the gate once for the whole batch: `/Volumes/josh_external/Pr
 
 Later sub-projects, not part of v1:
 - The core prompt hook: make `registerContextProvider` work for coding agents, so Codex gets lessons (it only logs today: `packages/runtime/src/extensions/ExtensionLoader.ts:1026-1037`, from the research doc).
-- A Codex failure reader (Codex stores `item/completed` rows with `status` and `error`; `CodexAppServerRawParser.ts:526`, from the research doc).
+- (Done in v1, owner Q11) The Codex failure reader: Codex stores `item/completed` rows with `status` and `error` (`CodexAppServerRawParser.ts:526`, from the research doc). See D3.
 - The upstream pull requests for U1 and U2.
 
 Settled during spec review (2026-11-24). The DM settled each item with the evidence named. The decision is applied in the Design, Success Criteria, Testing Decisions, Units of Work, and Risks sections.
-1. Read window. Every pass calls `get_tool_failures` with `since` set 14 days back for the habit and setup counts. The cursor only marks which day the last pass finished. It no longer limits the read. Evidence: the habit rule needs hits on 2 or more days (Success Criteria 8), and a read from the cursor covers one day.
-2. Duplicate tracker items. `lessons.json` gains a top-level `filed` array of `{ key, bucket, trackerItemId, filedAt }`. The skill files a tracker item only for a key not in `filed`, then appends to `filed`. It runs no tracker search. Evidence: D5 had no field for filed keys before this review.
+1. Read window. Every pass calls `get_tool_failures` with `since` set 14 days back for the habit and broken-tool counts. The cursor only marks which day the last pass finished. It no longer limits the read. Evidence: the habit rule needs hits on 2 or more days (Success Criteria 8), and a read from the cursor covers one day.
+2. Duplicate tracker items. `lessons.json` gains a top-level `filed` array of `{ key, bucket, trackerItemId, filedAt, resolvedCommentAt? }`. The skill files a tracker item only for a key not in `filed`, then appends to `filed`. It runs no tracker search. Evidence: D5 had no field for filed keys before this review.
 3. The pass's own sessions. The `get_tool_failures` handler always excludes `currentSessionId` and returns `callerSessionId`. `lessons.json` gains `passSessionIds` (the last 30 run session ids, newest first). The skill passes them as `excludeSessionIds` and adds its own id from `callerSessionId`. Evidence: every handler in `packages/electron/src/main/mcp/sessionContextServer.ts` receives `currentSessionId` (for example `handleGetSessionCoachingSignals`, lines 263-268). Automation runs start through `ai.sendPrompt` with `sessionName: "Automation: <title>"` (`packages/extensions/automations/src/index.tsx:72-77`), so each run is a new session.
 4. `enabledByDefault`. The value is `true`. Turning the extension on runs nothing by itself. The daily automation exists only after the skill's setup step. Evidence: every built-in extension manifest that sets it uses `true` (13 extensions: animation, automations, canvas, crew, datamodellm, developer, excalidraw, extension-dev-kit, feedback, ios-dev, knowledge, mockuplm, planning).
-5. Kill condition. None given by the owner. DM fallback: if after 30 days fewer than 2 lessons have a verdict (`effective` or `ineffective`), stop and review the thresholds before building the core prompt hook. Evidence: the approved design holds no kill condition (Idea Brief).
+5. Kill condition. None given by the owner. DM fallback: if after 30 days fewer than 2 lessons have a final verdict (`effective` or `ineffective`), stop and review the thresholds before building the core prompt hook. Evidence: the approved design holds no kill condition (Idea Brief).
 6. Upstream docstring style. The fork uses the owner's `Args::type` layout (U0). Before the first upstream pull request, the owner decides whether to convert core files to prose JSDoc. This does not block the build.
 7. `isSyntheticPrompt`. Keep its use in `toolFailures.ts` as written: it skips machine-written text rows so a reminder is never read as a tool result. Evidence: the test fixtures pin it.
 8. Tool names. The skill steps use the agent-facing name `mcp__nimbalyst-automations__automations_create`. The extension registers the same tool as `automations.create`. Evidence: `packages/extensions/automations/src/index.tsx:203`.
 9. Workspace scope. `ai_sessions.workspace_id` holds the workspace path. Evidence: database query, 2026-11-24, for example `/Users/joshuarichter/Documents/Projects/Tools/Phoenix`.
 10. Row shape. A failed Claude Code result row's `content` starts `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"PreToolUse:Bash hook error: ...","is_error":true,"tool_use_id":...`. Evidence: database query, 2026-11-23.
+
+Settled in grilling (2026-11-24):
+- Terms settled in grilling on 2026-11-24 and recorded in `GLOSSARY.md` (Evolution loop section): evolution loop, evolution pass, blocked call, broken tool, habit key, lesson, verdict, final verdict.
+- A refused tool call (class `denied`) stays a habit key: a refusal the agent keeps causing is a habit (owner, 2026-11-24).
+- A blocked call from a hook outside the workspace (for example `~/.claude/hooks/`) still gets a tracker item in this workspace, and the item names the hook file path (owner, 2026-11-24).
+- A retired lesson is never retried; the pass files 'Lesson did not help: <habitKey>' (owner, Q9).
+- A hand-reworded lesson keeps its clock (owner, Q10).
+- Codex sessions are counted too, with their own pairing function (owner, Q11).
+- The pass comments on an item whose failures stopped for 14 days; the owner closes it (owner, Q12).
+- Each workspace has its own setup step, lessons and counts (owner, Q13).
+- Codex failures make tracker items only; Codex habit keys get no lessons until the core prompt hook ships (owner, Q14).
+- Codex keys start with `codex:` (owner, Q15).
+- No notices for go-live or retirement (owner, Q16).
+- Stopping the loop = turning off the 'Evolution pass' automation; the lessons section stays until the owner deletes it (owner, Q17).
