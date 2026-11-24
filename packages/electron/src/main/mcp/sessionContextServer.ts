@@ -26,6 +26,14 @@ import {
   type CoachingMessageRow,
 } from "./sessionCoachingSignals";
 import {
+  deriveToolFailures,
+  evaluateHabitKeys,
+  type HabitKeyInput,
+  type ToolFailureRow,
+  type ToolFailuresResult,
+} from "./toolFailures";
+import { toMillis } from "../utils/timestampUtils";
+import {
   LIST_CITABLE_INPUTS_TOOL_NAME,
   LIST_CITABLE_INPUTS_TOOL_SCHEMA,
 } from "../services/pageCitations/listCitableInputs";
@@ -119,6 +127,216 @@ export async function fetchLastAssistantResponse(
     .join("\n");
   if (assembled.length === 0) return null;
   return assembled.slice(0, maxLen);
+}
+
+// ─── Tool failures (`get_tool_failures`) ─────────────────────────────
+
+/**
+ * Holds the inputs of `get_tool_failures`
+ *
+ * Attributes:
+ *     since::unknown
+ *         An ISO time. The handler cuts it down to 00:00 UTC of its day.
+ *     excludeSessionIds::unknown
+ *         The sessions to leave out, as a list of ids. The skill passes its own
+ *         earlier sessions here.
+ *     habitKeys::unknown
+ *         The habit keys to judge, each as `{ habitKey, activatedAt }`.
+ *     currentSessionId::string
+ *         The session that made the call. The dispatcher sets it, never the model.
+ */
+export interface ToolFailuresArgs {
+  since?: unknown;
+  excludeSessionIds?: unknown;
+  habitKeys?: unknown;
+  currentSessionId: string;
+}
+
+/** One joined row as the database returns it. The time columns differ by backend. */
+interface ToolFailureDbRow {
+  session_id: string;
+  created_at: unknown;
+  content: string;
+  message_kind: string | null;
+  hidden: unknown;
+  session_created_at: unknown;
+}
+
+/**
+ * Reads the workspace rows of tool calls from one UTC day on
+ *
+ * `= ANY($3)` leaves out the listed sessions. The SQLite translator turns it into
+ * `IN (...)`, so one query text serves both backends.
+ */
+const TOOL_FAILURE_ROWS_SQL = `
+  SELECT m.session_id, m.created_at, m.content, m.message_kind, m.hidden,
+         s.created_at AS session_created_at
+  FROM ai_agent_messages m JOIN ai_sessions s ON s.id = m.session_id
+  WHERE s.workspace_id = $1 AND m.created_at >= $2 AND m.message_kind = 'tool'
+    AND NOT (m.session_id = ANY($3))
+  ORDER BY m.id ASC`;
+
+/**
+ * Turns a database time into ISO text
+ *
+ * Args:
+ *     value::unknown
+ *         A `Date` (PGLite), ISO text (SQLite) or a number of milliseconds.
+ *
+ * Returns:
+ *     string | undefined
+ *         The time as ISO text. `undefined` when the value is not a time.
+ */
+function toIsoText(value: unknown): string | undefined {
+  const ms = toMillis(value);
+  return ms === null || Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
+}
+
+/**
+ * Cuts a time down to 00:00 UTC of its day
+ *
+ * Args:
+ *     value::unknown
+ *         An ISO time as text.
+ *
+ * Returns:
+ *     string | undefined
+ *         The start of the UTC day as ISO text. `undefined` when the value is not
+ *         a valid time.
+ */
+function startOfUtcDay(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const iso = toIsoText(Date.parse(value));
+  return iso === undefined ? undefined : `${iso.slice(0, 10)}T00:00:00.000Z`;
+}
+
+/**
+ * Turns one database row into the row type that `toolFailures.ts` reads
+ *
+ * Args:
+ *     row::ToolFailureDbRow
+ *         A joined row with backend-specific time and flag types.
+ *
+ * Returns:
+ *     ToolFailureRow
+ *         The row with ISO text times and a boolean `hidden`.
+ */
+function toToolFailureRow(row: ToolFailureDbRow): ToolFailureRow {
+  return {
+    session_id: row.session_id,
+    created_at: toIsoText(row.created_at) ?? "",
+    session_created_at: toIsoText(row.session_created_at),
+    content: row.content,
+    message_kind: row.message_kind,
+    searchable_text: null,
+    metadata: null,
+    hidden: Boolean(row.hidden),
+  };
+}
+
+/** The furthest back a caller can read, in days. */
+const MAX_LOOKBACK_DAYS = 60;
+
+/** The inputs of `get_tool_failures` after the checks, or the reason they failed. */
+type ParsedToolFailuresArgs =
+  | { since: string; habitKeys: HabitKeyInput[]; excluded: string[] }
+  | { error: string };
+
+/**
+ * Checks the list of habit keys
+ *
+ * Args:
+ *     value::unknown
+ *         The `habitKeys` input. `undefined` means no keys to judge.
+ *
+ * Returns:
+ *     `HabitKeyInput[] | undefined`
+ *         The keys. `undefined` when the value is not a list of
+ *         `{ habitKey, activatedAt }` with a valid ISO time.
+ */
+function parseHabitKeys(value: unknown): HabitKeyInput[] | undefined {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return undefined;
+  const keys: HabitKeyInput[] = [];
+  for (const item of value) {
+    const { habitKey, activatedAt } = (item ?? {}) as Record<string, unknown>;
+    if (typeof habitKey !== "string" || !habitKey) return undefined;
+    if (typeof activatedAt !== "string" || toIsoText(Date.parse(activatedAt)) === undefined) return undefined;
+    keys.push({ habitKey, activatedAt });
+  }
+  return keys;
+}
+
+/**
+ * Checks the inputs of `get_tool_failures`
+ *
+ * A `since` more than 60 days back is moved to 60 days back. The skill reads at most
+ * 59 days: a lesson judged on day 45, minus the 14-day before window.
+ *
+ * Args:
+ *     args::ToolFailuresArgs
+ *         The raw inputs and the calling session.
+ *
+ * Returns:
+ *     ParsedToolFailuresArgs
+ *         The checked inputs. `excluded` holds the pass sessions and the calling
+ *         session, each once. An `error` text names the first input that is wrong.
+ */
+function parseToolFailuresArgs(args: ToolFailuresArgs): ParsedToolFailuresArgs {
+  const requested = startOfUtcDay(args.since);
+  if (requested === undefined) return { error: "since must be an ISO time such as 2026-11-20T00:00:00.000Z" };
+  // A since older than the limit reads from the limit, with no error.
+  const earliest = startOfUtcDay(new Date(Date.now() - MAX_LOOKBACK_DAYS * 86_400_000).toISOString());
+  const since = earliest !== undefined && requested < earliest ? earliest : requested;
+  const exclude = args.excludeSessionIds ?? [];
+  if (!Array.isArray(exclude) || exclude.some((id) => typeof id !== "string")) {
+    return { error: "excludeSessionIds must be a list of session id text" };
+  }
+  const habitKeys = parseHabitKeys(args.habitKeys);
+  if (habitKeys === undefined) {
+    return { error: "habitKeys must be a list of { habitKey, activatedAt } with an ISO activatedAt" };
+  }
+  if (typeof args.currentSessionId !== "string" || !args.currentSessionId) {
+    return { error: "currentSessionId is missing, so the calling session cannot be left out" };
+  }
+  return { since, habitKeys, excluded: [...new Set([...(exclude as string[]), args.currentSessionId])] };
+}
+
+/**
+ * Counts the failed tool calls of one workspace from one UTC day on
+ *
+ * Args:
+ *     db::MessageRowDb
+ *         The database. A test passes a fake.
+ *     workspaceId::string
+ *         The workspace path. Only sessions of this workspace are read.
+ *     args::ToolFailuresArgs
+ *         The tool inputs and the calling session.
+ *
+ * Returns:
+ *     `ToolFailuresResult | { error: string }`
+ *         The counts, or an error text when an input is not valid. It never throws
+ *         for a bad input.
+ */
+export async function fetchToolFailures(
+  db: MessageRowDb,
+  workspaceId: string,
+  args: ToolFailuresArgs,
+): Promise<ToolFailuresResult | { error: string }> {
+  if (!workspaceId) return { error: "workspace is unknown, so no sessions can be read" };
+  const parsed = parseToolFailuresArgs(args);
+  if ("error" in parsed) return parsed;
+  const { rows } = await db.query<ToolFailureDbRow>(TOOL_FAILURE_ROWS_SQL, [
+    workspaceId,
+    parsed.since,
+    parsed.excluded,
+  ]);
+  const failureRows = rows.map(toToolFailureRow);
+  return {
+    ...deriveToolFailures(failureRows),
+    verdicts: evaluateHabitKeys(failureRows, parsed.habitKeys),
+    callerSessionId: args.currentSessionId,
+  };
 }
 
 // ─── Tool handlers ──────────────────────────────────────────────────
@@ -726,6 +944,41 @@ export const SESSION_CONTEXT_TOOL_SCHEMAS = [
     },
   },
   {
+    name: "get_tool_failures",
+    description:
+      "Count the failed tool calls of every session in the current workspace, per UTC day, as JSON. Each failure lands in one bucket: `blocked` (a hook or Claude Code refused the call), `broken-tool` (the tool cannot run in this setup) or `habit` (the agent used the tool wrongly, keyed `<tool>:<class>`). Returns daily counts, habit hits and distinct days, up to 3 sample texts per key, and a before and after verdict for each habit key you pass. Built for the evolution-pass skill. The calling session is always left out, and `callerSessionId` names it. The `truncated` flag says when a cap was hit.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        since: {
+          type: "string",
+          description:
+            "ISO time. The read starts at 00:00 UTC of this day, so every window holds whole UTC days.",
+        },
+        habitKeys: {
+          type: "array",
+          description:
+            "Habit keys to judge. Each gets the failure counts of the 14 days before and after its lesson went live, and a verdict.",
+          items: {
+            type: "object",
+            properties: {
+              habitKey: { type: "string", description: "The key as <tool>:<class>, for example Bash:exit-code." },
+              activatedAt: { type: "string", description: "ISO time when the lesson went live." },
+            },
+            required: ["habitKey", "activatedAt"],
+          },
+        },
+        excludeSessionIds: {
+          type: "array",
+          description:
+            "Session ids to leave out, such as the earlier sessions of the evolution pass itself.",
+          items: { type: "string" },
+        },
+      },
+      required: ["since"],
+    },
+  },
+  {
     name: "get_workstream_overview",
     description:
       "Get an overview of the current workstream (parent session with child sessions). Shows all child sessions with their titles, message counts, and files edited. Use this to understand the broader context when working in a workstream.",
@@ -899,6 +1152,18 @@ export async function dispatchSessionContextTool(
           content: [{ type: "text", text: result }],
           isError: result.startsWith("Error:"),
         };
+      }
+
+      case "get_tool_failures": {
+        // `currentSessionId` comes last, so the model cannot override it.
+        const result = await fetchToolFailures(database, workspaceId, {
+          ...args,
+          currentSessionId: aiSessionId,
+        });
+        if ("error" in result) {
+          return { content: [{ type: "text", text: `Error: ${result.error}` }], isError: true };
+        }
+        return { content: [{ type: "text", text: JSON.stringify(result) }], isError: false };
       }
 
       case "get_workstream_overview": {

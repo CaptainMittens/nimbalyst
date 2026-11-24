@@ -125,7 +125,7 @@ The only always-loaded internal surface — universal agent↔host glue.
 ### `mcp__nimbalyst-host` — settings, cross-session context, and orchestration (deferred)
 
 - Settings: AI defaults, theme, completion sound, spellcheck, sync, extension enabled state, workspace trust — all settable via MCP.
-- Cross-session context: `list_recent_sessions`, `get_session_summary` (read what another session did), `get_session_coaching_signals` (bounded structured evidence for one session — tool usage, the user's own prompts, tracker links; workspace-scoped and capped for many-session sweeps), `get_workstream_overview` / `get_workstream_edited_files`, `update_session_board` (change phase/tags on *another* session by ID), `schedule_wakeup`.
+- Cross-session context: `list_recent_sessions`, `get_session_summary` (read what another session did), `get_session_coaching_signals` (bounded structured evidence for one session — tool usage, the user's own prompts, tracker links; workspace-scoped and capped for many-session sweeps), `get_tool_failures` (daily counts of failed tool calls in this workspace, sorted into blocked, broken-tool and habit buckets, with before and after verdicts for a lesson; used by the evolution pass), `get_workstream_overview` / `get_workstream_edited_files`, `update_session_board` (change phase/tags on *another* session by ID), `schedule_wakeup`.
 - Extensions: `extensions_list` (installed + enabled state, plus what the marketplace registry offers), `extension_set_enabled`.
 - Orchestrate other sessions: `spawn_session` / `create_session`, `send_prompt`, `get_session_status` / `get_session_result` / `list_spawned_sessions`, `respond_to_prompt`, `list_worktrees`. Used by any "spawn N parallel reviewers" pattern.
 

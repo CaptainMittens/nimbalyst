@@ -1,0 +1,19 @@
+{
+  "id": "com.nimbalyst.evolution",
+  "name": "Evolution",
+  "version": "1.0.0",
+  "description": "Learns from repeated tool failures: files tracker items and writes short lessons",
+  "apiVersion": "1.0.0",
+  "permissions": {
+    "filesystem": true,
+    "ai": true
+  },
+  "contributions": {
+    "claudePlugin": {
+      "path": "claude-plugin",
+      "displayName": "Evolution",
+      "description": "Daily evolution pass: files tracker items for blocked calls and broken tools, and writes lessons for repeated failures",
+      "enabledByDefault": true
+    }
+  }
+}

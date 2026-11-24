@@ -420,6 +420,7 @@ Companion app; pairs with a desktop over encrypted sync. Voice mode is not inclu
 - Crew (Alpha) -- off by default; persistent agent personas (for example a PM) defined as markdown files in `nimbalyst-local/crew/`, each with a role directive, notes, a journal, weekly/interval shift schedules, notification limits, and token budgets counted across all tokens including cache. Shifts run as ordinary agent sessions grouped under the member's workstream, in the project's normal permission mode. Fullscreen panel with roster, per-member desk (embedded transcript), feed, and hiring from templates or by cloning a member; `/crew:hire` designs a new member from a job description in any agent session. Desktop only; schedules run only while the project is open, and a missed run fires once on reopen
 - DataModelLM
 - Developer Tools
+- Evolution -- an `evolution-pass` agent skill that reads the last 14 days of tool failures in a workspace, files tracker items for blocked calls and broken tools, writes short lessons for repeated failures into the Claude Code memory file, and retires lessons whose failure rate did not drop; its setup step creates a daily automation, which the user turns off to stop the loop
 - Excalidraw
 - Extension Dev Kit
 - Git -- commit history, diffs, push/pull, and branch operations

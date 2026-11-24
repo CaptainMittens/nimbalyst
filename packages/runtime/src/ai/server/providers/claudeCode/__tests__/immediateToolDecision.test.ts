@@ -206,6 +206,18 @@ describe('resolveImmediateToolDecision', () => {
       expect(result).toBeNull();
     });
 
+    it('mcp__nimbalyst-host__get_tool_failures is auto-allowed with no prompt', async () => {
+      expect(INTERNAL_MCP_TOOLS).toContain('mcp__nimbalyst-host__get_tool_failures');
+
+      const deps = createDeps({ internalMcpTools: INTERNAL_MCP_TOOLS as readonly string[] as string[] });
+      const params = createParams({
+        toolName: 'mcp__nimbalyst-host__get_tool_failures',
+        input: { since: '2026-11-10T00:00:00.000Z' },
+      });
+      const result = await resolveImmediateToolDecision(deps, params);
+      assertZodCompliantAllow(result);
+    });
+
     it('still auto-allows the core internal tools (regression guard)', async () => {
       // Make sure the tracker entries did not remove or break the core internal
       // tools (now on the eager `nimbalyst` server).
