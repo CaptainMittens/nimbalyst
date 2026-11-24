@@ -4,10 +4,10 @@ layout: balanced
 ---
 
 # Atlas Evolution 0.13.0
-> A Hermes plugin that learns from repeat tool failures. 28,226 lines of Python, MIT licence. Colours: green = carries over to Nimbalyst, yellow = carries over with a gap, red = Hermes only.
+> A Hermes plugin that learns from repeat tool failures. 28,226 lines of Python, MIT licence. Colours: green = carries over to Nimbalyst, yellow = carries over with a gap, red = Hermes only. Status on each "Nimbalyst fit" node: done = built on branch feat/evolution-loop (commit 9769852b2, 17 files, 2,316 lines added), todo = not built, question = open. Updated 2026-11-24.
 
 ## 1 Signals {color: yellow}
-> Collects what goes wrong. Nimbalyst stores every tool call in ai_agent_messages, but nothing reads failures out of it yet.
+> Collects what goes wrong. Nimbalyst stores every tool call in ai_agent_messages.
 - Hooks it listens to {tags: hermes}
   - post_tool_call: failed tool calls
   - pre_llm_call and post_llm_call: turn timing
@@ -22,8 +22,9 @@ layout: balanced
   - Owner corrections
 - 14-day history replay seeds the first pass
 - Modules: signals, logwatch, backfill, telemetry, operations
-- Nimbalyst fit {color: yellow, status: todo}
-  > get_session_coaching_signals keeps tool names and counts only, with no error field (sessionCoachingSignals.ts:33). A failure reader is a core change.
+- Nimbalyst fit {color: green, status: done}
+  > Built: the tool get_tool_failures (sessionContextServer.ts) reads ai_agent_messages through toolFailures.ts. Three buckets: blocked, broken-tool, habit. Seven habit classes. Codex rows have their own pairing, with codex: keys.
+  - Not carried over: turn timing, API errors, skill use, owner corrections {status: todo}
 
 ## 2 Lessons {color: green}
 > The core idea. A repeat failure becomes a short "when X, do Y" rule.
@@ -39,16 +40,19 @@ layout: balanced
   - shown, hints, verdict, rate_before, rate_after
   - baseline_failures, baseline_calls
 - Modules: lessons, reflector, hints, packs
-- Nimbalyst fit {color: green, status: idea}
-  > New evolution extension. Lesson text as nimbalyst-memory facts.
+- Nimbalyst fit {color: green, status: done}
+  > Built as step 4 of the evolution-pass skill: a habit key with 3+ hits on 2+ days and no lesson becomes a live lesson in lessons.json. The agent writes the text; it goes live at once, with no owner wait. Codex keys get no lesson. Not run yet.
 
 ## 3 Delivery {color: yellow}
 > How the agent sees active lessons.
 - Prompt section, 1,400 characters at most
 - Hint added to a failing tool result (tool_hints on)
 - Optional agent tool: hermes_atlas_evolution_lessons
-- Nimbalyst fit {color: yellow, status: question}
-  > registerContextProvider only logs (ExtensionLoader.ts:1026). Workaround: a marked section in a memory file Claude Code reads.
+- Nimbalyst fit {color: yellow, status: done}
+  > Built: a section between evolution:lessons markers in the Claude Code MEMORY.md, 1,400 characters at most, beside the memory-spike learn section.
+  - Gap: a session in another folder or worktree may load a different MEMORY.md {status: question}
+  - Gap: Codex sessions get no lessons until registerContextProvider works (ExtensionLoader.ts:1026) {status: todo}
+  - Gap: no hint on a failing tool result {status: todo}
 
 ## 4 Measurement {color: green}
 > Checks whether each change helped.
@@ -59,8 +63,10 @@ layout: balanced
   - config edits, skill edits
 - Not yet tested over weeks of real use
 - Modules: experiments, evolve, insights, evolution_index
-- Nimbalyst fit {color: green, status: idea}
-  > The part memory-spike learn and nimbalyst-coach both lack.
+- Nimbalyst fit {color: green, status: done}
+  > Built: evaluateHabitKeys in toolFailures.ts. Inconclusive below 20 calls or 5 before-failures; effective at half the rate; ineffective at 0.9 times the rate with 3+ failures. The skill judges at day 15 to day 45 and retires an ineffective lesson.
+  - Not carried over: change experiments for config and skill edits {status: todo}
+  - Kill check: fewer than 2 final verdicts after 30 days means review the thresholds {status: question}
 
 ## 5 Proposals {color: green}
 > Anything bigger than a lesson waits for the owner.
@@ -71,22 +77,25 @@ layout: balanced
 - Every action logged with an undo
 - skill_rollback opens when a skill change regressed
 - Modules: proposals, decisions, explain
-- Nimbalyst fit {color: green, status: idea}
-  > Tracker items. The owner moves the status.
+- Nimbalyst fit {color: green, status: done}
+  > Built: tracker items "Clarify block message", "Fix tool setup" and "Lesson did not help". The filed list in lessons.json stops a second item for the same key. A comment goes on an item after 14 quiet days; the owner closes it.
 
 ## 6 Schedule and cost {color: green}
 - Autopilot pass about hourly
 - Weekly digest cron job
 - Self-cost meter per hook
 - Modules: autopilot, selfcost, billing, report
-- Nimbalyst fit {color: green, status: idea}
-  > automations extension for the schedule. BackendSessionsService.getUsage for cost.
+- Nimbalyst fit {color: yellow, status: done}
+  > Built: the skill's setup step creates a daily 06:00 automation "Evolution pass". It runs only while a Nimbalyst window is open on the workspace.
+  - Not carried over: cost meter and weekly digest {status: todo}
 
 ## 7 Storage {color: blue}
 - evolution.sqlite3, schema 8
 - settings.json
 - 90-day retention
 - Tables: lesson, change, proposal
+- Nimbalyst {status: done}
+  > One file per workspace: nimbalyst-local/evolution/lessons.json, with cursor, filed, passSessionIds, memoryDir and lessons. No new table.
 
 ## 8 Hermes upkeep {color: red}
 > Hermes-only. Skip for Nimbalyst.
@@ -97,6 +106,22 @@ layout: balanced
 - skill_health, radar
 - ecosystem: Hermes plugin catalog
 - Dashboard tab, menu, admin, cli, i18n
+
+## 9 Nimbalyst v1 status {color: blue}
+> Where the build stands on 2026-11-24.
+- Done {status: done}
+  - Spec, glossary terms, 8 tickets (NIL.6 to NIL.13)
+  - Code and skill on feat/evolution-loop, pushed to the fork
+  - Spec and first-run checklist on docs/evolution-loop-spec, pushed to the fork
+  - Gate: typecheck passed; 16,694 tests passed, 26 skipped
+- Waiting {status: todo}
+  - Watched first run in the dev app: 7 checks, none scored yet
+  - Merge into the fork's main: needs the owner's yes (public repo)
+  - Upstream pull requests for the core parts
+  - NIL.8 to NIL.12 still marked to-do, though the skill already holds their steps
+- Risks {status: question}
+  - Permission prompt on the MEMORY.md write can hang an unattended run
+  - Hook text drifts and new hooks fall into the other class
 
 ## Already on this machine {color: purple}
 - memory-spike learn
