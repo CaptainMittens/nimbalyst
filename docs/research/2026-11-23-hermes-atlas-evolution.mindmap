@@ -1,0 +1,105 @@
+---
+title: Hermes Atlas Evolution
+layout: balanced
+---
+
+# Atlas Evolution 0.13.0
+> A Hermes plugin that learns from repeat tool failures. 28,226 lines of Python, MIT licence. Colours: green = carries over to Nimbalyst, yellow = carries over with a gap, red = Hermes only.
+
+## 1 Signals {color: yellow}
+> Collects what goes wrong. Nimbalyst stores every tool call in ai_agent_messages, but nothing reads failures out of it yet.
+- Hooks it listens to {tags: hermes}
+  - post_tool_call: failed tool calls
+  - pre_llm_call and post_llm_call: turn timing
+  - post_api_request and api_request_error
+  - on_session_end, on_session_finalize
+  - on_skill_lifecycle: skill use
+  - subagent_start, post_compaction
+- What it records
+  - Tool name
+  - One of 22 failure classes
+  - Short detail
+  - Owner corrections
+- 14-day history replay seeds the first pass
+- Modules: signals, logwatch, backfill, telemetry, operations
+- Nimbalyst fit {color: yellow, status: todo}
+  > get_session_coaching_signals keeps tool names and counts only, with no error field (sessionCoachingSignals.ts:33). A failure reader is a core change.
+
+## 2 Lessons {color: green}
+> The core idea. A repeat failure becomes a short "when X, do Y" rule.
+- Rule: 3+ hits on 2+ days or sessions
+- Fixed templates per failure class
+- Reflector: a model drafts lessons with no template
+  - Drafts always wait for the owner
+- Modes
+  - auto: goes live after 2 hits in the owner's own turns
+  - otherwise: waits as a candidate
+- Lesson record (experience.py:63)
+  - signature, tool, klass, hint, origin, status, text
+  - shown, hints, verdict, rate_before, rate_after
+  - baseline_failures, baseline_calls
+- Modules: lessons, reflector, hints, packs
+- Nimbalyst fit {color: green, status: idea}
+  > New evolution extension. Lesson text as nimbalyst-memory facts.
+
+## 3 Delivery {color: yellow}
+> How the agent sees active lessons.
+- Prompt section, 1,400 characters at most
+- Hint added to a failing tool result (tool_hints on)
+- Optional agent tool: hermes_atlas_evolution_lessons
+- Nimbalyst fit {color: yellow, status: question}
+  > registerContextProvider only logs (ExtensionLoader.ts:1026). Workaround: a marked section in a memory file Claude Code reads.
+
+## 4 Measurement {color: green}
+> Checks whether each change helped.
+- Lesson verdict: 14 days before vs 14 days after
+  - effective, ineffective, inconclusive
+  - auto mode retires an ineffective lesson
+- Change experiments: 7 days before vs after
+  - config edits, skill edits
+- Not yet tested over weeks of real use
+- Modules: experiments, evolve, insights, evolution_index
+- Nimbalyst fit {color: green, status: idea}
+  > The part memory-spike learn and nimbalyst-coach both lack.
+
+## 5 Proposals {color: green}
+> Anything bigger than a lesson waits for the owner.
+- Each has risk, evidence, exact command
+- Only the owner approves, in a terminal
+  - Refuses when an agent marker is set
+- Plugin runs only lessons, skill_lock, some environment fixes
+- Every action logged with an undo
+- skill_rollback opens when a skill change regressed
+- Modules: proposals, decisions, explain
+- Nimbalyst fit {color: green, status: idea}
+  > Tracker items. The owner moves the status.
+
+## 6 Schedule and cost {color: green}
+- Autopilot pass about hourly
+- Weekly digest cron job
+- Self-cost meter per hook
+- Modules: autopilot, selfcost, billing, report
+- Nimbalyst fit {color: green, status: idea}
+  > automations extension for the schedule. BackendSessionsService.getUsage for cost.
+
+## 7 Storage {color: blue}
+- evolution.sqlite3, schema 8
+- settings.json
+- 90-day retention
+- Tables: lesson, change, proposal
+
+## 8 Hermes upkeep {color: red}
+> Hermes-only. Skip for Nimbalyst.
+- guard: blocks commands that kill Hermes
+- doctor, hermes_care, environment
+- gateway repair, fleet_update, system_update
+- memory_care: MEMORY.md and USER.md dedupe
+- skill_health, radar
+- ecosystem: Hermes plugin catalog
+- Dashboard tab, menu, admin, cli, i18n
+
+## Already on this machine {color: purple}
+- memory-spike learn
+  > Writes "failed command, then working command" lessons. No measurement, no retirement.
+- nimbalyst-coach
+  > Reads session signals and recommends changes. No failure classes, no verdicts.
