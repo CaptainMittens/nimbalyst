@@ -287,7 +287,7 @@ The class patterns sit beside the hook list in the same file. Tests pin each pat
 | `<tool_use_error>File has not been read yet` | `edit-precondition` | 373 |
 | `PreToolUse:Bash hook error: RPG destructive-guard` | `blocked`, key `destructive-guard` | 296 |
 | `PreToolUse:Bash hook error: ["$HOME/.claude/hooks/...` | `blocked`, key from the script name (for example `model-gate-git`, `paper-gate`) | 142 |
-| `PreToolUse:Bash hook error: Recursive grep block` | `blocked`, key `recursive-grep` | 80 |
+| `PreToolUse:Bash hook error: Recursive grep block` | `blocked`, key `Recursive grep block` (first 40 characters, step 4 of the key rule) | 80 |
 | `<tool_use_error>File has been modified since read` | `edit-precondition` | 72 |
 | `File does not exist.` | `missing-file` | 36 |
 | `<tool_use_error>Error: No such tool available:` | `broken-tool` (see rule 2) | 109 |
