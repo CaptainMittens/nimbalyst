@@ -123,6 +123,34 @@ layout: balanced
   - Permission prompt on the MEMORY.md write can hang an unattended run
   - Hook text drifts and new hooks fall into the other class
 
+## 10 Gap review 2026-11-24 {color: red}
+> Two separate reviews (Sonnet and Fable 5.2; Mythos is not offered by this Nimbalyst build) of branch feat/evolution-loop at 9769852b2. "Both" = both reviewers found it. The lead checked each line marked checked in the code.
+- Fix before the first run {status: todo}
+  - lessons.json saves only at the last step: a failed run files the same items again (both, checked, SKILL.md:65,83)
+  - truncated turns on for any sample over 200 characters, so the "failures stopped" comment never runs (both, checked, toolFailures.ts:606)
+  - automations_list and automations_create are not auto-allowed: setup waits on a prompt (both, checked, toolPolicy.ts)
+  - Hook key: the [tag] rule searches the whole text and the 40-character fallback changes with numbers in the message (both, checked, toolFailures.ts:331)
+  - A block seen once gets a tracker item; the spec target is 20 or more (both, checked, SKILL.md:48)
+  - The skill never reads the clock, so "now" and "14 days back" can be wrong (Sonnet, checked, SKILL.md:60)
+  - Rule 1: resultText repeats extractToolResultText (Sonnet, checked, subagentDrain.ts:46)
+- First-run plan is wrong {status: question}
+  - dev:user2 reads its own empty database, so the run finds no failures (Fable, checked, dev-user2.mjs)
+  - This workspace has few failures; Phoenix has about 9 times more (Fable, database query)
+- Fix after the first run {status: todo}
+  - The query loads every tool row with full text and no limit (both, checked, sessionContextServer.ts:171)
+  - The after-window is a fixed 14 days, so judging again up to day 45 gives the same answer (Fable, checked, toolFailures.ts:868)
+  - No per-tool call totals in the result (Fable)
+  - Bash:exit-code and other keys get lessons that cannot help (both)
+  - A misspelled tool name gets its own "Fix tool setup" item (Sonnet)
+  - Lesson text goes into MEMORY.md with no clean-up of untrusted failure text (Sonnet, security)
+- Atlas parts the spec dropped {status: question}
+  - shown: whether a session loaded the lesson; without it the after-window mixes in sessions that never saw it (Sonnet)
+  - Lesson expiry after quiet days, so the 1,400 characters do not fill (Fable)
+  - Detail in the key, so one exit-code lesson does not cover every command (Fable)
+  - Keep a lesson the owner reworded (Sonnet)
+- Tracker {status: todo}
+  - NIL.8 to NIL.12: code and tests are on the branch; move to in-review (Fable). NIL.13 stays to-do.
+
 ## Already on this machine {color: purple}
 - memory-spike learn
   > Writes "failed command, then working command" lessons. No measurement, no retirement.
