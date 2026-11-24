@@ -4,10 +4,17 @@ The checklist for the first manual run of the `evolution-pass` skill (spec unit 
 
 ## Setup
 
-1. Start the dev app from the build worktree: `cd packages/electron && pnpm run dev:user2`.
-2. Open this workspace in the dev app.
-3. In a new Claude Code session, type: "Run the evolution-pass skill."
-4. Watch the run to the end. Do not answer any dialog until you write it down below.
+`dev:user2` has its own data folder (`~/Library/Application Support/@nimbalyst/electron-user2`), so on its own it sees no tool history. The run reads a copy of the real database instead. Two apps must never open one database at the same time.
+
+1. Quit the installed Nimbalyst, so nothing writes to its database during the copy.
+2. Move the old `electron-user2/sqlite-db` folder to `~/.claude/rpg/trash/<date>/`, if it exists.
+3. Copy `~/Library/Application Support/@nimbalyst/electron/sqlite-db` to `~/Library/Application Support/@nimbalyst/electron-user2/sqlite-db`.
+4. Start the dev app from the build worktree: `cd packages/electron && pnpm run dev:user2`.
+5. Open the Nimbalyst workspace folder (`/Volumes/josh_external/Projects/Nimbalyst`) in the dev app.
+6. In a new Claude Code session, type: "Run the evolution-pass skill."
+7. Watch the run to the end. Do not answer any dialog until you write it down below.
+
+The run counts only the history up to the copy. Sessions after the copy stay in the installed app's database.
 
 ## Checks
 
