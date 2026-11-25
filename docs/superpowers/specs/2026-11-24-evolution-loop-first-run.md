@@ -30,13 +30,21 @@ Score the checks first. Then put the real files back, or the next real pass sees
 
 | # | Check | Expected | Result |
 |--:|:--|:--|:--|
-| 1 | The memory write raises no permission prompt | The run ends with no dialog, and `MEMORY.md` holds both markers | |
-| 2 | The `memory-spike learn` section survives the write | The `Memory-Spike Learned Patterns` heading and its lines are unchanged | |
-| 3 | A session in a git worktree loads the lessons | The session shows the live lessons, or this row records that it does not (a known gap, see Risks) | |
-| 4 | `lessons.json` holds the run's records | `filed` has one entry per item the run filed; `passSessionIds` holds the run's own session id | |
-| 5 | `get_tool_failures` and the automations calls raise no permission prompt | Both calls finish with no dialog | |
-| 6 | The skill is loaded | The session's skill list shows `evolution:evolution-pass` | |
-| 7 | A second run files no duplicate | The tracker gains no second item for the same key | |
+| 1 | The memory write raises no permission prompt | The run ends with no dialog, and `MEMORY.md` holds both markers | Pass (2026-11-25). No dialog; 2 markers; 1 lesson line. |
+| 2 | The `memory-spike learn` section survives the write | The `Memory-Spike Learned Patterns` heading and its lines are unchanged | Pass. A diff shows only 4 added lines, before the heading. |
+| 3 | A session in a git worktree loads the lessons | The session shows the live lessons, or this row records that it does not (a known gap, see Risks) | Does not load (known gap). Claude Code gives each worktree folder its own memory folder: 8 Nimbalyst-Plugins worktrees each have one under `~/.claude/projects/`. A worktree session reads its own `MEMORY.md`, not this one. |
+| 4 | `lessons.json` holds the run's records | `filed` has one entry per item the run filed; `passSessionIds` holds the run's own session id | Pass. 4 items filed, 4 `filed` entries, 1 pass id. |
+| 5 | `get_tool_failures` and the automations calls raise no permission prompt | Both calls finish with no dialog | Pass. `automations_list`, `automations_create` and `get_tool_failures` ran with no dialog. |
+| 6 | The skill is loaded | The session's skill list shows `evolution:evolution-pass` | Pass, in the installed fork build 0.84.4. |
+| 7 | A second run files no duplicate | The tracker gains no second item for the same key | Waits for the 06:00 automation run. |
+
+First run, 2026-11-25, in the installed fork build, on the real database (the database copy was not needed):
+
+- The read covered 14 days, `truncated: false`.
+- Filed 4 items: "Clarify block message" for the recursive-grep block (20 failures), and "Fix tool setup" for Grep (12 of 12), Monitor (1 of 15) and Glob (1 of 1).
+- 1 lesson went live (`Bash:exit-code`, 17 hits on 4 days). Nothing was old enough to judge.
+- Each `tracker_create` reported that the body was not stored in collaborative content. The local body was saved. This workspace has no team.
+- New gap: the pass ran inside a long working session. That session is now in `passSessionIds`, so its own tool failures are never counted. Run the pass in a new session.
 
 ## Commands
 
