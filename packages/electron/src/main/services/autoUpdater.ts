@@ -36,7 +36,8 @@ export { classifyUpdateError, categorizeDownloadDuration, isWindowsRenameLockErr
 const REMINDER_SUPPRESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 const GITHUB_UPDATE_PROVIDER = {
   provider: 'github' as const,
-  owner: 'nimbalyst',
+  // Fork build: update from the fork, which has no releases, so an upstream release never replaces this build.
+  owner: 'CaptainMittens',
   repo: 'nimbalyst'
 };
 

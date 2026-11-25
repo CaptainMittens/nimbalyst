@@ -204,7 +204,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "nimbalyst",
+        "owner": "CaptainMittens",
         "repo": "nimbalyst",
         "releaseType": "release"
       }
