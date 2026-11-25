@@ -151,7 +151,7 @@ export function CommonFileActions({
         </Item>
       )}
 
-      {/* Copy to Pages: Team when the project has one, Personal for markdown
+      {/* Copy to Wiki: Team when the project has one, Personal for markdown
           with or without a team. Unsupported types stay visible (with a team)
           but cannot open the dialog. */}
       {(hasTeam || canCopyToPersonal) && !isCollabUri(filePath) && (
@@ -169,7 +169,7 @@ export function CommonFileActions({
             <MaterialSymbol icon={isDirectory ? 'drive_folder_upload' : 'group'} size={iconSize} />
           )}
           <span className="min-w-0 flex-1">
-            <span className="block">{isDirectory ? 'Share Folder to Team' : 'Copy to Pages...'}</span>
+            <span className="block">{isDirectory ? 'Share Folder to Team' : 'Copy to Wiki...'}</span>
             {shareability.state === 'unsupported' && (
               <span className="block text-[11px] leading-snug text-nim-disabled mt-0.5">
                 {shareability.reason}

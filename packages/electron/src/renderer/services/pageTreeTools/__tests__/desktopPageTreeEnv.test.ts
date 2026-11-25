@@ -11,6 +11,8 @@ vi.mock('../../../store/atoms/collabDocuments', () => ({
   activeCollabScopeAtom: { toString: () => 'activeCollabScopeAtom' },
   getElectronCollabDocsSession: vi.fn(),
   getPersonalCollabDocsSession: vi.fn(),
+  // Every page here is a database page, on the copy-into-an-item path.
+  getPersonalCollabHost: () => ({ source: () => ({ isLegacyDocument: () => true }) }),
 }));
 vi.mock('../../../components/CollabMode/collabTypeResolver', () => ({ buildCollabTypeResolver: vi.fn() }));
 vi.mock('../../collaborativeDocumentCreationOrchestrator', () => ({ createCollaborativeDocument: vi.fn() }));
@@ -84,7 +86,7 @@ describe('agent Set type and the Pages tab strip', () => {
 });
 
 describe('agent createSharedDoc', () => {
-  it('seeds a structured type from its own default when given no content, and keeps code out of Personal', async () => {
+  it('seeds a structured type from its own default when given no content, and keeps Local pages markdown', async () => {
     const { createCollaborativeDocument } = await import('../../collaborativeDocumentCreationOrchestrator');
     const { getCollaborativeDocumentTypeCatalog } = await import('../../CollaborativeDocumentTypeCatalog');
     vi.mocked(getCollaborativeDocumentTypeCatalog).mockReturnValue({
@@ -100,8 +102,10 @@ describe('agent createSharedDoc', () => {
     await env.createPage('team', session, { ...input, documentType: 'markdown' });
     expect(vi.mocked(createCollaborativeDocument).mock.calls[1]![0].sourceContent).toBe('');
 
+    // A Local page is a file in the wiki folder: markdown or an editor type, never code.
+    await env.createPage('personal', session, { ...input, documentType: 'markdown' });
     await env.createPage('personal', session, { ...input, documentType: 'excalidraw' });
     await expect(env.createPage('personal', session, { ...input, documentType: 'code' })).rejects.toThrow(/cannot be a "code" page/);
-    expect(createCollaborativeDocument).toHaveBeenCalledTimes(3);
+    expect(createCollaborativeDocument).toHaveBeenCalledTimes(4);
   });
 });

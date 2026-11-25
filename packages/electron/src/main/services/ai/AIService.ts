@@ -1,5 +1,4 @@
 import { reservePromptAnswer } from './PromptAnswerReservation';
-import { warnIfUnpublished } from '@nimbalyst/runtime/sync/pushOutcome';
 import { sessionInbox } from './sessionInboxService';
 import { resolveProviderApiKey } from './resolveProviderApiKey';
 import { SAVED_CREDENTIAL, withoutProviderConfigCredentials } from '../../../shared/providerCredentials';
@@ -57,6 +56,7 @@ import {
 import { getAIProviderOverridesWithWorktreeFallback } from '../../utils/aiSettingsMerge';
 import { DocumentContextService } from '@nimbalyst/runtime';
 import { getSyncProvider } from '../SyncManager';
+import { publishContextUsage } from './publishContextUsage';
 import { normalizeCodexProviderConfig, stripTransientProviderFields } from '@nimbalyst/runtime/ai/server/utils/modelConfigUtils';
 import { resolveProjectPath } from '../../utils/workspaceDetection';
 import { inferWorktreePathFromFilePath, inferWorktreePathFromCommand } from './worktreeInference';
@@ -81,6 +81,7 @@ import { registerModelHandlers } from './ipc/registerModelHandlers';
 import { registerProjectSettingsHandlers } from './ipc/registerProjectSettingsHandlers';
 import { registerExtensionChatHandlers } from './ipc/registerExtensionChatHandlers';
 import { SessionProcessingGuard, tryClaimAndDispatchNextQueuedPrompt } from './queuedPromptDispatcher';
+import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AISessionsRepository';
 import {
   QueueDriveService,
   type DriveOutcome,
@@ -94,7 +95,10 @@ import { publishQueuedPromptsToSync } from './queuedPromptSyncPublisher';
 import { onWorkspaceWindowAvailable } from '../../window/workspaceWindowAvailability';
 import { dispatchQueuedPromptToClaudeCli } from './claudeCliQueueDispatch';
 import { publishQueuedPromptClaim } from './queuedPromptClaimEvents';
-import { canDispatchIntoDrain } from './drainFollowUp';
+import { canDispatchIntoDrain, isLeadTurnPending } from './drainFollowUp';
+import { hasLiveInteractivePrompt } from '../../mcp/tools/interactivePromptLiveness';
+import { isCommitProposalInFlight } from '@nimbalyst/runtime/ai/server/commitProposalInFlight';
+import { deferInterruptDuringCommit, deferUserSendNowDuringCommit } from './commitInterruptDeferral';
 import { ensureClaudeCliSession } from './claudeCliLauncherSingleton';
 import {
   resolveProviderWorkflowCatalog,
@@ -137,6 +141,8 @@ export interface InterruptCurrentTurnResult {
   method?: 'interrupt' | 'abort' | 'terminal-ctrl-c';
   /** True when the session was forced idle because no completion event could arrive. */
   forcedIdle?: boolean;
+  /** #1682: held until the in-flight commit proposal call settles, then replayed. */
+  deferred?: 'commit-in-flight';
 }
 
 export class AIService {
@@ -248,6 +254,14 @@ export class AIService {
       }
       return (this.getSettingsStore().get('customClaudeCodePath', '') as string) || '';
     });
+
+    // Read fresh each query so the Agent Features toggle applies on the next turn.
+    ClaudeCodeProvider.setPromptSuggestionsEnabledLoader(
+      () => this.getSettingsStore().get('promptSuggestionsEnabled', true) !== false,
+    );
+    ClaudeCodeProvider.setClaudeInChromeEnabledLoader(
+      () => this.getSettingsStore().get('claudeInChromeEnabled', false) === true,
+    );
 
     // API keys must be explicitly set by the user in settings.
     // NEVER auto-import keys from process.env. A user's .env file with
@@ -441,6 +455,10 @@ export class AIService {
           return !!liveState && (liveState.status === 'running' || liveState.isStreaming);
         },
         canDispatchIntoDrain,
+        isAwaitingUserInput: (id) =>
+          getSessionStateManager().getSessionState(id)?.status === 'waiting_for_input'
+          || hasLiveInteractivePrompt(id),
+        isCommitProposalInFlight,
         resolveWindow: (path, allowAutoOpen) =>
           this.queueWindowResolver.resolve(path, { allowAutoOpen }),
         failAllPending: async (id, errorMessage) => {
@@ -476,13 +494,35 @@ export class AIService {
    * sweepExecutingForSession (delivery-aware -- already delivered prompts are
    * marked completed, not rolled back, so a follow-up queue drive doesn't
    * re-send the same input -- NIM-615).
+   *
+   * `userSendNow` marks the user's own send-now, which closes a commit
+   * proposal still waiting on them instead of waiting for it (NIM-7642).
+   * Meta-agent interrupts leave it unset.
    */
-  public async interruptCurrentTurn(sessionId: string): Promise<InterruptCurrentTurnResult> {
+  public async interruptCurrentTurn(
+    sessionId: string,
+    options: { userSendNow?: boolean } = {},
+  ): Promise<InterruptCurrentTurnResult> {
     if (!sessionId) {
       throw new Error('Session ID is required to interrupt');
     }
 
     const { AISessionsRepository } = await import('@nimbalyst/runtime/storage/repositories/AISessionsRepository');
+    // #1682: an interrupt mid-commit makes the SDK report a rejection while the
+    // commit lands. Hold it and replay the send-now once the call settles.
+    const deferDuringCommit = options.userSendNow ? deferUserSendNowDuringCommit : deferInterruptDuringCommit;
+    if (await deferDuringCommit(sessionId, {
+      hasPendingPrompts: async (id) => (await (await import('../RepositoryManager')).getQueuedPromptsStore().listPending(id)).length > 0,
+      interrupt: (id) => this.interruptCurrentTurn(id),
+      drive: async (id) => {
+        const row = await AISessionsRepository.get(id);
+        const path = row?.worktreePath || row?.workspacePath;
+        if (path) await this.driveQueuedPrompts(id, path, 'send-now');
+      },
+      logWarn: (message) => logger.main.warn(message),
+    })) {
+      return { success: false, deferred: 'commit-in-flight', error: 'A commit proposal is in progress; the interrupt runs when it settles.' };
+    }
     const session = await AISessionsRepository.get(sessionId);
     if (!session) {
       return { success: false, error: 'Session not found' };
@@ -927,7 +967,9 @@ export class AIService {
       logError: (message, error) => logger.main.error(message, error),
       logInfo: (message) => logger.main.info(message),
       resolveLiveWindow: findWindowByWorkspace,
+      resolveSessionTitle: async (id) => (await AISessionsRepository.get(id))?.title ?? undefined,
       canBypassChainGuard: () => canDispatchIntoDrain(sessionId),
+      isLeadTurnPending: () => isLeadTurnPending(sessionId),
       onAfterSettled: async () => {
         try {
           const { AISessionsRepository } = await import('@nimbalyst/runtime/storage/repositories/AISessionsRepository');
@@ -1181,20 +1223,7 @@ export class AIService {
             // Push context usage to mobile sync
             const syncProvider = getSyncProvider();
             if (syncProvider) {
-              try {
-                const outcome = await syncProvider.pushChange(session.id, {
-                  type: 'metadata_updated',
-                  metadata: {
-                    currentContext: {
-                      tokens: parsedUsage.totalTokens,
-                      contextWindow: parsedUsage.contextWindow,
-                    },
-                  },
-                });
-                warnIfUnpublished(message => logger.main.warn(message), session.id, '[AIService] Failed to publish sync change', outcome);
-              } catch (error) {
-                logger.main.warn(`[AIService] Failed to publish sync change for session ${session.id}:`, error);
-              }
+              await publishContextUsage(syncProvider, session.id, { tokens: parsedUsage.totalTokens, contextWindow: parsedUsage.contextWindow });
             }
 
             // Also send IPC event to update UI immediately
@@ -1260,7 +1289,7 @@ export class AIService {
       publishQueueStateToSync: (sessionId) => this.publishQueueStateToSync(sessionId),
       driveQueuedPrompts: (sessionId, workspacePath, reason) => this.driveQueuedPrompts(sessionId, workspacePath, reason),
       forceSessionIdleOnCancel: (sessionId) => this.forceSessionIdleOnCancel(sessionId),
-      interruptCurrentTurn: (sessionId) => this.interruptCurrentTurn(sessionId),
+      interruptCurrentTurn: (sessionId, options) => this.interruptCurrentTurn(sessionId, options),
 
       createToolHandler: (webContents, documentContext, sessionId, workspaceId) =>
         this.createToolHandler(webContents, documentContext, sessionId, workspaceId),

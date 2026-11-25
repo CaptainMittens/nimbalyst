@@ -19,6 +19,7 @@ import React, { useCallback, useRef, useImperativeHandle, forwardRef, useEffect,
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
 import { store, registerInteractiveWidgetHost, unregisterInteractiveWidgetHost } from '@nimbalyst/runtime/store';
 import type { SessionData, ChatAttachment, TranscriptViewMessage } from '@nimbalyst/runtime/ai/server/types';
+import type { ExitPlanModeDeferral } from '@nimbalyst/runtime/ai/exitPlanModeDeferral';
 import { agentCapabilitiesForProviderType } from '@nimbalyst/runtime/ai/server/agentCapabilities';
 import type { ToolCallDiffLoadResult } from '@nimbalyst/runtime/ai/server/transcript';
 import { AgentTranscriptPanel } from '@nimbalyst/runtime/ui/AgentTranscript/components/AgentTranscriptPanel';
@@ -42,6 +43,7 @@ import { useDialog } from '../../contexts/DialogContext';
 import { FileGutter } from '../AIChat/FileGutter';
 import { recordClaudeActivity } from '../../store/listeners/claudeUsageListeners';
 import { recordCodexActivity } from '../../store/listeners/codexUsageListeners';
+import { revealOwnedTerminal } from '../../store/listeners/terminalRevealListeners';
 import { PendingReviewBanner } from '../AIChat/PendingReviewBanner';
 import { WakeupBanner } from '../AIChat/WakeupBanner';
 import { McpLockdownBanner } from '../AIChat/McpLockdownBanner';
@@ -76,6 +78,7 @@ import {
   sessionThinkingModeRawAtom,
   sessionOpenCodeRoleAtom,
   sessionLoadingAtom,
+  sessionLoadErrorAtom,
   sessionModeAtom,
   sessionModelAtom,
   sessionArchivedAtom,
@@ -107,6 +110,7 @@ import {
 import { streamCompletionSignalAtom } from '../../store/atoms/sessionTranscript';
 import { sessionBackgroundTasksAtom } from '../../store/atoms/sessionBackgroundTasks';
 import { sessionPromptAdditionsAtom, sessionLastSubmitAtAtom, sessionDraftLocalModifiedAtAtom, nextOptimisticId } from '../../store/atoms/sessions';
+import { sessionViewRetention } from '../../store/sessionViewRetention';
 import { clearAIInputHistoryAtom } from '../../store/atoms/aiInputUndo';
 import {
   cliTerminalExpandedAtom,
@@ -134,6 +138,7 @@ import { resolveTranscriptClickPath } from '../../utils/resolveTranscriptClickPa
 import { openAgentEditedPage } from '../../utils/agentEditedPage';
 import { saveSessionArchived } from '../../utils/saveSessionArchived';
 import { autoCommitEnabledAtom, setAutoCommitEnabledAtom } from '../../store/atoms/autoCommitAtoms';
+import { settingAtom } from '../../store/atoms/settingAtomFamily';
 import { diffPeekSizeAtom, setDiffPeekSizeAtom } from '../../store/atoms/diffPeekSizeAtoms';
 import { registerSessionWorkspace, loadInitialSessionFileState } from '../../store/listeners/fileStateListeners';
 import { sessionFileEditsAtom } from '../../store/atoms/sessionFiles';
@@ -408,6 +413,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
   const compactionSupport = agentCapabilitiesForProviderType(provider).compaction;
   const tokenUsage = useAtomValue(sessionTokenUsageAtom(sessionId));
   const isDataLoading = useAtomValue(sessionLoadingAtom(sessionId));
+  const loadError = useAtomValue(sessionLoadErrorAtom(sessionId));
   const chatShowToolCalls = useAtomValue(chatShowToolCallsAtom);
   const [aiMode, setAiMode] = useAtom(sessionModeAtom(sessionId));
   const [currentModel, setCurrentModel] = useAtom(sessionModelAtom(sessionId));
@@ -751,6 +757,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
   // Auto-commit setting
   const autoCommitEnabled = useAtomValue(autoCommitEnabledAtom);
   const setAutoCommitEnabled = useSetAtom(setAutoCommitEnabledAtom);
+  const usageLimitAutoResumeEnabled = useAtomValue(settingAtom('ai.usageLimitAutoResumeEnabled'));
 
   // Diff peek popover size (shared with git extension)
   const diffPeekSize = useAtomValue(diffPeekSizeAtom);
@@ -772,6 +779,9 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
   // ============================================================
   // Load session data on mount
   // ============================================================
+  // Keep this session's messages resident while it is shown.
+  useEffect(() => (sessionId ? sessionViewRetention.acquire(sessionId) : undefined), [sessionId]);
+
   useEffect(() => {
     if (!sessionId || !workspacePath) return;
     if (!hasSessionData) {
@@ -880,7 +890,9 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
         (sessionError.message.toLowerCase().includes('401 unauthorized') ||
          (sessionError.message.toLowerCase().includes('401') && sessionError.message.toLowerCase().includes('authentication')));
 
-      if (!isCodexOpenAIAuthError) {
+      // A usage-limit block is already saved as the rate-limit card, which
+      // carries the auto-resume switch; a local copy would show it twice.
+      if (!isCodexOpenAIAuthError && !sessionError.isUsageLimit) {
         // Add error as an assistant message so user can see what went wrong.
         // isCodexAuthRequired short-circuits the rendered text to a CTA widget
         // that opens the Codex auth section in settings; the raw error string
@@ -1403,6 +1415,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
           actionLabel: action.label,
           config: {
             model: action.config.model,
+            effort: action.config.effort,
             foreground: action.config.foreground,
             autoSubmit: action.config.autoSubmit,
             worktree: action.config.worktree,
@@ -1465,7 +1478,14 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
     return !!registration?.supportsTranscriptEmbed;
   }, []);
 
+  // Read through a ref so handleCompact keeps its identity across message
+  // updates; it is threaded down to every transcript row, and a new identity
+  // per streamed frame would defeat the row memoization.
+  const compactStateRef = useRef({ sessionData, messages });
+  compactStateRef.current = { sessionData, messages };
+
   const handleCompact = useCallback(async () => {
+    const { sessionData, messages } = compactStateRef.current;
     if (!sessionData) return;
 
     // Phase 4: the provider's declared capability chooses the mechanism. This
@@ -1513,7 +1533,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
     } catch (error) {
       console.error('[SessionTranscript] Failed to send /compact command:', error);
     }
-  }, [sessionId, sessionData, messages, getEffectiveDocumentContext, aiMode, workspacePath, updateSessionStore, compactionSupport]);
+  }, [sessionId, getEffectiveDocumentContext, aiMode, workspacePath, updateSessionStore, compactionSupport]);
 
   const handleTodoClick = useCallback((todo: TodoItem) => {
     onTodoClick?.(todo);
@@ -1701,13 +1721,15 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
     }));
   }, [workspacePath]);
 
-  const stopExitPlanModeSession = useCallback(async (requestId: string, confirmSessionId: string) => {
+  // deferredTo is set when the plan is implemented in another session; the
+  // provider records it in the tool result so the plan card says so.
+  const stopExitPlanModeSession = useCallback(async (requestId: string, confirmSessionId: string, deferredTo?: ExitPlanModeDeferral) => {
     // Mark the prompt as cancelled in DB so it doesn't reappear
     await respondToPrompt({
       sessionId: confirmSessionId,
       promptId: requestId,
       promptType: 'exit_plan_mode_request',
-      response: { approved: false, cancelled: true },
+      response: { approved: false, cancelled: true, deferredTo },
     });
 
     // Cancel the entire agent session - this will abort the waiting ExitPlanMode request
@@ -1743,7 +1765,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
       });
 
       openSessionWithDraft(newSessionId, implementationPrompt);
-      await stopExitPlanModeSession(requestId, confirmSessionId);
+      await stopExitPlanModeSession(requestId, confirmSessionId, { kind: 'session' });
 
       posthog?.capture('exit_plan_mode_response', {
         decision: 'start_new_session',
@@ -1919,6 +1941,13 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
       autoCommitEnabled,
       setAutoCommitEnabled: (enabled: boolean) => {
         setAutoCommitEnabled(enabled);
+      },
+
+      // Usage-limit auto-resume (the rate-limit card's switch)
+      usageLimitAutoResumeEnabled,
+      setUsageLimitAutoResume: async (enabled: boolean, resetsAtMs: number | null) => {
+        const current = workspacePath && resetsAtMs != null ? { sessionId, workspacePath, resetsAtMs } : undefined;
+        await window.electronAPI.invoke('wakeup:set-usage-limit-auto-resume', enabled, current);
       },
 
       // Git commit operations
@@ -2167,6 +2196,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
         }
       },
       openPage: (uri: string) => openAgentEditedPage(uri, workspacePath || ''),
+      revealCommandTerminal: (owner) => revealOwnedTerminal({ workspacePath: workspacePath || '', ...owner }),
       trackEvent: (eventName: string, properties?: Record<string, unknown>) => {
         posthog?.capture(eventName, properties);
       },
@@ -2182,6 +2212,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
       get workspacePath() { return liveHostRef.current?.workspacePath ?? (workspacePath || ''); },
       get worktreeId() { return liveHostRef.current?.worktreeId ?? worktreeId; },
       get autoCommitEnabled() { return liveHostRef.current?.autoCommitEnabled ?? false; },
+      get usageLimitAutoResumeEnabled() { return liveHostRef.current?.usageLimitAutoResumeEnabled ?? false; },
       get diffPeekSize() { return getDiffPeekSizeForInteractiveWidgetHost(liveHostRef.current); },
       askUserQuestionSubmit: (...args) => liveHostRef.current!.askUserQuestionSubmit(...args),
       askUserQuestionCancel: (...args) => liveHostRef.current!.askUserQuestionCancel(...args),
@@ -2199,6 +2230,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
       renderFeedbackArtifactPreview: (...args) => liveHostRef.current!.renderFeedbackArtifactPreview!(...args),
       renderFeedbackArtifactPopover: (...args) => liveHostRef.current!.renderFeedbackArtifactPopover!(...args),
       setAutoCommitEnabled: (...args) => liveHostRef.current!.setAutoCommitEnabled(...args),
+      setUsageLimitAutoResume: (...args) => liveHostRef.current!.setUsageLimitAutoResume!(...args),
       gitCommit: (...args) => liveHostRef.current!.gitCommit(...args),
       gitCommitCancel: (...args) => liveHostRef.current!.gitCommitCancel(...args),
       gitFileDiff: (...args) => liveHostRef.current!.gitFileDiff!(...args),
@@ -2209,6 +2241,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
       openAttachmentSettings: (...args) => liveHostRef.current!.openAttachmentSettings!(...args),
       openFile: (...args) => liveHostRef.current!.openFile(...args),
       openPage: (...args) => liveHostRef.current!.openPage!(...args),
+      revealCommandTerminal: (...args) => liveHostRef.current!.revealCommandTerminal!(...args),
       trackEvent: (...args) => liveHostRef.current!.trackEvent(...args),
     };
 
@@ -2481,6 +2514,26 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
 
   // Loading state
   if (!sessionData) {
+    if (!isDataLoading && loadError) {
+      return (
+        <div
+          className="session-load-error flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center text-[var(--nim-text-muted)]"
+          data-session-id={sessionId}
+        >
+          <div className="session-load-error-title text-[var(--nim-text)]">Couldn't load this session</div>
+          <div className="session-load-error-detail max-w-[560px] break-words text-xs select-text">{loadError}</div>
+          <button
+            type="button"
+            className="session-load-error-retry nim-btn-secondary px-3 py-1.5 rounded text-sm"
+            onClick={() => {
+              if (workspacePath) loadSessionData({ sessionId, workspacePath });
+            }}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
     return (
       <div
         style={{
@@ -2780,6 +2833,7 @@ const LocalSessionTranscript = forwardRef<SessionTranscriptRef, SessionTranscrip
         onQueue={handleQueue}
         queueCount={queuedPrompts.length}
         currentFilePath={currentFilePath}
+        currentFileName={documentContext?.fileName}
         onLaunchActionInNewSession={handleLaunchActionInNewSession}
       />
     </div>

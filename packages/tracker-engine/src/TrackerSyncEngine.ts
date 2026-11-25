@@ -610,6 +610,9 @@ export class TrackerSyncEngine {
    */
   terminateAccess(termination: TrackerAccessTermination): void {
     if (this.accessTermination) return;
+    // Before the socket teardown forgets them: an ended access never
+    // reconnects, so nothing in flight will ever be answered.
+    this.refuseInFlightSchemaMutations('accessEnded', termination.message);
     this.closeSocket();
     this.recordAccessTermination(termination);
   }
@@ -645,6 +648,7 @@ export class TrackerSyncEngine {
   /** Destroy the engine. Cannot be reused after this. */
   destroy(): void {
     this.destroyed = true;
+    this.refuseInFlightSchemaMutations('closed', 'The tracker connection closed before the room answered.');
     this.disconnect();
     this.rollbackSnapshots.clear();
     this.pendingLaneIds.clear();
@@ -1295,7 +1299,7 @@ export class TrackerSyncEngine {
       );
       if (this.destroyed) return;
       if (snapshot) {
-        await this.persistence.rollbackOptimistic(snapshot.itemId, snapshot.snapshot);
+        if (rejection.code !== 'recoveryConflict') await this.persistence.rollbackOptimistic(snapshot.itemId, snapshot.snapshot);
         if (this.destroyed) return;
         this.rollbackSnapshots.delete(clientMutationId);
         this.config.onRejection?.({
@@ -1337,7 +1341,7 @@ export class TrackerSyncEngine {
       );
       if (this.destroyed) return;
       if (!snapshot) continue;
-      await this.persistence.rollbackOptimistic(snapshot.itemId, snapshot.snapshot);
+      if (rejection.code !== 'recoveryConflict') await this.persistence.rollbackOptimistic(snapshot.itemId, snapshot.snapshot);
       if (this.destroyed) return;
       this.rollbackSnapshots.delete(entry.clientMutationId);
       this.config.onRejection?.({
@@ -1363,16 +1367,7 @@ export class TrackerSyncEngine {
     );
     const sent = this.schemaOutbox.settle(msg.clientMutationId);
     if (sent) {
-      try {
-        this.config.schemaSync?.onSettled?.({
-          type: sent.type,
-          model: sent.model,
-          accepted: msg.accepted,
-          ...(msg.error ? { error: { code: msg.error.code, message: msg.error.message } } : {}),
-        });
-      } catch (err) {
-        this.config.onBootstrapError?.(err);
-      }
+      this.notifySchemaSettled(sent, msg.accepted, msg.error);
     }
     if (msg.accepted && msg.schema) {
       this.pendingLaneIds.delete(msg.clientMutationId);
@@ -1385,6 +1380,36 @@ export class TrackerSyncEngine {
       msg.error,
       this.config.schemaSync?.markRejected,
     );
+  }
+
+  private notifySchemaSettled(
+    sent: { type: string; model: string | null },
+    accepted: boolean,
+    error: { code: string; message: string } | undefined,
+  ): void {
+    try {
+      this.config.schemaSync?.onSettled?.({
+        type: sent.type,
+        model: sent.model,
+        accepted,
+        ...(error ? { error: { code: error.code, message: error.message } } : {}),
+      });
+    } catch (err) {
+      this.config.onBootstrapError?.(err);
+    }
+  }
+
+  /**
+   * Answer, as refused, schema mutations the room will never ack. The codes
+   * are temporary, so a desktop row is not retired and goes out again on the
+   * next connect; a browser creation waiting on its answer hears now instead
+   * of never.
+   */
+  private refuseInFlightSchemaMutations(code: string, message: string): void {
+    for (const sent of this.schemaOutbox.drain()) {
+      this.pendingLaneIds.delete(sent.clientMutationId);
+      this.notifySchemaSettled(sent, false, { code, message });
+    }
   }
 
   private async handleSavedViewDelta(msg: TrackerSavedViewDeltaMessage): Promise<void> {
@@ -1516,6 +1541,12 @@ export class TrackerSyncEngine {
         message: msg.message || 'Your access to this tracker was revoked.',
       });
       return;
+    }
+    // A room that throws while handling a message answers with a bare error
+    // that names no mutation. Older rooms do this for a schema mutation too, so
+    // anything still waiting on a schema ack would otherwise wait forever.
+    if (!msg.clientMutationId) {
+      this.refuseInFlightSchemaMutations(msg.code, msg.message);
     }
     const pending = msg.clientMutationId
       ? this.pendingConfigChanges.get(msg.clientMutationId)
@@ -1701,6 +1732,7 @@ export class TrackerSyncEngine {
       snapshot = await this.persistence.applyAndEnqueueAtomically(itemId, payload, row);
     } else {
       snapshot = await this.persistence.applyOptimistic(itemId, payload);
+      row.expectedSyncId = snapshot.syncId ?? 0;
       row.rollbackSnapshot = snapshot;
       await this.persistence.enqueueTransaction(row);
     }
@@ -1737,6 +1769,7 @@ export class TrackerSyncEngine {
         type: 'trackerMutation',
         clientMutationId: row.clientMutationId,
         itemId: row.itemId,
+        expectedSyncId: row.expectedSyncId ?? this.rollbackSnapshots.get(row.clientMutationId)?.snapshot.syncId ?? 0,
         encryptedPayload: null,
       });
       return;
@@ -1748,6 +1781,7 @@ export class TrackerSyncEngine {
       type: 'trackerMutation',
       clientMutationId: row.clientMutationId,
       itemId: row.itemId,
+      expectedSyncId: row.expectedSyncId ?? this.rollbackSnapshots.get(row.clientMutationId)?.snapshot.syncId ?? 0,
       encryptedPayload: encodeTrackerPayloadPlaintext(row.payload!),
       ...(row.payload?.issueNumber !== undefined ? { issueNumber: row.payload.issueNumber } : {}),
       ...(row.payload?.issueKey !== undefined ? { issueKey: row.payload.issueKey } : {}),
@@ -1773,6 +1807,7 @@ export class TrackerSyncEngine {
       mutations: rows.map(row => ({
         clientMutationId: row.clientMutationId,
         itemId: row.itemId,
+        expectedSyncId: row.expectedSyncId ?? this.rollbackSnapshots.get(row.clientMutationId)?.snapshot.syncId ?? 0,
         encryptedPayload: encodeTrackerPayloadPlaintext(row.payload!),
         ...(row.payload?.issueNumber !== undefined ? { issueNumber: row.payload.issueNumber } : {}),
         ...(row.payload?.issueKey !== undefined ? { issueKey: row.payload.issueKey } : {}),
@@ -1878,6 +1913,7 @@ export class TrackerSyncEngine {
     this.accessTermination = termination;
     this.suppressReconnect = true;
     this.cancelReconnect();
+    this.refuseInFlightSchemaMutations('accessEnded', termination.message);
     this.setStatus('error');
     this.config.onAccessTerminated?.(termination);
   }

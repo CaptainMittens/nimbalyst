@@ -290,12 +290,12 @@ export function shouldBlockStartedSessionProviderSwitch(
  * still choose previous generations. See CLAUDE_CODE_PINNED_SDK_MODELS in
  * modelConstants.ts.
  *
- * `fable` is the Fable tier above Opus (currently Fable 5.1). `fable-5` is the
- * pinned previous-generation Fable. Both run a 1M window natively.
+ * `fable` is the Fable tier above Opus (currently Fable 5.2). `fable-5-1` and `fable-5` are the
+ * pinned previous generations. All run a 1M window natively.
  *
  * `haiku` is Haiku 5.5; `haiku-4-5` keeps Haiku 4.5 selectable.
  */
-export const CLAUDE_CODE_VARIANTS = ['fable', 'fable-5', 'opus', 'opus-5', 'opus-4-8', 'opus-4-7', 'opus-4-6', 'sonnet', 'sonnet-5', 'sonnet-4-6', 'haiku', 'haiku-4-5'] as const;
+export const CLAUDE_CODE_VARIANTS = ['fable', 'fable-5-1', 'fable-5', 'opus', 'opus-5', 'opus-4-8', 'opus-4-7', 'opus-4-6', 'sonnet', 'sonnet-5', 'sonnet-4-6', 'haiku', 'haiku-4-5'] as const;
 
 /**
  * Resolves a configured model string to the SDK model value.
@@ -439,6 +439,8 @@ export interface SessionData {
   agentRole?: AgentRole;
   createdBySessionId?: string | null;
   messages: TranscriptViewMessage[];
+  /** Renderer-only: messages were dropped from memory; metadata is still current. */
+  messagesEvicted?: boolean;
   documentContext?: DocumentContext;
   workspacePath?: string;
   title?: string;
@@ -486,6 +488,11 @@ export interface SessionData {
     // read absent as 0. Per-provider semantics: tokenUsageAccumulation.ts.
     cacheReadInputTokens?: number;
     cacheCreationInputTokens?: number;
+    // Cumulative cache writes by lifetime, each already counted inside
+    // cacheCreationInputTokens. Claude Code only, and only from turns whose CLI
+    // reported the split, so they can sum to less than cacheCreationInputTokens.
+    cacheCreationEphemeral5mInputTokens?: number;
+    cacheCreationEphemeral1hInputTokens?: number;
     // Internal Codex baseline tracking for cumulative SDK snapshots.
     // Not user-facing; used to convert provider-cumulative usage into per-session deltas.
     providerCumulativeInputTokens?: number;   // cache-inclusive
@@ -590,9 +597,11 @@ export interface StreamChunk {
   // liveness -- the Git journal behind the menu-bar indicator -- can see the
   // call end. It carries the same `toolCall` object as that earlier chunk, so it
   // is a completion signal only, never a second tool call.
-  type: 'text' | 'tool_call' | 'tool_result' | 'tool_error' | 'error' | 'complete' | 'context_usage' | 'stream_edit_start' | 'stream_edit_content' | 'stream_edit_end' | 'pre_edit_snapshot' | 'post_edit_snapshot';
+  type: 'text' | 'tool_call' | 'tool_result' | 'tool_error' | 'error' | 'complete' | 'context_usage' | 'prompt_suggestion' | 'stream_edit_start' | 'stream_edit_content' | 'stream_edit_end' | 'pre_edit_snapshot' | 'post_edit_snapshot';
   content?: string;
   isSystem?: boolean; // For system messages like slash command output
+  /** Predicted next user prompt, for `prompt_suggestion` chunks. Ephemeral UI state, never transcript content. */
+  suggestion?: string;
   toolCall?: {
     id?: string;
     name: string;
@@ -617,6 +626,8 @@ export interface StreamChunk {
   isAuthError?: boolean; // True when error is an authentication failure (SDK first-class detection)
   isBedrockToolError?: boolean; // True when error is a Bedrock tool search error
   isServerError?: boolean; // True when error is a 500/internal server error (Claude may be down)
+  usageLimitResetsAtMs?: number; // A usage limit blocked the turn; when it resets (epoch ms). Drives auto-resume.
+  usageLimitType?: string; // The SDK's limit type for that block, e.g. 'five_hour'
   isCodexAuthRequired?: boolean; // True when a Codex app-server session was blocked because the user is not signed in to OpenAI
   isProcessCrash?: boolean; // True when the agent subprocess died from a native fault (#1361), so the turn must settle as errored despite the follow-up 'complete'
   isComplete?: boolean;
@@ -627,6 +638,10 @@ export interface StreamChunk {
     total_tokens: number;
     cache_read_input_tokens?: number;
     cache_creation_input_tokens?: number;
+    // Cache writes by lifetime, already inside cache_creation_input_tokens.
+    // Absent when the CLI did not report the split.
+    cache_creation_ephemeral_5m_input_tokens?: number;
+    cache_creation_ephemeral_1h_input_tokens?: number;
   };
   // Structured `/context` report from the agent SDK (0.3.241+), when the binary
   // attaches one. Set only on the `complete` chunk of a /context turn; the
@@ -642,6 +657,8 @@ export interface StreamChunk {
     outputTokens?: number;
     cacheReadInputTokens?: number;
     cacheCreationInputTokens?: number;
+    cacheCreationEphemeral5mInputTokens?: number; // SDK 0.3.311+, inside cacheCreationInputTokens
+    cacheCreationEphemeral1hInputTokens?: number;
     costUSD?: number;
     contextWindow?: number;
     webSearchRequests?: number;

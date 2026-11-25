@@ -1,5 +1,6 @@
 import React from 'react';
 import { usePlacedViewAttrs } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/usePlacedViewAttrs';
+import { PlacedViewResizeFrame } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/PlacedViewResizeFrame';
 import { buildCollabUri, isCollabUri, parseCollabUri } from '@nimbalyst/collab-protocol';
 import { setEmbedPluginCallbacks, type EmbedFrameProps } from '@nimbalyst/runtime/editor/plugins/EmbedPlugin/EmbedPluginCallbacks';
 import { parsePlacedViewUrl, type PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
@@ -7,6 +8,11 @@ import type { CollabEditorMountOptions } from './types';
 
 /** The renderer is global, but document authority and preview ownership are not. */
 export const BrowserDocumentEmbedContext = React.createContext<CollabEditorMountOptions['renderDecisionArtifact']>(undefined);
+/** The mount's `renderFileEmbed`: embeds of files the document links to by path. */
+export const BrowserFileEmbedContext = React.createContext<CollabEditorMountOptions['renderFileEmbed']>(undefined);
+
+/** A link with a scheme is a document or a web page, never a file beside this one. */
+const isFilePath = (src: string) => !/^[a-z][a-z0-9+.-]*:/i.test(src);
 
 function sharedArtifact(src: string): string | null {
   try {
@@ -69,14 +75,16 @@ function BrowserPlacedViewNote({ src, label }: { src: string; label: string }): 
 
 function BrowserDocumentEmbed({ src, label, nodeKey, attrs }: EmbedFrameProps): React.JSX.Element {
   const render = React.useContext(BrowserDocumentEmbedContext);
+  const renderFile = React.useContext(BrowserFileEmbedContext);
   const onAttrsChange = usePlacedViewAttrs(nodeKey);
   const target = parsePlacedViewUrl(src);
   if (target) {
     const view = placedViewRenderer?.({ nodeKey, src, label, target, attrs, onAttrsChange });
-    return view ? <>{view}</> : <BrowserPlacedViewNote src={src} label={label} />;
+    if (!view) return <BrowserPlacedViewNote src={src} label={label} />;
+    return target.kind === 'type' ? <PlacedViewResizeFrame attrs={attrs} onAttrsChange={onAttrsChange}>{view}</PlacedViewResizeFrame> : <>{view}</>;
   }
   const artifact = sharedArtifact(src);
-  const preview = artifact ? render?.(nodeKey, artifact) : null;
+  const preview = artifact ? render?.(nodeKey, artifact, { label, attrs }) : isFilePath(src) ? renderFile?.({ src, label, attrs }) ?? null : null;
   return <div className="collab-bundle-document-embed" contentEditable={false}>
     {preview ?? <div className="collab-bundle-document-embed-unavailable">{label || 'Shared document'}: preview unavailable in this view.</div>}
   </div>;

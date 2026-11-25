@@ -14,6 +14,7 @@ import {
   PASTE_COMMAND,
   type LexicalEditor,
   type RangeSelection,
+  type PasteCommandType,
 } from 'lexical';
 import { $isLinkNode, LinkNode } from '@lexical/link';
 import { $createDocumentReferenceNode } from './DocumentLinkNode';
@@ -26,6 +27,12 @@ import { $createEmbeddedFileNode } from '../../editor/plugins/EmbedPlugin/Embedd
 import { createEmbedFileHref } from '../../editor/plugins/EmbedPlugin/embedFilePaths';
 import { isEmbeddableUrl } from '../../editor/plugins/EmbedPlugin/embeddableExtensions';
 import { useDocumentPath } from '../../DocumentPathContext';
+import {
+  $insertMentionOption,
+  buildMentionOptions,
+  editorSupportsMentions,
+  type MentionMember,
+} from '../../editor/plugins/MentionPlugin/mentionTypeahead';
 import {
   resolveDocumentLinkLookupPaths,
   isCollabReferenceHref,
@@ -142,8 +149,10 @@ function CollabReferencePastePlugin({
     () =>
       editor.registerCommand(
         PASTE_COMMAND,
-        (event: ClipboardEvent) => {
-          const clipboardData = event.clipboardData;
+        (event: PasteCommandType) => {
+          // PASTE_COMMAND also carries InputEvent/KeyboardEvent; only
+          // ClipboardEvent has clipboardData.
+          const clipboardData = 'clipboardData' in event ? event.clipboardData : null;
           if (!clipboardData || clipboardData.files.length > 0) return false;
 
           const value = clipboardData.getData('text/plain').trim();
@@ -397,6 +406,11 @@ interface DocumentLinkPluginProps {
    * targets open the page. Absent: local files only.
    */
   collabReferenceSource?: CollabReferenceSource | null;
+  /**
+   * The people `@` offers as mention chips, read when the query changes.
+   * Absent: no people (dates are always offered where chips are supported).
+   */
+  getMentionMembers?: () => MentionMember[];
 }
 
 export function DocumentLinkPlugin({
@@ -405,6 +419,7 @@ export function DocumentLinkPlugin({
   triggerFn,
   anchorElem,
   collabReferenceSource,
+  getMentionMembers,
 }: DocumentLinkPluginProps): JSX.Element {
   const [editor] = useLexicalComposerContext();
   const { documentPath: currentDocumentPath } = useDocumentPath();
@@ -593,8 +608,11 @@ export function DocumentLinkPlugin({
   const options = useMemo(() => {
     // Use fuzzy filtering with ranking
     const filtered = fuzzyFilterDocuments(documents, queryString, 50);
+    const mentions = editorSupportsMentions(editor)
+      ? buildMentionOptions(queryString, getMentionMembers?.() ?? [])
+      : [];
 
-    return filtered.map(({ item: doc, match }) => {
+    return [...mentions, ...filtered.map(({ item: doc, match }) => {
       // Collab references: `path` already holds the folder breadcrumb (a
       // directory), so show it directly. Local files: strip the filename to
       // show the parent directory.
@@ -616,8 +634,8 @@ export function DocumentLinkPlugin({
         matchedIndices: match.matchedIndices,
         score: match.score,
       };
-    });
-  }, [queryString, documents]);
+    })];
+  }, [queryString, documents, editor, getMentionMembers]);
 
   const handleQueryChange = useCallback((query: string | null) => {
     setQueryString(query || '');
@@ -632,6 +650,7 @@ export function DocumentLinkPlugin({
     editor.update(() => {
       const selection = $getSelection();
       if (!$isRangeSelection(selection)) return;
+      if ($insertMentionOption(selection, option.id)) return;
 
       const docId = option.id.replace('doc-', '');
       const doc = documents.find(d => d.id === docId);

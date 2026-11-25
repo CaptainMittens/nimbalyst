@@ -41,7 +41,13 @@ struct NimbalystAppMain: App {
 
     /// Launch with --transcript-test to show the TranscriptWebView with fake data
     /// (bypasses pairing/auth for testing transcript rendering).
-    private let isTranscriptTest = CommandLine.arguments.contains("--transcript-test")
+    private let isTranscriptTest: Bool = {
+        #if DEBUG
+        return CommandLine.arguments.contains("--transcript-test")
+        #else
+        return false
+        #endif
+    }()
 
     /// Launch with --screenshot-mode to show the app with realistic demo data
     /// for App Store screenshot capture. Combine with --screenshot-screen=<name>
@@ -75,7 +81,9 @@ struct NimbalystAppMain: App {
     var body: some Scene {
         WindowGroup {
             if isTranscriptTest {
+                #if DEBUG
                 TranscriptTestView()
+                #endif
             } else if isScreenshotMode {
                 #if DEBUG
                 ScreenshotHostView()
@@ -90,6 +98,9 @@ struct NimbalystAppMain: App {
                     .onOpenURL { url in
                         NSLog("[onOpenURL] Received URL: \(url.absoluteString.prefix(120))")
                         handleDeepLink(url)
+                    }
+                    .onContinueUserActivity(NSUserActivityTypeBrowsingWeb) { activity in
+                        if let url = activity.webpageURL { handleUniversalLink(url) }
                     }
             }
         }
@@ -127,8 +138,24 @@ struct NimbalystAppMain: App {
             // instead of a second path that has to be kept in step with it.
             NSLog("[DeepLink] Opening session \(sessionId)")
             NotificationManager.shared.pendingSessionId = sessionId
+        case .console(let route):
+            ConsoleLinkInbox.shared.open(route)
+        case .consolePersonal:
+            ConsoleLinkInbox.shared.personalPageRequested = true
         case .unsupported:
             NSLog("[DeepLink] Ignored: URL is not allowlisted")
+        }
+    }
+
+    /// `applinks:console.nimbalyst.com`: a team page opens in Pages. With no
+    /// signed-in account there is nothing to show it with, so it goes to Safari.
+    private func handleUniversalLink(_ url: URL) {
+        guard appState.isPaired, appState.authManager.isAuthenticated else {
+            UIApplication.shared.open(url)
+            return
+        }
+        if !ConsoleLinkInbox.shared.open(url) {
+            UIApplication.shared.open(url)
         }
     }
 }
@@ -137,6 +164,7 @@ struct NimbalystAppMain: App {
 
 /// A standalone view that renders TranscriptWebView with hardcoded test data.
 /// Used for automated verification that the transcript bundle loads and renders.
+#if DEBUG
 #if canImport(UIKit)
 struct TranscriptTestView: View {
     private let testSession = Session(
@@ -213,4 +241,5 @@ struct TranscriptTestView: View {
         Text("Transcript test requires iOS")
     }
 }
+#endif
 #endif

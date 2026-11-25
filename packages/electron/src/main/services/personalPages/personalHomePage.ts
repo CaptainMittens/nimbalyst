@@ -10,7 +10,7 @@ import { insertDocumentIfAbsent, type PersonalPagesDb } from './personalPagesSto
 
 export const PERSONAL_HOME_PAGE_ID = 'home:personal';
 
-const HOME_MARKDOWN = [
+export const PERSONAL_HOME_MARKDOWN = [
   'This is your personal home page. Pages in the Personal section stay on this device.',
   '',
   'To add a page, right-click empty space in the sidebar or the Personal heading and choose New page. Right-click any page to add a page inside it.',
@@ -45,7 +45,7 @@ export async function seedPersonalHomeOnce(db: PersonalPagesDb, workspacePath: s
     title: 'Home',
     fileExtension: '.md',
     editorId: 'builtin.lexical',
-    body: HOME_MARKDOWN,
+    body: PERSONAL_HOME_MARKDOWN,
   });
   flags.markSeeded(workspacePath);
   return true;

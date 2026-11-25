@@ -42,6 +42,8 @@ import {
 } from 'react';
 import {createPortal} from 'react-dom';
 
+import {isTableShowingCards} from '../TableCardLayoutPlugin';
+
 type PointerPosition = {
     x: number;
     y: number;
@@ -156,7 +158,12 @@ function TableCellResizer({editor}: {editor: LexicalEditor}): JSX.Element {
                                 editor.getElementByKey(tableNode.getKey()),
                             );
 
-                            if (!tableElement) {
+                            // No resizing while the table shows as cards: its header row is
+                            // hidden, so width measurement would read zero-width columns.
+                            if (
+                                !tableElement ||
+                                isTableShowingCards(tableElement)
+                            ) {
                                 resetState();
                                 return;
                             }
@@ -248,7 +255,7 @@ function TableCellResizer({editor}: {editor: LexicalEditor}): JSX.Element {
 
                     let height = tableRow.getHeight();
                     if (height === undefined) {
-                        const rowCells = tableRow.getChildren<TableCellNode>();
+                        const rowCells = tableRow.getChildren().filter($isTableCellNode);
                         height = Math.min(
                             ...rowCells.map(
                                 (cell) => getCellNodeHeight(cell, editor) ?? Infinity,

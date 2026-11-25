@@ -7,11 +7,13 @@
  */
 
 /**
- * Eight drag handles around a selected block (image, 2x2, ...). Corners keep
- * the aspect ratio; edges change one dimension. The target's inline size is
- * set live while dragging and the final size is reported once on release, so
- * the node writes once. Handles position against the nearest positioned
- * ancestor; styles are `.block-resizer` in `index.css`.
+ * Drag handles for a block (image, 2x2, placed view, ...): eight around a
+ * selected block, or one bottom-right grip (`handles="corner"`). Corners keep
+ * the aspect ratio unless `keepAspectRatio` is false; edges change one
+ * dimension. The target's inline size is set live while dragging and the
+ * final size is reported once on release, so the node writes once. Handles
+ * position against the nearest positioned ancestor; styles are
+ * `.block-resizer` and `.block-resizer-grip` in `index.css`.
  */
 
 import type {LexicalEditor} from 'lexical';
@@ -43,6 +45,8 @@ const HANDLES: Array<[string, number]> = [
   ['nw', Direction.north | Direction.west],
 ];
 
+const CORNER_HANDLES: Array<[string, number]> = [['se', Direction.south | Direction.east]];
+
 export interface BlockResizerProps {
   editor: LexicalEditor;
   /** The element whose width/height the handles drag. */
@@ -55,6 +59,12 @@ export interface BlockResizerProps {
   minHeight?: number;
   maxWidth?: number;
   maxHeight?: number;
+  /** `all` draws eight handles; `corner` draws only the bottom-right grip. */
+  handles?: 'all' | 'corner';
+  /** Whether a corner drag keeps the starting aspect ratio. */
+  keepAspectRatio?: boolean;
+  /** Double-clicking a handle calls this, e.g. to go back to the automatic size. */
+  onReset?: () => void;
   /** Rendered inside the handle wrapper (e.g. the image's caption button). */
   children?: React.ReactNode;
 }
@@ -70,6 +80,9 @@ export default function BlockResizer({
   // Very large defaults effectively remove the constraint.
   maxWidth = 10000,
   maxHeight = 10000,
+  handles = 'all',
+  keepAspectRatio = true,
+  onReset,
   children,
 }: BlockResizerProps): JSX.Element {
   const controlWrapperRef = useRef<HTMLDivElement>(null);
@@ -189,7 +202,19 @@ export default function BlockResizer({
     if (target !== null && positioning.isResizing) {
       const zoom = calculateZoomLevel(target);
       // Corner cursor
-      if (isHorizontal && isVertical) {
+      if (isHorizontal && isVertical && !keepAspectRatio) {
+        let dx = Math.floor(positioning.startX - event.clientX / zoom);
+        dx = positioning.direction & Direction.east ? -dx : dx;
+        let dy = Math.floor(positioning.startY - event.clientY / zoom);
+        dy = positioning.direction & Direction.south ? -dy : dy;
+
+        const width = clamp(positioning.startWidth + dx, minWidth, maxWidth);
+        const height = clamp(positioning.startHeight + dy, minHeight, maxHeight);
+        target.style.width = `${width}px`;
+        target.style.height = `${height}px`;
+        positioning.currentHeight = height;
+        positioning.currentWidth = width;
+      } else if (isHorizontal && isVertical) {
         let diff = Math.floor(positioning.startX - event.clientX / zoom);
         diff = positioning.direction & Direction.east ? -diff : diff;
 
@@ -252,13 +277,18 @@ export default function BlockResizer({
   return (
     <div ref={controlWrapperRef}>
       {children}
-      {HANDLES.map(([name, direction]) => (
+      {(handles === 'corner' ? CORNER_HANDLES : HANDLES).map(([name, direction]) => (
         <div
           key={name}
-          className={`block-resizer block-resizer-${name}`}
+          className={handles === 'corner' ? 'block-resizer-grip' : `block-resizer block-resizer-${name}`}
+          data-testid={handles === 'corner' ? 'block-resizer-grip' : undefined}
           onPointerDown={(event) => {
             handlePointerDown(event, direction);
           }}
+          onDoubleClick={onReset && editor.isEditable() ? (event) => {
+            event.preventDefault();
+            onReset();
+          } : undefined}
         />
       ))}
     </div>

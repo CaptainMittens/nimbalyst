@@ -172,6 +172,14 @@ final class PendingSessionResolverTests: XCTestCase {
         XCTAssertEqual(navigation.hostDeviceId, "vm")
         navigation.openSession("unattributed", database: db)
         XCTAssertEqual(navigation.hostDeviceId, "mac", "A headless host never lists unattributed sessions")
+
+        var staleMac = device("mac", "desktop")
+        staleMac.isOnline = false
+        staleMac.lastSeenAt = Int(Date().timeIntervalSince1970 * 1000)
+        roster.send([staleMac, device("studio", "desktop"), device("vm", "headless")])
+        navigation.openSession("owned", database: db)
+        navigation.openSession("unattributed", database: db)
+        XCTAssertEqual(navigation.hostDeviceId, "studio", "An offline installation listed first must not become the creation target")
     }
 
     func testComposeStateSurvivesColumnRemountAndRejectsOldRemoteDrafts() {
@@ -194,6 +202,32 @@ final class PendingSessionResolverTests: XCTestCase {
         navigation.clearAccount()
         XCTAssertFalse(navigation.composeState(for: "session") === compose)
         XCTAssertTrue(navigation.composeState(for: "session").text.isEmpty)
+    }
+
+    func testWideSidebarChoiceSurvivesCompactCollapse() {
+        let defaults = UserDefaults(suiteName: #function)!
+        defaults.removePersistentDomain(forName: #function)
+        let navigation = WorkspaceNavigationState(defaults: defaults)
+        navigation.recordColumnVisibility(.detailOnly, isWide: true)
+        navigation.recordColumnVisibility(.all, isWide: false)
+        XCTAssertEqual(navigation.wideColumnVisibility, .detailOnly)
+        XCTAssertEqual(WorkspaceNavigationState(defaults: defaults).wideColumnVisibility, .detailOnly)
+        navigation.recordColumnVisibility(.all, isWide: true)
+        XCTAssertEqual(WorkspaceNavigationState(defaults: defaults).wideColumnVisibility, .all)
+    }
+
+    func testDesktopSubmitClearsADraftItSyncedToTheComposer() {
+        let compose = SessionComposeState()
+        compose.applyRemoteDraft("Prompt typed on desktop", updatedAt: 500)
+        XCTAssertEqual(compose.text, "Prompt typed on desktop")
+        // The desktop sent it: its newer clear arrives stored as nil.
+        compose.applyRemoteDraft(nil, updatedAt: 600)
+        XCTAssertEqual(compose.text, "")
+        // A clear older than text typed here does not erase it.
+        compose.text = "Typed on the phone"
+        compose.lastLocalEditAt = 700
+        compose.applyRemoteDraft(nil, updatedAt: 650)
+        XCTAssertEqual(compose.text, "Typed on the phone")
     }
 
     func testResolvesSessionAlreadyInDatabaseWithoutWaiting() throws {

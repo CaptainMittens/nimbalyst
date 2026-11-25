@@ -66,6 +66,22 @@ const CSS_VAR_MAP: Record<keyof ExtendedThemeColors, string> = {
   'comment-mark': '--nim-comment-mark',
   'quote-text': '--nim-quote-text',
   'quote-border': '--nim-quote-border',
+
+  // Colored text palette
+  'text-color-red': '--nim-text-color-red',
+  'text-color-orange': '--nim-text-color-orange',
+  'text-color-yellow': '--nim-text-color-yellow',
+  'text-color-green': '--nim-text-color-green',
+  'text-color-blue': '--nim-text-color-blue',
+  'text-color-purple': '--nim-text-color-purple',
+  'text-color-gray': '--nim-text-color-gray',
+  'text-bg-red': '--nim-text-bg-red',
+  'text-bg-orange': '--nim-text-bg-orange',
+  'text-bg-yellow': '--nim-text-bg-yellow',
+  'text-bg-green': '--nim-text-bg-green',
+  'text-bg-blue': '--nim-text-bg-blue',
+  'text-bg-purple': '--nim-text-bg-purple',
+  'text-bg-gray': '--nim-text-bg-gray',
   'scrollbar-thumb': '--nim-scrollbar-thumb',
   'scrollbar-thumb-hover': '--nim-scrollbar-thumb-hover',
   'scrollbar-track': '--nim-scrollbar-track',
@@ -250,6 +266,8 @@ class OffscreenEditorRendererImpl {
       fileName,
       theme: 'light', // TODO: Get from app settings
       isActive: false, // Offscreen editors are never "active"
+      workspaceId: workspacePath,
+      workspacePath,
 
       async loadContent(): Promise<string> {
         const result = await electronAPI.readFileContent(filePath);
@@ -363,6 +381,7 @@ class OffscreenEditorRendererImpl {
        * the offscreen path made `fs` impossible; it was simply never wired.
        */
       fs: createProjectFileSystemHost({
+        workspacePath,
         // Nothing on screen to refresh: this host exists to render once.
         onAfterWrite: async () => {},
       }),

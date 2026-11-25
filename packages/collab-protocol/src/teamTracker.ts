@@ -327,6 +327,8 @@ export interface TrackerSyncRequestMessage {
 }
 
 export interface TrackerMutationRequestMessage {
+  /** Server revision seen when this edit was queued; required for recovered items. */
+  expectedSyncId?: number;
   type: 'trackerMutation';
   clientMutationId: string;
   itemId: string;
@@ -486,6 +488,7 @@ export interface TrackerDeltaMessage {
 }
 
 export type TrackerMutationRejectCode =
+  | 'recoveryConflict'
   | 'staleKeyEpoch'
   | 'rotationLocked'
   | 'forbidden'
@@ -508,7 +511,14 @@ export type TrackerMutationRejectCode =
   | 'adminRequired'
   /** A create-only schema mutation named a type the room already defines. */
   | 'schemaExists'
-  | 'malformed';
+  | 'malformed'
+  /**
+   * The room threw while applying the mutation, so nothing was written.
+   * Temporary: the same payload may succeed on a later attempt. Lets the
+   * server answer a specific mutation instead of sending a bare
+   * `trackerError` that names none.
+   */
+  | 'serverError';
 
 export interface TrackerMutationAckMessage {
   type: 'trackerMutationAck';

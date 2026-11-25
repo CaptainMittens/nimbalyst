@@ -1,4 +1,3 @@
-import { parseDocumentDeepLinkAnchor, type SharedDocumentAnchor } from '../shared/documentDeepLinks';
 import { app, BrowserWindow, dialog, nativeImage, nativeTheme, session, shell } from 'electron';
 import {
     parseTrackerDeepLink,
@@ -6,7 +5,6 @@ import {
     type TrackerDeepLinkView,
 } from '../shared/trackerDeepLinks';
 import { parseInviteDeepLink, type InviteDeepLinkTarget } from '../shared/inviteDeepLinks';
-import { resolveOrgMessagingDestination } from '../shared/orgMessagingRouting';
 import { safeHandle, safeOn } from './utils/ipcRegistry';
 import { installMicrophoneGate } from './mediaPermissionGate';
 import { markBootComplete } from './utils/bootState';
@@ -21,16 +19,16 @@ import { appendFileSync, existsSync, renameSync, unlinkSync, writeFileSync } fro
 import {
     createWindow,
     documentServices,
-    findWindowByFilePath,
     findWindowByWorkspace,
     getMostRecentlyFocusedWorkspaceWindow,
 } from './window/WindowManager';
 import { beginStartupActivation, finishStartupWindowCreation } from './window/StartupActivation';
-import { loadFileIntoWindow } from './file/FileOperations';
+import { loadFileIntoWindow, loadFileIntoWorkspaceWindow, reloadIntoWindowWithFile } from './file/FileOperations';
 import { createApplicationMenu } from './menu/ApplicationMenu';
 import { updateNativeTheme, updateWindowTitleBars } from './theme/ThemeManager';
 import { restoreSessionState, saveSessionState } from './session/SessionState';
 import { createRestartShutdown } from './session/restartShutdown';
+import { resumeBackendTerminalsAfterAbortedQuit, stopAllBackendTerminals } from './extensions/backendTerminals';
 import { setSafeModeSessionStateProtection } from './session/safeModeSessionState';
 import { isSafeModeArgument } from './session/startupSafeMode';
 import { getRestartSignalPath } from './utils/appPaths';
@@ -39,8 +37,9 @@ import {
     dispatchAppActionLink,
     type AppAction,
 } from './utils/appActionLinks';
-import { createWorkspaceManagerWindow, getWorkspaceManagerWindow, setupWorkspaceManagerHandlers, wasWorkspaceManagerManuallyClosed } from './window/WorkspaceManagerWindow.ts';
+import { createWorkspaceManagerWindow, getWorkspaceManagerWindow, openOrFocusWorkspaceWindow, setupWorkspaceManagerHandlers, wasWorkspaceManagerManuallyClosed } from './window/WorkspaceManagerWindow.ts';
 import { initializeApplicationWindowRecovery } from './window/ApplicationWindowRecovery';
+import { handleSecondInstance } from './window/secondInstanceActivation';
 import { createTeamManagementWindow, setupTeamManagementHandlers } from './window/TeamManagementWindow';
 import { setupTrayPanelHandlers } from './window/TrayPanelWindow';
 import { setupMenuBarIslandHandlers } from './window/MenuBarIslandWindow';
@@ -69,8 +68,19 @@ import { getExternalSessionService, stopExternalSessionService } from './service
 import { registerNotificationHandlers } from './ipc/NotificationHandlers';
 import { registerPermissionHandlers } from './ipc/PermissionHandlers';
 import { registerGitStatusHandlers } from './ipc/GitStatusHandlers';
+import { registerShellCommandHandlers } from './shellCommand/shellCommandActions';
+import { resolveLaunchTarget, statPathKind, userArgsStart, type LaunchTarget } from './shellCommand/launchTarget';
+import { markSingleInstanceLockLost, ownerOnly, ownsAppLifecycle } from './singleInstance/lifecycleOwnership';
+import { planLosingInstance } from './singleInstance/losingInstancePlan';
+import {
+    consumeLaunchSignals,
+    isLaunchSignalFilename,
+    relayAppleEventThenQuit,
+    relayFileToLockOwner,
+} from './singleInstance/launchRelay';
 import { registerGitHandlers } from './ipc/GitHandlers';
 import { registerProjectSelectionHandlers } from './ipc/ProjectSelectionHandlers';
+import { registerProjectAppearanceHandlers } from './ipc/ProjectAppearanceHandlers';
 import { registerMultiProjectRailHandlers } from './ipc/MultiProjectRailHandlers';
 import { registerUsageAnalyticsHandlers } from './ipc/UsageAnalyticsHandlers';
 import { registerWorktreeHandlers } from './ipc/WorktreeHandlers';
@@ -80,6 +90,8 @@ import { registerReadReceiptHandlers } from './ipc/ReadReceiptHandlers';
 import { registerTrackerPersonalStateHandlers } from './ipc/TrackerPersonalStateHandlers';
 import { registerTrackerPageLinkHandlers } from './ipc/TrackerPageLinkHandlers';
 import { registerTrackerPageTypeHandlers } from './ipc/TrackerPageTypeHandlers';
+import { registerLinkPreviewHandlers } from './ipc/LinkPreviewHandlers';
+import { registerCodeExcerptHandlers } from './ipc/CodeExcerptHandlers';
 import {
     registerTeamInboxHandlers,
     shutdownTeamInboxHandlers,
@@ -195,6 +207,9 @@ import {
 } from './protocols/collabAssetProtocol';
 import { SessionNamingService } from './services/SessionNamingService';
 import { SessionWakeupScheduler } from './services/SessionWakeupScheduler';
+import { createSessionWakeup } from './services/sessionWakeupCreation';
+import { configureUsageLimitAutoResume } from './services/ai/usageLimitAutoResume';
+import { getSettingsService } from './services/SettingsService';
 import { getPendingSubmissionStore, getSessionWakeupsStore, repositoryManager } from './services/RepositoryManager';
 import { recoverPendingSubmissionsOnBoot } from './services/ai/pendingSubmissions';
 import { ExtensionDevService } from './services/ExtensionDevService';
@@ -205,6 +220,7 @@ import { registerMockupHandlers } from './ipc/MockupHandlers';
 import { registerOffscreenEditorHandlers } from './ipc/OffscreenEditorHandlers';
 import { initVoiceModeService } from './services/voice/VoiceModeService';
 import { initVoiceModeSettingsHandler } from './services/voice/VoiceModeSettingsHandler';
+import { initDictationService } from './services/dictation/DictationService';
 import { registerWalkthroughHandlers } from './ipc/WalkthroughHandlers';
 import { registerDataModelHandlers } from './ipc/DataModelHandlers';
 import { registerClaudeUsageHandlers } from './ipc/ClaudeUsageHandlers';
@@ -236,6 +252,8 @@ import { configureMcpServers } from '@nimbalyst/runtime/ai/server';
 import { matchesAllowPattern } from '@nimbalyst/runtime/ai/server/permissions/toolPermissionHelpers';
 import { resolveCodexPreEditHookScriptPath } from './services/ai/codexPreEditHookPath';
 import {configureCodexShellTracking} from './services/ai/codexShellTrackingHost';
+import {configureClaudeShellTracking, registerClaudeShellSession, releaseClaudeShellSession} from './services/ai/claudeShellTrackingHost';
+import {setShellWindowLifecycle} from './services/ai/HooklessAgentFileWatcher';
 import { createGrokAskUserQuestionHandler } from './services/ai/grokAskUserQuestionHandler';
 import { executeGeminiTool } from './services/ai/geminiToolExecutor';
 import { sessionFileTracker } from './services/SessionFileTracker';
@@ -286,20 +304,19 @@ import { initTrackerSchemaService, updateTrackerSchemaWorkspace } from './servic
 import { registerTrackerLifecycleIpc } from './services/tracker/trackerLifecycleService';
 import { initTrackerNavigationService } from './services/TrackerNavigationService';
 import { initPersonalPagesService } from './services/PersonalPagesService';
+import { initLocalWikiService } from './services/localWiki/LocalWikiService';
 import { initTrackerSavedViewService } from './services/TrackerSavedViewService';
 import { initTrackerRevisionService } from './services/tracker/trackerRevisionService';
 import {
   registerTeamHandlers,
   autoMatchTeamForWorkspace,
   getOrgScopedJwt,
-  findTeamForWorkspace,
   resolveInviteDeepLink,
   type InviteDeepLinkOutcome,
 } from './services/TeamService';
 import { registerOrgProjectWalkHandlers } from './services/OrgProjectWalkService';
 import {
     consumePendingOrgFeedbackLink,
-    queuePendingOrgFeedbackLink,
 } from './services/PendingOrgFeedbackLinks';
 import { registerSignInAttributionHandlers } from './services/SignInAttribution';
 import { registerProjectWalkClaimHandlers } from './services/ProjectWalkClaim';
@@ -312,7 +329,8 @@ import {
 } from './window/windowState';
 import { getRecentItems } from './utils/store';
 import { registerTeamCustodyHandlers } from './services/TeamCustodyService';
-import { purgeLegacyKeyFiles } from './services/LegacyKeyFilePurge';
+import { registerTeamRecoveryHandlers } from './services/TeamRecoveryService';
+import { findLegacyRecoveryKeyFiles } from './services/LegacyRecoveryKeyFiles';
 import { registerDocumentSyncHandlers } from './ipc/DocumentSyncHandlers';
 import { registerCollabTestIdentityHandlers } from './ipc/CollabTestIdentityHandlers';
 import { getCollabOutboxDrainCoordinator } from './services/CollabOutboxDrainerService';
@@ -337,6 +355,14 @@ import {
     FEEDBACK_REQUEST_DEEP_LINK_HOST,
     parseFeedbackRequestDeepLink,
 } from '../shared/feedbackRequestLinks';
+import {
+    findWorkspaceForOrgId,
+    openFeedbackRequestFromDeepLink,
+    openSharedDocumentFromDeepLink,
+    openSharedFolderFromDeepLink,
+    registerDeepLinkRoutingHandlers,
+} from './deepLinks/registerDeepLinkRouting';
+import { parseSharedDocumentDeepLink, parseSharedFolderDeepLink } from './deepLinks/sharedDocumentRouting';
 
 setAuthCallbackSuccessHandler(async () => {
   try {
@@ -731,156 +757,120 @@ if (!allowMultipleInstances) {
     const gotTheLock = app.requestSingleInstanceLock();
 
     if (!gotTheLock) {
-        // Another instance holds the lock. On macOS, when the OS launches the
-        // packaged app to open a file, the path comes via Apple Events which
-        // Electron delivers as the open-file event. But open-file only fires
-        // once the event loop is running. We must NOT quit synchronously or the
-        // event is lost. Instead, stay alive, wait for open-file, relay the
-        // path via a signal file, then exit.
-        const pendingOpenFilePath = path.join(app.getPath('userData'), '.pending-open-file');
+        // Another instance holds the lock. This process only hands its launch
+        // over and quits; it must not boot the app, open the shared database
+        // or run the quit cleanup (#1188, #1070). Recorded before any
+        // app.quit(), which emits before-quit synchronously.
+        markSingleInstanceLockLost();
 
-        logger.main.info(`[SingleInstance] Second instance launched, waiting for open-file. argv=${JSON.stringify(process.argv)}`);
+        logger.main.info(`[SingleInstance] Second instance launched. argv=${JSON.stringify(process.argv)}`);
 
-        // Also check argv for file paths (Windows/Linux, or CLI open --args)
-        const fileArg = process.argv.find(arg =>
-            !arg.startsWith('-') &&
-            arg !== process.argv[0] &&
-            path.isAbsolute(arg)
-        );
-        if (fileArg) {
-            logger.main.info(`[SingleInstance] Found file in argv: ${fileArg}`);
-            try { writeFileSync(pendingOpenFilePath, fileArg, 'utf-8'); } catch (_) {}
+        // A file in argv (Windows/Linux, or CLI open --args) is relayed through
+        // a signal file. A folder (`nimbalyst .`), a missing path or a deep link
+        // reaches the primary through its second-instance event, which carries
+        // this process's argv and cwd.
+        const launchTarget = resolveLaunchTarget(process.argv.slice(userArgsStart(app.isPackaged)), process.cwd());
+        const plan = planLosingInstance({
+            platform: process.platform,
+            launchTarget,
+            hasDeepLink: process.argv.some(arg => arg.startsWith('nimbalyst://')),
+        });
+        if (plan.action === 'relay-file-and-quit') {
+            logger.main.info(`[SingleInstance] Found file in argv: ${plan.filePath}`);
+            relayFileToLockOwner(app.getPath('userData'), plan.filePath);
             app.quit();
-        } else if (process.argv.find(arg => arg.startsWith('nimbalyst://'))) {
-            // Primary instance will handle via second-instance event; quit immediately
-            logger.main.info('[SingleInstance] Second instance has deep link arg, quitting immediately');
+        } else if (plan.action === 'quit') {
+            const why = plan.reason === 'no-target'
+                ? 'no file, folder or deep link to hand over'
+                : plan.reason === 'deep-link'
+                    ? 'a deep link arg'
+                    : `a ${plan.reason} target (${launchTarget?.path})`;
+            logger.main.info(`[SingleInstance] Another instance holds the lock and this launch has ${why}, quitting now`);
             app.quit();
         } else {
-            // No file in argv -- wait for open-file Apple Event
-            let gotFile = false;
-            app.on('open-file', (event, filePath) => {
-                event.preventDefault();
-                gotFile = true;
-                logger.main.info(`[SingleInstance] Second instance received open-file: ${filePath}`);
-                try {
-                    writeFileSync(pendingOpenFilePath, filePath, 'utf-8');
-                    logger.main.info(`[SingleInstance] Wrote signal file: ${pendingOpenFilePath}`);
-                } catch (err) {
-                    logger.main.error('[SingleInstance] Failed to write signal file:', err);
-                }
-                app.quit();
+            // macOS only: when the OS launches the packaged app to open a file
+            // or a nimbalyst:// link, it arrives as an Apple Event (open-file
+            // or open-url) once the event loop is running, never in argv.
+            // Quitting synchronously would lose it, so wait, relay it via a
+            // signal file, then quit.
+            logger.main.info('[SingleInstance] Waiting for open-file or open-url');
+            relayAppleEventThenQuit({
+                app,
+                userDataPath: app.getPath('userData'),
+                timeoutMs: plan.timeoutMs,
+                quit: () => app.quit(),
             });
-
-            // Fallback timeout -- if open-file never fires, quit anyway
-            setTimeout(() => {
-                if (!gotFile) {
-                    logger.main.info('[SingleInstance] No open-file after timeout, quitting');
-                    app.quit();
-                }
-            }, 5000);
         }
     } else {
         // We are the primary instance. When a second instance tries to launch,
         // extract any deep link URL or file path and handle it here.
-        app.on('second-instance', (_event, argv, _workingDirectory) => {
-            logger.main.info('[SingleInstance] second-instance event, argv:', argv);
-
-            // On Windows the protocol URL is passed as the last argument
-            const deepLinkUrl = argv.find(arg => arg.startsWith('nimbalyst://'));
-            if (deepLinkUrl) {
-                logger.main.info('[SingleInstance] Found deep link in argv:', summarizeDeepLink(deepLinkUrl));
-                handleDeepLink(deepLinkUrl);
-            }
-
-            // Check argv for file paths (Windows/Linux pass files as args)
-            const fileArg = argv.find(arg =>
-                !arg.startsWith('-') &&
-                !arg.startsWith('nimbalyst://') &&
-                arg !== argv[0] &&
-                path.isAbsolute(arg) &&
-                existsSync(arg) &&
-                fs.statSync(arg).isFile()
-            );
-            if (fileArg) {
-                logger.main.info(`[SingleInstance] Opening file from argv: ${fileArg}`);
-                openFileWithWorkspaceDetection(fileArg);
-            }
-
-            // Focus an existing window so the user sees the result
-            const windows = BrowserWindow.getAllWindows();
-            if (windows.length > 0) {
-                const win = windows[0];
-                if (win.isMinimized()) win.restore();
-                win.focus();
-            }
+        app.on('second-instance', (_event, argv, workingDirectory) => {
+            handleSecondInstance(argv, workingDirectory, {
+                handleDeepLink: (deepLinkUrl) => {
+                    logger.main.info('[SingleInstance] Found deep link in argv:', summarizeDeepLink(deepLinkUrl));
+                    handleDeepLink(deepLinkUrl);
+                },
+                openLaunchTarget,
+            });
         });
     }
 }
 
-// Watch for pending open-file signals from other instances.
-// On macOS, when the packaged app is launched to open a file but a dev instance
-// holds the single-instance lock, the file path is lost because macOS delivers
-// file paths via Apple Events (not argv), and the second instance quits before
-// its event loop processes the Apple Event. In production this isn't an issue
-// because the packaged app IS the primary instance.
-//
-// Workaround for dev mode: watch a signal file that the second instance writes.
-// Currently only works for CLI invocations where the path is in argv.
-// For Finder double-click during dev, quit the packaged app first.
-{
-    const pendingOpenFilePath = path.join(app.getPath('userData'), '.pending-open-file');
-
-    // Check for a stale signal file on startup (second instance may have written
-    // it before we started watching)
-    const checkPendingFile = () => {
-        try {
-            if (existsSync(pendingOpenFilePath)) {
-                const filePath = fs.readFileSync(pendingOpenFilePath, 'utf-8').trim();
-                unlinkSync(pendingOpenFilePath);
-                if (filePath && existsSync(filePath)) {
-                    logger.main.info(`[SingleInstance] Opening file from signal: ${filePath}`);
-                    if (app.isReady()) {
-                        openFileWithWorkspaceDetection(filePath);
-                    } else {
-                        pendingFilePath = filePath;
-                    }
-                }
-            }
-        } catch (_) {}
-    };
-
-    // Check immediately
-    checkPendingFile();
-
-    // Watch the userData directory for the signal file
-    try {
-        const userDataPath = app.getPath('userData');
-        fs.watch(userDataPath, (eventType, filename) => {
-            if (filename === '.pending-open-file') {
-                // Small delay to ensure the file is fully written
-                setTimeout(checkPendingFile, 50);
-            }
-        });
-    } catch (err) {
-        logger.main.warn('[SingleInstance] Failed to watch for open-file signals:', err);
-    }
-}
-
-// Track pending deep link URL
+// Track pending deep link URL. Declared before the signal check below, which
+// can queue one before the app is ready.
 let pendingDeepLinkUrl: string | null = null;
 
-// Per-workspace queue of shared-document deep links waiting for the renderer
-// to be ready (e.g., a window we just created for the project). Drained via
-// the `deep-link:consume-pending-shared-doc` IPC during listener init.
-const pendingSharedDocLinks = new Map<string, { documentId: string; orgId: string } & SharedDocumentAnchor>();
+// Watch for launch signals from a second instance that lost the lock: a file
+// named in its argv, or on macOS an open-file or open-url Apple Event, which
+// never reaches this process's second-instance argv. See launchRelay.ts.
+// Only the lock owner watches: a second instance would consume the signal it
+// just wrote, or one meant for the primary, and open the file itself (#1188).
+if (ownsAppLifecycle()) {
+    const userDataPath = app.getPath('userData');
 
-safeHandle('deep-link:consume-pending-shared-doc', (_event, workspacePath: string) => {
-    if (!workspacePath) return null;
-    const pending = pendingSharedDocLinks.get(workspacePath);
-    if (!pending) return null;
-    pendingSharedDocLinks.delete(workspacePath);
-    return { ...pending, workspacePath };
-});
+    // A second instance may have written a signal before we started watching.
+    const checkPendingSignals = () => consumeLaunchSignals(userDataPath, {
+        openFile: (filePath) => {
+            if (app.isReady()) {
+                openFileWithWorkspaceDetection(filePath);
+            } else {
+                pendingFilePath = filePath;
+            }
+        },
+        openUrl: (url) => {
+            if (app.isReady()) {
+                handleDeepLink(url);
+            } else {
+                pendingDeepLinkUrl = url;
+            }
+        },
+    });
+
+    // Check immediately
+    checkPendingSignals();
+
+    // Watch the userData directory for the signal files
+    try {
+        const signalWatcher = fs.watch(userDataPath, (eventType, filename) => {
+            if (isLaunchSignalFilename(filename)) {
+                // Small delay to ensure the file is fully written
+                setTimeout(checkPendingSignals, 50);
+            }
+        });
+        // Without a listener an async watch error (EMFILE once the process
+        // is out of descriptors) is an uncaught exception (#1779).
+        signalWatcher.on('error', (err) => {
+            logger.main.warn('[SingleInstance] Launch signal watcher error:', err);
+        });
+    } catch (err) {
+        logger.main.warn('[SingleInstance] Failed to watch for launch signals:', err);
+    }
+}
+
+
+// Shared-document, shared-folder and feedback-request links: queues, notices
+// for links that cannot be routed, and the routing itself.
+registerDeepLinkRoutingHandlers();
 
 // Project-org feedback requests land in Org mode. Queued by workspace so a
 // renderer still mounting can consume the same target as a live window; see
@@ -919,17 +909,6 @@ safeHandle('deep-link:consume-pending-team-invite', () => {
     return pending;
 });
 
-// Same pattern for shared-folder deep links: nimbalyst://folder/{folderId}?orgId=...
-const pendingSharedFolderLinks = new Map<string, { folderId: string; orgId: string }>();
-
-safeHandle('deep-link:consume-pending-shared-folder', (_event, workspacePath: string) => {
-    if (!workspacePath) return null;
-    const pending = pendingSharedFolderLinks.get(workspacePath);
-    if (!pending) return null;
-    pendingSharedFolderLinks.delete(workspacePath);
-    return { ...pending, workspacePath };
-});
-
 async function openInboxSourceFromDeepLink(rawUrl: string): Promise<boolean> {
     try {
         const parsed = new URL(rawUrl);
@@ -944,10 +923,8 @@ async function openInboxSourceFromDeepLink(rawUrl: string): Promise<boolean> {
             );
         }
         if (parsed.host === 'doc' && orgId) {
-            const documentId = decodeURIComponent(parsed.pathname.replace(/^\//, ''));
-            return documentId
-                ? openSharedDocumentFromDeepLink(documentId, orgId, parseDocumentDeepLinkAnchor(parsed))
-                : false;
+            const link = parseSharedDocumentDeepLink(rawUrl);
+            return link ? openSharedDocumentFromDeepLink(link) : false;
         }
         if (parsed.host === 'conversation' && orgId) {
             const conversation = parseConversationDeepLink(rawUrl);
@@ -959,9 +936,7 @@ async function openInboxSourceFromDeepLink(rawUrl: string): Promise<boolean> {
         }
         if (parsed.host === FEEDBACK_REQUEST_DEEP_LINK_HOST) {
             const feedback = parseFeedbackRequestDeepLink(rawUrl);
-            return feedback
-                ? openFeedbackRequestFromDeepLink(feedback.requestId, feedback.orgId)
-                : false;
+            return feedback ? openFeedbackRequestFromDeepLink(feedback) : false;
         }
         return false;
     } catch {
@@ -1004,7 +979,7 @@ function summarizeDeepLink(url: string): { host: string; pathname: string; param
 }
 
 // Handle deep link URLs (nimbalyst://...)
-app.on('open-url', (event, url) => {
+app.on('open-url', ownerOnly('open-url', (event, url) => {
     event.preventDefault();
     logger.main.info('[DeepLink] open-url event:', summarizeDeepLink(url));
 
@@ -1014,7 +989,7 @@ app.on('open-url', (event, url) => {
         // Store the URL to handle after app is ready
         pendingDeepLinkUrl = url;
     }
-});
+}));
 
 function handleAppActionLink(
     url: string,
@@ -1071,45 +1046,21 @@ async function handleDeepLink(url: string): Promise<void> {
                 logger.main.warn('[DeepLink] Extension install missing extension ID');
             }
         } else if (parsed.host === 'doc' || parsed.pathname?.startsWith('/doc/')) {
-            // Handle shared document link: nimbalyst://doc/{documentId}?orgId={orgId}
-            const encoded = parsed.host === 'doc'
-                ? parsed.pathname?.replace(/^\//, '')
-                : parsed.pathname?.replace('/doc/', '');
-            let documentId: string | undefined;
-            try {
-                documentId = encoded ? decodeURIComponent(encoded) : undefined;
-            } catch {
-                logger.main.warn('[DeepLink] Shared doc link has malformed documentId:', summarizeDeepLink(url));
+            // nimbalyst://doc/{documentId}?orgId={orgId}[&projectId={teamProjectId}]
+            const link = parseSharedDocumentDeepLink(url);
+            if (!link) {
+                logger.main.warn('[DeepLink] Shared doc link is malformed or missing documentId or orgId:', summarizeDeepLink(url));
                 return;
             }
-            const orgId = parsed.searchParams.get('orgId');
-
-            if (!documentId || !orgId) {
-                logger.main.warn('[DeepLink] Shared doc link missing documentId or orgId:', summarizeDeepLink(url));
-                return;
-            }
-
-            await openSharedDocumentFromDeepLink(documentId, orgId, parseDocumentDeepLinkAnchor(parsed));
+            await openSharedDocumentFromDeepLink(link);
         } else if (parsed.host === 'folder' || parsed.pathname?.startsWith('/folder/')) {
-            // Handle shared folder link: nimbalyst://folder/{folderId}?orgId={orgId}
-            const encoded = parsed.host === 'folder'
-                ? parsed.pathname?.replace(/^\//, '')
-                : parsed.pathname?.replace('/folder/', '');
-            let folderId: string | undefined;
-            try {
-                folderId = encoded ? decodeURIComponent(encoded) : undefined;
-            } catch {
-                logger.main.warn('[DeepLink] Shared folder link has malformed folderId:', summarizeDeepLink(url));
+            // nimbalyst://folder/{folderId}?orgId={orgId}[&projectId={teamProjectId}]
+            const link = parseSharedFolderDeepLink(url);
+            if (!link) {
+                logger.main.warn('[DeepLink] Shared folder link is malformed or missing folderId or orgId:', summarizeDeepLink(url));
                 return;
             }
-            const orgId = parsed.searchParams.get('orgId');
-
-            if (!folderId || !orgId) {
-                logger.main.warn('[DeepLink] Shared folder link missing folderId or orgId:', summarizeDeepLink(url));
-                return;
-            }
-
-            await openSharedFolderFromDeepLink(folderId, orgId);
+            await openSharedFolderFromDeepLink(link);
         } else if (parsed.host === FEEDBACK_REQUEST_DEEP_LINK_HOST) {
             // nimbalyst://feedback-request/{requestId}?orgId={orgId} — the app
             // half of the pasteable link, and the console's "Open in Nimbalyst"
@@ -1119,7 +1070,7 @@ async function handleDeepLink(url: string): Promise<void> {
                 logger.main.warn('[DeepLink] Feedback request link is incomplete:', summarizeDeepLink(url));
                 return;
             }
-            await openFeedbackRequestFromDeepLink(feedback.requestId, feedback.orgId);
+            await openFeedbackRequestFromDeepLink(feedback);
         } else if (parsed.host === 'invite' || parsed.pathname?.startsWith('/invite/')) {
             // Handle team invitation handoff from the web console:
             // nimbalyst://invite/{orgId}?email={email}
@@ -1244,208 +1195,6 @@ function collectOpenWorkspaces(): EndpointWorkspace[] {
 }
 
 /**
- * Find a workspace path whose team matches the given orgId. Looks first
- * across all open windows (active + rail-warm), then falls back to the
- * user's recent workspaces. Returns null if no known workspace matches.
- */
-async function findWorkspaceForOrgId(orgId: string): Promise<string | null> {
-    const seen = new Set<string>();
-
-    // Open windows first — both active and rail-warm paths.
-    for (const state of windowStates.values()) {
-        const paths = new Set<string>();
-        const active = resolveActiveWorkspacePath(state);
-        if (active) paths.add(active);
-        if (state?.workspacePath) paths.add(state.workspacePath);
-        for (const p of state?.additionalWorkspacePaths ?? []) paths.add(p);
-
-        for (const workspacePath of paths) {
-            if (seen.has(workspacePath)) continue;
-            seen.add(workspacePath);
-            const team = await findTeamForWorkspace(workspacePath);
-            if (team?.orgId === orgId) return workspacePath;
-        }
-    }
-
-    // Fall back to recent workspaces the user has opened before.
-    const recent = getRecentItems('workspaces');
-    for (const item of recent) {
-        if (seen.has(item.path)) continue;
-        seen.add(item.path);
-        const team = await findTeamForWorkspace(item.path);
-        if (team?.orgId === orgId) return item.path;
-    }
-
-    return null;
-}
-
-/**
- * Route a shared-document deep link to the renderer holding the matching
- * team workspace. Queues the payload in `pendingSharedDocLinks` so a freshly
- * created window's renderer can drain it on listener init.
- *
- * `threadId` is present when the link came from a comment notification. It is
- * carried verbatim to the renderer, which opens the document's comments panel
- * on that thread; resolving where the thread is anchored is the mounted
- * editor's job, never this payload's.
- */
-async function openSharedDocumentFromDeepLink(documentId: string, orgId: string, anchor: SharedDocumentAnchor = {}): Promise<boolean> {
-    const reason = !isAuthenticated() ? 'not-authenticated' : 'no-workspace';
-    const workspacePath = isAuthenticated() ? await findWorkspaceForOrgId(orgId) : null;
-
-    if (!workspacePath) {
-        logger.main.warn('[DeepLink] Cannot route shared doc:', { reason, orgId, documentId });
-        const fallback = getMostRecentlyFocusedWorkspaceWindow();
-        if (fallback) {
-            if (fallback.isMinimized()) fallback.restore();
-            fallback.focus();
-            fallback.webContents.send('deep-link:shared-document-not-available', { documentId, orgId, reason });
-        }
-        return false;
-    }
-
-    // Queue first; the renderer drains by workspacePath on listener init.
-    // For an already-loaded window we also fire the live event below; the
-    // renderer treats it as idempotent against the pending queue.
-    pendingSharedDocLinks.set(workspacePath, { documentId, orgId, ...anchor });
-
-    const existing = findWindowByWorkspace(workspacePath);
-    if (existing && !existing.isDestroyed()) {
-        if (existing.isMinimized()) existing.restore();
-        existing.focus();
-        existing.webContents.send('deep-link:open-shared-document', {
-            documentId,
-            orgId,
-            workspacePath,
-            ...anchor,
-        });
-        logger.main.info('[DeepLink] Routed shared doc to existing window:', { workspacePath, documentId });
-        return true;
-    }
-
-    // No window has this workspace open — create one. The renderer's
-    // deep-link listener will drain the pending queue once it mounts.
-    logger.main.info('[DeepLink] Opening new window for shared doc workspace:', { workspacePath, documentId });
-    createWindow(false, true, workspacePath);
-    return true;
-}
-
-/**
- * Route a shared-folder deep link to the renderer holding the matching team
- * workspace. Mirrors the shared-document flow, but targets Collab mode focused
- * on the folder (expand ancestors + select).
- */
-async function openSharedFolderFromDeepLink(folderId: string, orgId: string): Promise<void> {
-    const reason = !isAuthenticated() ? 'not-authenticated' : 'no-workspace';
-    const workspacePath = isAuthenticated() ? await findWorkspaceForOrgId(orgId) : null;
-
-    if (!workspacePath) {
-        logger.main.warn('[DeepLink] Cannot route shared folder:', { reason, orgId, folderId });
-        const fallback = getMostRecentlyFocusedWorkspaceWindow();
-        if (fallback) {
-            if (fallback.isMinimized()) fallback.restore();
-            fallback.focus();
-            fallback.webContents.send('deep-link:shared-folder-not-available', { folderId, orgId, reason });
-        }
-        return;
-    }
-
-    pendingSharedFolderLinks.set(workspacePath, { folderId, orgId });
-
-    const existing = findWindowByWorkspace(workspacePath);
-    if (existing && !existing.isDestroyed()) {
-        if (existing.isMinimized()) existing.restore();
-        existing.focus();
-        existing.webContents.send('deep-link:open-shared-folder', {
-            folderId,
-            orgId,
-            workspacePath,
-        });
-        logger.main.info('[DeepLink] Routed shared folder to existing window:', { workspacePath, folderId });
-        return;
-    }
-
-    logger.main.info('[DeepLink] Opening new window for shared folder workspace:', { workspacePath, folderId });
-    createWindow(false, true, workspacePath);
-}
-
-/**
- * Route a feedback-request deep link to the project's Org mode or the
- * standalone organization window's Inbox.
- *
- * The destination is a *selected row*, not a tab: the respond card renders
- * inline in the Inbox's context pane, while `virtual://feedback-request/` is the
- * author's results view and would be the wrong place to land a recipient.
- *
- * That pane reads the request through a workspace-scoped target, so a workspace
- * bound to this org has to be resolvable first. Without one the link fails
- * honestly — the inbox row that offered it stays unread rather than opening a
- * window that could only show an empty pane.
- */
-async function openFeedbackRequestFromDeepLink(
-    requestId: string,
-    orgId: string,
-): Promise<boolean> {
-    if (!isAuthenticated()) {
-        logger.main.warn('[DeepLink] Cannot route feedback request:', {
-            reason: 'not-authenticated',
-            orgId,
-            requestId,
-        });
-        return false;
-    }
-
-    const focusedWindow = getMostRecentlyFocusedWorkspaceWindow();
-    const focusedWorkspacePath = resolveActiveWorkspacePathForWindowId(
-        getWindowIdForWindow(focusedWindow),
-    );
-    const focusedProjectOrgId = focusedWorkspacePath
-        ? (await findTeamForWorkspace(focusedWorkspacePath))?.orgId
-        : null;
-
-    if (
-        focusedWindow
-        && !focusedWindow.isDestroyed()
-        && focusedWorkspacePath
-        && resolveOrgMessagingDestination(focusedProjectOrgId, orgId) === 'project-mode'
-    ) {
-        queuePendingOrgFeedbackLink(focusedWorkspacePath, { requestId, orgId });
-        if (focusedWindow.isMinimized()) focusedWindow.restore();
-        focusedWindow.focus();
-        focusedWindow.webContents.send('deep-link:open-org-feedback-request', {
-            requestId,
-            orgId,
-            workspacePath: focusedWorkspacePath,
-        });
-        logger.main.info('[DeepLink] Routed feedback request to project Org mode:', {
-            orgId,
-            requestId,
-            workspacePath: focusedWorkspacePath,
-        });
-        return true;
-    }
-
-    const workspacePath = await findWorkspaceForOrgId(orgId);
-
-    if (!workspacePath) {
-        logger.main.warn('[DeepLink] Cannot route feedback request:', {
-            reason: 'no-workspace',
-            orgId,
-            requestId,
-        });
-        return false;
-    }
-
-    createTeamManagementWindow({ orgId, workspacePath, feedbackRequestId: requestId });
-    logger.main.info('[DeepLink] Routed feedback request to the organization window:', {
-        orgId,
-        requestId,
-        workspacePath,
-    });
-    return true;
-}
-
-/**
  * Handle the team-invitation handoff the web console sends after it accepts an
  * invitation in the browser: `nimbalyst://invite/{orgId}?email={email}`.
  *
@@ -1550,10 +1299,20 @@ async function openTrackerFromDeepLink(
     return true;
 }
 
-// Handle file open from OS (macOS)
-app.on('open-file', (event, path) => {
+// Handle file open from OS (macOS). A second instance relays it instead (above).
+app.on('open-file', ownerOnly('open-file', (event, path) => {
     event.preventDefault();
     logger.main.info(`open-file event received: ${path}`);
+
+    // `open -a Nimbalyst <folder>` and folders dropped on the Dock icon.
+    if (statPathKind(path) === 'directory') {
+        if (app.isReady()) {
+            openLaunchTarget({ kind: 'directory', path });
+        } else {
+            pendingWorkspacePath = path;
+        }
+        return;
+    }
 
     if (app.isReady()) {
         openFileWithWorkspaceDetection(path);
@@ -1561,45 +1320,58 @@ app.on('open-file', (event, path) => {
         // Store the file path to open after app is ready
         pendingFilePath = path;
     }
-});
+}));
+
+/**
+ * Open what a launch asked for in the running app. Returns false when there
+ * was nothing to open, so the caller falls back to focusing a window.
+ */
+function openLaunchTarget(target: LaunchTarget): boolean {
+    if (target.kind === 'directory') {
+        logger.main.info(`[LaunchTarget] Opening folder: ${target.path}`);
+        openOrFocusWorkspaceWindow(target.path);
+        updateTrackerSchemaWorkspace(target.path);
+        return true;
+    }
+    if (target.kind === 'file') {
+        logger.main.info(`[LaunchTarget] Opening file: ${target.path}`);
+        void openFileWithWorkspaceDetection(target.path);
+        return true;
+    }
+    logger.main.warn(`[LaunchTarget] Path does not exist: ${target.path}`);
+    return false;
+}
 
 // Helper function to open a file with workspace detection
 async function openFileWithWorkspaceDetection(filePath: string): Promise<void> {
-    // Check if file is already open in a window
-    const existingWindow = findWindowByFilePath(filePath);
-    if (existingWindow) {
-        // Window is already open - no need to focus, let macOS handle window ordering
+    // Detect which workspace this file belongs to
+    const workspacePath = detectFileWorkspace(filePath);
+
+    // The window whose rail holds the project may be showing another rail
+    // project; it switches to the file's project before the file opens. This
+    // also covers a file that window already has open.
+    if (workspacePath && loadFileIntoWorkspaceWindow(workspacePath, filePath)) {
         return;
     }
 
-    // Detect which workspace this file belongs to
-    const workspacePath = detectFileWorkspace(filePath);
+    // Check if file is already open in a window
+    if (reloadIntoWindowWithFile(filePath)) {
+        return;
+    }
 
     if (workspacePath) {
         // File belongs to a known workspace
         logger.main.info(`File belongs to workspace: ${workspacePath}`);
 
-        // Find or create workspace window
-        let workspaceWindow = findWindowByWorkspace(workspacePath);
-
-        if (workspaceWindow) {
-            // Workspace window exists, use it - no need to focus, let macOS handle window ordering
-            await loadFileIntoWindow(workspaceWindow, filePath);
-        } else {
-            // Create new workspace window for this workspace
-            workspaceWindow = createWindow(false, true, workspacePath, undefined, {
-                startupReveal: true,
-                startupFrontmost: true,
-            });
-            updateTrackerSchemaWorkspace(workspacePath);
-            // createWindow reveals the window itself — inactive while this runs
-            // during launch, activating for a file opened later.
-            workspaceWindow.once('ready-to-show', async () => {
-                // Window state is already set by createWindow with workspace path
-                // Just load the file
-                await loadFileIntoWindow(workspaceWindow!, filePath);
-            });
-        }
+        // No open window holds the project: create a workspace window for it
+        const workspaceWindow = createWindow(false, true, workspacePath, undefined, {
+            startupReveal: true,
+            startupFrontmost: true,
+        });
+        updateTrackerSchemaWorkspace(workspacePath);
+        // createWindow reveals the window itself — inactive while this runs
+        // during launch, activating for a file opened later.
+        loadFileIntoWindow(workspaceWindow, filePath);
     } else {
         // File is not in a known workspace - open it in the frontmost workspace window as an external file
         logger.main.info(`File not in known workspace, opening as external file in frontmost window`);
@@ -1618,9 +1390,7 @@ async function openFileWithWorkspaceDetection(filePath: string): Promise<void> {
                     startupFrontmost: true,
                 });
                 updateTrackerSchemaWorkspace(suggestedWorkspace);
-                newWindow.once('ready-to-show', async () => {
-                    await loadFileIntoWindow(newWindow, filePath);
-                });
+                loadFileIntoWindow(newWindow, filePath);
             } else {
                 // No project root detected - use the file's directory as workspace
                 const fileDir = path.dirname(filePath);
@@ -1631,9 +1401,7 @@ async function openFileWithWorkspaceDetection(filePath: string): Promise<void> {
                     startupFrontmost: true,
                 });
                 updateTrackerSchemaWorkspace(fileDir);
-                newWindow.once('ready-to-show', async () => {
-                    await loadFileIntoWindow(newWindow, filePath);
-                });
+                loadFileIntoWindow(newWindow, filePath);
             }
         }
     }
@@ -1664,17 +1432,20 @@ function parseCommandLineArgs() {
         } else if (arg.startsWith('nimbalyst://')) {
             pendingDeepLinkUrl = arg;
             logger.main.info(`[SingleInstance] Found deep link in argv: ${arg.substring(0, 60)}...`);
-        } else if (!arg.startsWith('--') && !arg.startsWith('-')) {
-            // Handle plain file path argument (e.g., "preditor file.md")
-            const argExists = existsSync(arg);
-            const argIsMarkdown = arg.endsWith('.md');
-            logger.main.info(`  Potential file: exists=${argExists}, isMarkdown=${argIsMarkdown}`);
-
-            if (argExists && argIsMarkdown) {
-                pendingFilePath = arg;
-                logger.main.info(`✓ File path from CLI: ${pendingFilePath}`);
-            }
         }
+    }
+
+    // Plain path argument: `nimbalyst .`, `nimbalyst notes.md`, or a file the
+    // OS passes as an argument on Windows/Linux.
+    const launchTarget = resolveLaunchTarget(args, process.cwd());
+    if (launchTarget?.kind === 'directory' && !pendingWorkspacePath) {
+        pendingWorkspacePath = launchTarget.path;
+        logger.main.info(`✓ Folder from CLI: ${pendingWorkspacePath}`);
+    } else if (launchTarget?.kind === 'file') {
+        pendingFilePath = launchTarget.path;
+        logger.main.info(`✓ File path from CLI: ${pendingFilePath}`);
+    } else if (launchTarget?.kind === 'missing') {
+        logger.main.warn(`Path from CLI does not exist: ${launchTarget.path}`);
     }
 
     // Validate --file requires --workspace
@@ -1736,8 +1507,9 @@ BrowserWindow.prototype.focus = function(this: BrowserWindow) {
 };
 // --- END ACTIVATION DEBUGGING ---
 
-// App ready handler
-app.whenReady().then(async () => {
+// App ready handler. Electron emits ready even after an early app.quit(), so a
+// second instance must skip this explicitly (#1188).
+app.whenReady().then(ownerOnly('app initialisation', async () => {
     workspaceBackendLifecycle.observeModuleStarts();
     checkpoint('app-ready');
 
@@ -1980,6 +1752,7 @@ app.whenReady().then(async () => {
     registerAttachmentHandlers();
     registerProjectSelectionHandlers();
     registerMultiProjectRailHandlers();
+    registerProjectAppearanceHandlers();
     registerClaudeCodeHandlers();
     registerCodexAuthHandlers();
     initializeClaudeCodeSessionHandlers();  // Initialize Claude Code session import
@@ -1995,6 +1768,7 @@ app.whenReady().then(async () => {
     geminiUsageService.initialize();
     registerPermissionHandlers();
     registerGitStatusHandlers();
+    registerShellCommandHandlers();
     registerGitHandlers();
     registerWorktreeHandlers();
     registerPullRequestHandlers();
@@ -2003,6 +1777,8 @@ app.whenReady().then(async () => {
     registerTrackerPersonalStateHandlers();
     registerTrackerPageLinkHandlers();
     registerTrackerPageTypeHandlers();
+    registerLinkPreviewHandlers();
+    registerCodeExcerptHandlers();
     registerWakeupHandlers();
     registerBlitzHandlers();
     registerProjectMigrationHandlers();
@@ -2036,6 +1812,7 @@ app.whenReady().then(async () => {
     registerTrackerLifecycleIpc(); // Promote to team / archive, from the UI
     initTrackerNavigationService();
     initPersonalPagesService();
+    initLocalWikiService();
     initTrackerSavedViewService();
     initTrackerRevisionService();
 
@@ -2054,9 +1831,9 @@ app.whenReady().then(async () => {
     registerFeedbackRequestHandlers();
     registerOrgSettingsHandlers();
     registerTeamCustodyHandlers();
-    // Team custody is server-managed; drop the client key material the retired
-    // lane left in userData (some of it plaintext where safeStorage was off).
-    purgeLegacyKeyFiles();
+    registerTeamRecoveryHandlers();
+    // Custody retirement does not prove every old organization was recovered.
+    findLegacyRecoveryKeyFiles();
     registerCollabConversionClient();
     registerDocumentSyncHandlers();
     // No-op outside an unpackaged Playwright run with the collab harness env.
@@ -2164,14 +1941,26 @@ app.whenReady().then(async () => {
         const enabledServers: Record<string, any> = {};
         for (const [name, config] of Object.entries(allServers)) {
             if (isMCPServerEnabledForProvider(config as MCPServerConfig, MCP_PROVIDER_IDS.CODEX)) {
+                // Codex speaks Streamable HTTP natively. Rewriting a server that is
+                // also present in ~/.codex/config.toml to an mcp-remote stdio entry
+                // makes Codex deep-merge `command` with the persisted `url`, which
+                // is an invalid mixed-transport configuration.
+                const codexHttp = await mcpConfigService.resolveMcpRemoteOptions(
+                    config as MCPServerConfig,
+                    { nativeHttpSupported: true }
+                );
                 const isAuthorized = await mcpConfigService.isOAuthAuthorized(config as MCPServerConfig, {
+                    ...codexHttp,
                     useMcpRemoteForNativeOAuth: true,
                 });
                 if (!isAuthorized) {
                     logger.mcp.info(`[MCP] Skipping unauthorized OAuth server for Codex: ${name}`);
                     continue;
                 }
-                enabledServers[name] = mcpConfigService.processServerConfigForRuntime(config as any);
+                enabledServers[name] = mcpConfigService.processServerConfigForRuntime(
+                    config as MCPServerConfig,
+                    codexHttp
+                );
             }
         }
         return enabledServers;
@@ -2349,28 +2138,8 @@ app.whenReady().then(async () => {
     // Lives here in main because runtime is cross-platform (Capacitor/mobile too) and must
     // not import Electron-only services.
     ClaudeCodeProvider.setScheduleWakeupHandler(async ({ sessionId, workspacePath, delaySeconds, prompt, reason }) => {
-        const id = `wakeup-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         const fireAt = new Date(Date.now() + delaySeconds * 1000);
-
-        const row = await getSessionWakeupsStore().create({
-            id,
-            sessionId,
-            workspaceId: workspacePath,
-            prompt,
-            reason,
-            fireAt,
-        });
-        SessionWakeupScheduler.getInstance().onCreated(row);
-
-        for (const window of BrowserWindow.getAllWindows()) {
-            if (!window.isDestroyed()) {
-                try {
-                    window.webContents.send('wakeup:changed', row);
-                } catch {
-                    // ignore destroyed window
-                }
-            }
-        }
+        await createSessionWakeup(getSessionWakeupsStore(), { sessionId, workspacePath, prompt, reason, fireAt });
 
         console.log(`[CLAUDE-CODE] ScheduleWakeup -> session=${sessionId} fireAt=${fireAt.toISOString()} delay=${delaySeconds}s`);
     });
@@ -2620,6 +2389,8 @@ app.whenReady().then(async () => {
     // diff text in item/completed and does not need this hook.
     OpenAICodexProvider.setPreEditHookScriptPathResolver(resolveCodexPreEditHookScriptPath);
     configureCodexShellTracking();
+    configureClaudeShellTracking();
+    setShellWindowLifecycle({ register: registerClaudeShellSession, release: releaseClaudeShellSession });
     OpenAICodexProvider.setPreEditSidecarDirResolver((sessionId: string) => {
       if (!sessionId) return undefined;
       const safeId = sessionId.replace(/[^A-Za-z0-9_-]/g, '_');
@@ -2710,6 +2481,12 @@ app.whenReady().then(async () => {
 
     ClaudeCodeProvider.setClaudeSettingsPatternSaver(patternSaver);
     ClaudeCodeProvider.setClaudeSettingsPatternChecker(patternChecker);
+    // Project-local rules only: "Always" approvals land there, while committed
+    // project settings stay under the CLI's auto-mode filter.
+    ClaudeCodeProvider.setClaudeLocalAllowRuleChecker(async (workspacePath, pattern) => {
+      const local = await claudeSettingsManager.getLocalPatterns(workspacePath);
+      return (local?.allow ?? []).some((allow) => matchesAllowPattern(pattern, allow));
+    });
     ClaudeCodeProvider.setTrustChecker(trustChecker);
 
     OpenAICodexProvider.setPermissionPatternSaver(patternSaver);
@@ -2928,6 +2705,7 @@ app.whenReady().then(async () => {
     });
     initVoiceModeService();
     initVoiceModeSettingsHandler();
+    initDictationService();
     registerWalkthroughHandlers();
 
     // Start MCP SSE server
@@ -3106,6 +2884,15 @@ app.whenReady().then(async () => {
             },
         });
         await scheduler.start();
+        const wakeupsStore = getSessionWakeupsStore();
+        configureUsageLimitAutoResume({
+            store: wakeupsStore,
+            isEnabled: () => getSettingsService().get('ai.usageLimitAutoResumeEnabled'),
+            setEnabled: (enabled) => getSettingsService().set('ai.usageLimitAutoResumeEnabled', enabled),
+            create: (request) => createSessionWakeup(wakeupsStore, request),
+            cancel: (id) => scheduler.cancel(id),
+            now: () => Date.now(),
+        });
     } catch (error) {
         logger.mcp.error('Failed to start session wakeup scheduler:', error);
     }
@@ -3483,16 +3270,20 @@ app.whenReady().then(async () => {
             });
         }
     });
-});
+}));
 
-initializeApplicationWindowRecovery({
-    // quit-and-install strips before-quit, so isAppQuitting never flips on that path.
-    isQuitting: () => isAppQuitting || isAppRestarting || AutoUpdaterService.isUpdatingApp(),
-    getPreferredProjectWindow: getMostRecentlyFocusedWorkspaceWindow,
-    getWorkspaceManagerWindow,
-    createWorkspaceManagerWindow,
-    wasWorkspaceManagerManuallyClosed,
-});
+// Its activate and window-all-closed handlers open the Project Manager, which a
+// second instance waiting for open-file on macOS must not do (#1188).
+if (ownsAppLifecycle()) {
+    initializeApplicationWindowRecovery({
+        // quit-and-install strips before-quit, so isAppQuitting never flips on that path.
+        isQuitting: () => isAppQuitting || isAppRestarting || AutoUpdaterService.isUpdatingApp(),
+        getPreferredProjectWindow: getMostRecentlyFocusedWorkspaceWindow,
+        getWorkspaceManagerWindow,
+        createWorkspaceManagerWindow,
+        wasWorkspaceManagerManuallyClosed,
+    });
+}
 
 let migrationQuitDraining = false;
 const shutdownForRestart = createRestartShutdown({
@@ -3500,18 +3291,34 @@ const shutdownForRestart = createRestartShutdown({
         console.log('[QUIT] Restart signal detected, saving session state before restart');
         isAppRestarting = true;
         isAppQuitting = true;
+        // The normal quit path below never runs on restart, and a live tray
+        // repaints the menu bar island into a fresh window mid-quit.
+        try {
+            TrayManager.getInstance().shutdown();
+        } catch (error) {
+            console.error('[QUIT] Error shutting down TrayManager for restart:', error);
+        }
         if (sessionSaveInterval) clearInterval(sessionSaveInterval);
         sessionSaveInterval = null;
     },
     stopExternalSessions: stopExternalSessionService,
     saveSessionState,
+    // The normal quit cleanup below never runs on restart. Without this the
+    // process groups of extension-started commands outlive the app and keep
+    // their ports. A failure here must not block the restart.
+    stopCommandTerminals: () => stopAllBackendTerminals().catch((error) => {
+        console.error('[QUIT] Error stopping extension command terminals for restart:', error);
+    }),
+    restartAborted: resumeBackendTerminalsAfterAbortedQuit,
     flushPendingBackups: flushPendingCollabBackups,
     quit: () => {
         console.log('[QUIT] Session state saved for restart');
         app.quit();
     },
 });
-app.on('before-quit', async (event) => {
+// A second instance never booted the app, so it has nothing of its own to
+// clean up: this cleanup would back up and close the primary's database (#1188).
+app.on('before-quit', ownerOnly('quit cleanup', async (event) => {
     if (migrationQuitDraining || migrationNeedsQuitDrain()) {
         event.preventDefault();
         if (!migrationQuitDraining) {
@@ -3605,6 +3412,14 @@ app.on('before-quit', async (event) => {
 
     // Mark app as quitting to prevent interval operations
     isAppQuitting = true;
+
+    // Start stopping extension-started commands now (the quit can no longer be
+    // cancelled) so their grace period overlaps the rest of the cleanup instead
+    // of starting late in the force-quit budget. shutdownTerminalHandlers()
+    // awaits this same stop before destroying PTYs.
+    void stopAllBackendTerminals().catch((error) => {
+        console.error('[QUIT] Error stopping extension command terminals:', error);
+    });
 
     // Revoke source readers and drain their commits before database shutdown.
     await stopExternalSessionService();
@@ -4139,7 +3954,7 @@ app.on('before-quit', async (event) => {
         console.log(`[QUIT] [${t16}] Calling app.exit(0) (${t16-t15}ms after timeout set)`);
         try { app.exit(0); } catch {}
     }, 50);
-});
+}));
 
 // Windows-specific shutdown signal handlers
 // Windows sends different signals than Unix systems during forced shutdowns

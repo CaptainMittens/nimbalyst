@@ -1,7 +1,12 @@
-import { watch as watchFiles, type FSWatcher } from "chokidar";
+import { watch as watchDir, type FSWatcher } from "fs";
 import * as path from "path";
 import { logger } from "../../utils/logger";
-import type { ExternalSessionRef, ExternalSessionSource } from "./types";
+import { supportsRecursiveWatch } from "../../file/WorkspaceNativeWatcher";
+import {
+  ExternalIngestQueueFullError,
+  type ExternalSessionRef,
+  type ExternalSessionSource,
+} from "./types";
 import type {
   ExternalSessionIngestor,
   ExternalWorkspaceRoute,
@@ -14,16 +19,31 @@ interface Dependencies {
   sources: ExternalSessionSource[];
   ingestor: Pick<ExternalSessionIngestor, "ingest">;
   getRoutes: () => Promise<ExternalScope[]>;
-  watch?: typeof watchFiles;
+  watch?: (
+    root: string,
+    options: { recursive: boolean; persistent: boolean },
+    listener: (type: string, filename: string | null) => void
+  ) => Pick<FSWatcher, "on" | "close">;
   intervalMs?: number;
   scopeIsCurrent?: (scope: ExternalScope) => boolean;
 }
+// GitHub #1812: when a session file fails to import, leave it alone for a while
+// instead of trying it again on every scan. The first wait is one minute. The
+// wait doubles after each failure in a row, up to 30 minutes. A file that has
+// changed on disk, or that imports successfully, starts over with no wait.
+const RETRY_BACKOFF_BASE_MS = 60_000;
+const RETRY_BACKOFF_MAX_MS = 30 * 60_000;
+// Same size limit as the settled-file list below: the oldest entry goes first.
+const MAX_FAILING_FILES = 8192;
+
 /** Bounded discovery is also the recovery path for dropped events, absent roots,
  * new workspaces and Codex date rollover. No filesystem work occurs before start. */
 export class ExternalSessionWatcher {
   private generation = 0;
   private enabled = false;
-  private handle?: FSWatcher;
+  // One directory handle per root. A per-file watcher held a descriptor for
+  // every transcript under ~/.claude/projects (2,096 on one machine).
+  private handles = new Map<string, Pick<FSWatcher, "on" | "close">>();
   private timer?: ReturnType<typeof setTimeout>;
   private running?: Promise<void>;
   private roots = new Set<string>();
@@ -45,31 +65,25 @@ export class ExternalSessionWatcher {
   // Discovery is the recovery path for missed events; revisiting these every
   // pass re-read and re-queried every log in the project.
   private settled = new Map<string, string>();
+  // Files whose last import failed. Each entry remembers what the file looked
+  // like at the time (so a change is noticed), how many failures in a row, and
+  // when the next try is allowed.
+  private failing = new Map<
+    string,
+    {
+      /** Discovery-time stamp, when the source reports one. */
+      stamp?: string;
+      updatedAt: number;
+      failures: number;
+      retryAt: number;
+    }
+  >();
   constructor(private readonly deps: Dependencies) {}
 
   start(): Promise<void> {
     if (this.enabled) return this.running ?? Promise.resolve();
     this.enabled = true;
     this.generation++;
-    this.handle = (this.deps.watch ?? watchFiles)([], {
-      ignoreInitial: true,
-      persistent: false,
-      depth: 6,
-      ignored: (file) => this.ignorePath(file),
-      awaitWriteFinish: { stabilityThreshold: 150, pollInterval: 50 },
-    });
-    this.handle.on("all", (_event, file) => {
-      if (!this.enabled) return;
-      if (file.endsWith(".jsonl") && this.changed.size < 512)
-        this.changed.add(file);
-      this.schedule(100);
-    });
-    this.handle.on("error", (error) =>
-      logger.main.warn(
-        "[ExternalSessions] Watch error; scoped polling will retry",
-        error
-      )
-    );
     return this.tick();
   }
 
@@ -79,13 +93,13 @@ export class ExternalSessionWatcher {
     this.generation++;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
-    const handle = this.handle;
-    this.handle = undefined;
-    await handle?.close();
+    for (const handle of this.handles.values()) handle.close();
+    this.handles.clear();
     await this.running;
     await Promise.all(this.deps.sources.map((source) => source.dispose()));
     this.changed.clear();
     this.settled.clear();
+    this.failing.clear();
     this.pendingDiscovery = undefined;
     this.routes.clear();
     this.roots.clear();
@@ -104,6 +118,86 @@ export class ExternalSessionWatcher {
         (!roots.some((other) => other !== root && contains(root, other)) &&
           contains(root, candidate))
     );
+  }
+  private syncWatches(): void {
+    for (const [root, handle] of this.handles)
+      if (!this.roots.has(root)) {
+        handle.close();
+        this.handles.delete(root);
+      }
+    for (const root of this.roots) {
+      if (this.handles.has(root)) continue;
+      // Ancestors report only the creation of their children. Leaves admit
+      // descendants (Claude subagent logs); Linux has no native recursive
+      // watch, so discovery picks those up there.
+      const leaf = ![...this.roots].some(
+        (other) => other !== root && other.startsWith(root + path.sep)
+      );
+      try {
+        const handle = (this.deps.watch ?? watchDir)(
+          root,
+          { recursive: leaf && supportsRecursiveWatch, persistent: false },
+          (_type, filename) => this.onEvent(root, filename)
+        );
+        handle.on("error", (error) => {
+          handle.close();
+          if (this.handles.get(root) === handle) this.handles.delete(root);
+          logger.main.warn(
+            "[ExternalSessions] Watch error; scoped polling will retry",
+            error
+          );
+        });
+        this.handles.set(root, handle);
+      } catch (error: any) {
+        // A root created later (a new day, a first session) is retried next scan.
+        if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR")
+          logger.main.warn(
+            "[ExternalSessions] Watch failed; scoped polling will retry",
+            error
+          );
+      }
+    }
+  }
+  /** True while a file that failed to import is unchanged and its wait is not over. */
+  private isBackingOff(ref: ExternalSessionRef, stamp?: string): boolean {
+    const failure = this.failing.get(ref.filePath);
+    if (!failure || Date.now() >= failure.retryAt) return false;
+    // A file that changed since the failure may import now, so try it at once.
+    return failure.stamp === stamp && failure.updatedAt === ref.updatedAt;
+  }
+  /** Remembers a failure and returns when the next try is allowed. */
+  private recordFailure(ref: ExternalSessionRef, stamp?: string) {
+    const previous = this.failing.get(ref.filePath);
+    // A file that changed since its last failure starts over at one.
+    const failures =
+      previous &&
+      previous.stamp === stamp &&
+      previous.updatedAt === ref.updatedAt
+        ? previous.failures + 1
+        : 1;
+    const wait = Math.min(
+      RETRY_BACKOFF_BASE_MS * 2 ** (failures - 1),
+      RETRY_BACKOFF_MAX_MS
+    );
+    const retryAt = Date.now() + wait;
+    this.failing.delete(ref.filePath);
+    this.failing.set(ref.filePath, {
+      stamp,
+      updatedAt: ref.updatedAt,
+      failures,
+      retryAt,
+    });
+    if (this.failing.size > MAX_FAILING_FILES)
+      this.failing.delete(this.failing.keys().next().value!);
+    return { failures, retryAt };
+  }
+  private onEvent(root: string, filename: string | null): void {
+    if (!this.enabled || !filename) return;
+    const file = path.join(root, filename);
+    if (this.ignorePath(file)) return;
+    if (file.endsWith(".jsonl") && this.changed.size < 512)
+      this.changed.add(file);
+    this.schedule(100);
   }
   private schedule(delay: number): void {
     if (!this.enabled || this.timer) return;
@@ -154,13 +248,8 @@ export class ExternalSessionWatcher {
         routes.size ? source.watchRoots([...routes.keys()]) : []
       )
     );
-    for (const root of this.roots)
-      if (!roots.has(root)) await this.handle?.unwatch(root);
-    if (!eligible()) return;
-    const previousRoots = this.roots;
     this.roots = roots;
-    for (const root of roots)
-      if (!previousRoots.has(root)) this.handle?.add(root);
+    this.syncWatches();
     // Process event files directly; source identify validates cwd and ignores foreign paths.
     const files = [...this.changed].slice(0, 32);
     for (const file of files) {
@@ -243,6 +332,8 @@ export class ExternalSessionWatcher {
         const ref = page.refs[page.next++];
         remaining--;
         if (path.resolve(ref.workspacePath) !== page.cwd) continue;
+        const stamp = page.stamps.get(ref.filePath);
+        if (this.isBackingOff(ref, stamp)) continue;
         try {
           const result = await this.deps.ingestor.ingest(
             page.source,
@@ -255,7 +346,7 @@ export class ExternalSessionWatcher {
           );
           if (result.hasMore && this.changed.size < 512)
             this.changed.add(ref.filePath);
-          const stamp = page.stamps.get(ref.filePath);
+          this.failing.delete(ref.filePath);
           this.settled.delete(ref.filePath);
           if (result.settled && stamp) {
             this.settled.set(ref.filePath, stamp);
@@ -264,9 +355,23 @@ export class ExternalSessionWatcher {
           }
         } catch (error) {
           this.settled.delete(ref.filePath);
+          if (error instanceof ExternalIngestQueueFullError) {
+            // A full queue says nothing about the file, so it earns no wait.
+            logger.main.warn(
+              "[ExternalSessions] Import queue full; next scoped scan retries",
+              { filePath: ref.filePath }
+            );
+            continue;
+          }
+          const { failures, retryAt } = this.recordFailure(ref, stamp);
           logger.main.warn(
-            "[ExternalSessions] Import batch failed; next scoped scan retries",
-            error
+            "[ExternalSessions] Import batch failed; retrying after a wait",
+            error,
+            {
+              filePath: ref.filePath,
+              failures,
+              nextRetryAt: new Date(retryAt).toISOString(),
+            }
           );
         }
       }

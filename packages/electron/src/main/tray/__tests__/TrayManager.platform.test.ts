@@ -155,6 +155,7 @@ vi.mock('../../window/MenuBarIslandWindow', () => ({
   isMenuBarIslandWindow: vi.fn(() => false),
   showMenuBarIsland: showMenuBarIslandMock,
   closeMenuBarIsland: closeMenuBarIslandMock,
+  shutdownMenuBarIsland: vi.fn(),
 }));
 
 vi.mock('../../utils/logger', () => ({
@@ -520,6 +521,26 @@ describe('liveness ticks', () => {
     await (tm as any).onSessionStateEvent({ type: 'session:completed', sessionId: 's1', timestamp: new Date() });
 
     expect((tm as any).sessionCache.get('s1')).toMatchObject({ turnInFlight: false });
+  });
+
+  // #1748: with the process out of file descriptors the settings read inside the
+  // debounced rebuild threw from a bare timer callback, which surfaced as an
+  // Uncaught Exception dialog. The timer must log and keep the last menu.
+  it('contains a settings-read failure inside the debounced menu rebuild', () => {
+    const tm = TrayManager.getInstance();
+    isShowTrayIconMock.mockImplementationOnce(() => {
+      throw Object.assign(new Error('EMFILE: too many open files'), { code: 'EMFILE' });
+    });
+
+    (tm as any).scheduleMenuRebuild();
+
+    expect(() => vi.runOnlyPendingTimers()).not.toThrow();
+    expect(loggerError).toHaveBeenCalledWith(expect.stringContaining('menu rebuild'), expect.objectContaining({ code: 'EMFILE' }));
+
+    // The next rebuild still runs once the failure clears.
+    (tm as any).scheduleMenuRebuild();
+    vi.runOnlyPendingTimers();
+    expect(isShowTrayIconMock).toHaveBeenCalledTimes(2);
   });
 });
 

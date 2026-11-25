@@ -20,7 +20,7 @@ import {
   type ExtensionStorage,
 } from '@nimbalyst/runtime';
 import { store, themeIdAtom } from '@nimbalyst/runtime/store';
-import { customEditorRegistry } from '../CustomEditors';
+import { findPageEditorRegistration } from '../HtmlPage/htmlPageRegistration';
 import { collabEditorLookupName } from '../TabEditor/collabEditorAvailability';
 import { historyDialogFileAtom } from '../../store/atoms/historyDialog';
 import { personalPageHistoryKey as personalPageDocumentPath } from '../../../shared/personalPageUri';
@@ -217,8 +217,9 @@ const PersonalExtensionEditor: React.FC<PersonalExtensionPageBodyProps & { body:
   onEditRef.current = body.onEdit;
   const fileExtension = page.fileExtension ?? undefined;
   const registration = useMemo(
-    () => customEditorRegistry.findRegistrationForFile(
+    () => findPageEditorRegistration(
       collabEditorLookupName({ fileName: page.title, fileExtension, title: page.title, documentType: page.documentType }),
+      { documentType: page.documentType },
     ),
     [page.title, page.documentType, fileExtension],
   );
@@ -263,7 +264,7 @@ const PersonalExtensionEditor: React.FC<PersonalExtensionPageBodyProps & { body:
         ) : (
           <div className="py-4 text-center text-sm text-nim-faint" role="status">
             {body.status === 'unavailable'
-              ? 'This page is unavailable on this device. It may have been deleted. Check Pages Trash for a recoverable copy.'
+              ? 'This page is unavailable on this device. It may have been deleted. Check Wiki Trash for a recoverable copy.'
               : body.status === 'error' ? 'This page could not be loaded.' : 'Loading...'}
             {(body.status === 'unavailable' || body.status === 'error') && (
               <button type="button" className="ml-2 text-nim-link hover:underline" onClick={body.retryLoad}>Try again</button>

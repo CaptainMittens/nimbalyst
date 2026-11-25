@@ -12,6 +12,8 @@ import { onTrackerItemApplied } from '../services/TrackerSyncManager';
 import { readHeadlessBodyMarkdown } from '../services/MainBodyDocService';
 import { startRemoteBodyLinkIndexing } from '../services/tracker/trackerRemoteBodyLinks';
 import { queryPageMarks } from '../services/pageMarks/pageMarksQuery';
+import { getLocalWikiService } from '../services/localWiki/LocalWikiService';
+import { localWikiPageMarks } from '../services/localWiki/localWikiPageMarks';
 import type { PageMarksQuery } from '@nimbalyst/collab-client/pages';
 
 export function registerTrackerPageLinkHandlers(): void {
@@ -43,7 +45,9 @@ export function registerTrackerPageLinkHandlers(): void {
       return { success: false, error: 'workspacePath is required' };
     }
     try {
-      const marks = await queryPageMarks(database as any, payload.workspacePath, payload.query ?? {});
+      const workspacePath = payload.workspacePath;
+      const marks = await queryPageMarks(database as any, workspacePath, payload.query ?? {},
+        async () => localWikiPageMarks(await getLocalWikiService().wikiFor(workspacePath)));
       return { success: true, marks };
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };

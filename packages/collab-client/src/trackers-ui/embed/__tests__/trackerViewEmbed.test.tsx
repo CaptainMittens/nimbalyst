@@ -16,7 +16,7 @@ import {
 } from '@nimbalyst/collab-client/trackers';
 import { TrackersUIProvider } from '../../TrackersUIProvider';
 import { useTrackerViewRows } from '../../useTrackerViewRows';
-import { TrackerViewEmbed } from '../TrackerViewEmbed';
+import { TRACKER_EMBEDS_READ_ONLY_ATTRIBUTE, TrackerViewEmbed } from '../TrackerViewEmbed';
 import { createTypePageView } from '../typePageView';
 import { PlacedViewEmbed } from '../PlacedViewEmbed';
 import { MarksListEmbed } from '../MarksListEmbed';
@@ -130,6 +130,17 @@ describe('TrackerViewEmbed', () => {
     expect(change).toHaveBeenLastCalledWith({ sort: 'realtime:asc' });
     fireEvent(grid, new CustomEvent('aftercolumnresize', { bubbles: true, detail: { 0: { prop: 'realtime', size: 180 } } }));
     expect(change).toHaveBeenLastCalledWith({ w: 'title:320,realtime:180' });
+  });
+
+  it('fits an unsized table body to its rows, and a saved height overrides the fit', async () => {
+    const view = (attrs: Record<string, string>) => <TrackersUIProvider dataSource={fakeSource()} identity={null}><PlacedViewEmbed target={{ kind: 'type', typeId: 'ev-target' }} label="Targets" attrs={attrs} /></TrackersUIProvider>;
+    const { rerender } = render(view({}));
+    await screen.findByText('1 item');
+    const body = () => document.querySelector<HTMLElement>('[data-placed-view-body]')!;
+    // One row fits well under the old fixed 420px, so the body shrinks to its floor.
+    expect(body().style.height).toBe('120px');
+    rerender(view({ height: '300' }));
+    expect(body().style.height).toBe('300px');
   });
 
   it('sorts by subsequent fields on a tie without reversing descending results twice', () => {
@@ -286,6 +297,43 @@ describe('TrackerViewEmbed editing', () => {
     expect(document.querySelector('revo-grid')!.getAttribute('data-readonly')).toBe('true');
     editCell('0.7');
     await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(source.command).not.toHaveBeenCalled();
+  });
+
+  it('is read-only under an ancestor the host marked read-only, with no create row', async () => {
+    const source = fakeSource();
+    render(
+      <div {...{ [TRACKER_EMBEDS_READ_ONLY_ATTRIBUTE]: 'true' }}>
+        <TrackersUIProvider dataSource={source} identity={null}>
+          <TrackerViewEmbed view={scoreView} />
+        </TrackersUIProvider>
+      </div>,
+    );
+    await screen.findByText('1 item');
+    expect(document.querySelector('revo-grid')!.getAttribute('data-readonly')).toBe('true');
+    expect(screen.queryByText('+ New')).toBeNull();
+    editCell('0.7');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(source.command).not.toHaveBeenCalled();
+  });
+
+  it('refuses edits and creates through stale callbacks once an ancestor turns read-only', async () => {
+    const source = fakeSource();
+    const { container } = render(
+      <div data-testid="host">
+        <TrackersUIProvider dataSource={source} identity={null}>
+          <TrackerViewEmbed view={scoreView} />
+        </TrackersUIProvider>
+      </div>,
+    );
+    await screen.findByText('1 item');
+    fireEvent.click(screen.getByText('+ New'));
+    container.querySelector('[data-testid="host"]')!.setAttribute(TRACKER_EMBEDS_READ_ONLY_ATTRIBUTE, 'true');
+
+    fireEvent.change(screen.getByLabelText('New item title'), { target: { value: 'Late' } });
+    fireEvent.submit(screen.getByLabelText('New item title').closest('form')!);
+    editCell('0.7');
+    await waitFor(() => expect(document.querySelector('revo-grid')!.getAttribute('data-readonly')).toBe('true'));
     expect(source.command).not.toHaveBeenCalled();
   });
 

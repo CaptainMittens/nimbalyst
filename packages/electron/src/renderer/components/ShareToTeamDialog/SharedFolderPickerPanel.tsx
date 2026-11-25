@@ -133,7 +133,7 @@ export function SharedFolderPickerPanel({
           </div>
         ) : refreshFailed ? (
           <div className="px-3 py-6 text-center text-[12px] text-[var(--nim-text-muted)]">
-            Pages could not be refreshed. Close this dialog and try again.
+            The wiki could not be refreshed. Close this dialog and try again.
           </div>
         ) : (
           <>

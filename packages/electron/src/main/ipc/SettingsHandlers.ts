@@ -1,6 +1,7 @@
 import { registerProviderCredentialHandlers } from './ProviderCredentialHandlers';
 import { registerCloudflareSandboxHandlers } from './CloudflareSandboxHandlers';
 import { BrowserWindow, safeStorage, session, dialog } from 'electron';
+import { getWindowIdForWindow, windowStates } from '../window/windowState';
 import { applyAnalyticsEnabled } from '../services/analytics/applyAnalyticsEnabled';
 import { safeHandle, safeOn } from '../utils/ipcRegistry';
 import { deleteSecretFile, readSecretFile, writeSecretFile } from '../utils/fileUtils';
@@ -62,6 +63,7 @@ import {
     updateSleepPrevention,
 } from '../services/SyncManager';
 import { getDocSyncStatusForWorkspace } from '../file/WorkspaceWatcher';
+import { transcriptBackfill } from '../services/sync/transcriptBackfill';
 import * as StytchAuth from '../services/StytchAuthService';
 import { getRestartSignalPath } from '../utils/appPaths';
 import { TrayManager } from '../tray/TrayManager';
@@ -76,6 +78,10 @@ import {
 import { purgeOfflineCollabAccounts } from '../services/CollabOfflineAccountLifecycle';
 import { listPersonalSyncDevices, updatePersonalSyncDevices } from '../services/PersonalSyncDevicesService';
 import { recordProjectWalkOriginator } from '../services/ProjectWalkClaim';
+import {
+  getDefaultBackendModuleLifecycleDeps,
+  syncDeveloperModeBackendModules,
+} from '../extensions/backendModuleLifecycle';
 
 // Track if we've subscribed to sync status changes
 let syncStatusListenerSetup = false;
@@ -631,8 +637,16 @@ export function registerSettingsHandlers() {
         return getOpenProjectPaths();
     });
 
-    safeHandle('app:set-open-projects', async (_event, paths: string[]) => {
-        setOpenProjectPaths(Array.isArray(paths) ? paths : []);
+    safeHandle('app:set-open-projects', async (event, paths: string[]) => {
+        const order = Array.isArray(paths) ? paths.filter(path => typeof path === 'string') : [];
+        const windowId = getWindowIdForWindow(BrowserWindow.fromWebContents(event.sender));
+        const state = windowId === null ? undefined : windowStates.get(windowId);
+        if (state) {
+            state.projectRailOrder = order;
+            // The renderer now owns the rail; a reload must not resurrect the saved one.
+            state.restoredRail = undefined;
+        }
+        setOpenProjectPaths(order);
     });
 
     safeHandle('app:get-active-project-path', async () => {
@@ -658,8 +672,8 @@ export function registerSettingsHandlers() {
     // suspected stall point on cold start. The renderer races this call against
     // a timeout (see useOnboarding.ts), so we want a main-side breadcrumb that
     // tells us whether the handler ever ran and how long the underlying store
-    // read took. Logs the elapsed time at info level so it lands in main.log on
-    // packaged builds.
+    // read took. Slow reads and failures remain visible in packaged builds;
+    // successful fast reads are debug-only.
     safeHandle('onboarding:get', async () => {
         const t0 = Date.now();
         try {
@@ -668,7 +682,7 @@ export function registerSettingsHandlers() {
             if (elapsed > 50) {
                 logger.main.warn(`[SettingsHandlers] onboarding:get slow read: ${elapsed}ms`);
             } else {
-                logger.main.info(`[SettingsHandlers] onboarding:get ok (${elapsed}ms)`);
+                logger.main.debug(`[SettingsHandlers] onboarding:get ok (${elapsed}ms)`);
             }
             return state;
         } catch (err) {
@@ -704,6 +718,13 @@ export function registerSettingsHandlers() {
         for (const win of BrowserWindow.getAllWindows()) {
             if (win.isDestroyed() || win.webContents.id === event.sender.id) continue;
             win.webContents.send('app-settings:changed', { key: 'developerMode', value: enabled });
+        }
+        // Extensions that declare `requiresDeveloperMode` run their backend
+        // modules only while it is on. Fire-and-forget, like extension enable.
+        if (before !== enabled) {
+            void syncDeveloperModeBackendModules(getDefaultBackendModuleLifecycleDeps()).catch((err) =>
+                logger.main.error('[SettingsHandlers] backend-module sync for Developer Mode failed:', err)
+            );
         }
     });
 
@@ -1166,9 +1187,13 @@ export function registerSettingsHandlers() {
         const docSyncEnabledProjects = [...new Set(selection?.docSyncEnabledProjects ?? [])];
 
         const addedProjects = enabledProjects.filter((path) => !previousEnabled.includes(path));
+        const removedProjects = previousEnabled.filter((path) => !enabledProjects.includes(path));
         const docSyncChanged = docSyncEnabledProjects.length !== previousDocSync.length
             || docSyncEnabledProjects.some((path) => !previousDocSync.includes(path));
 
+        // Before the write: newly enabled projects keep their sessions marked
+        // until the next reconcile queues the transcripts they withheld.
+        transcriptBackfill.holdProjects(addedProjects);
         // One write for the whole selection.
         setSessionSyncConfig(persistActivePersonalSyncProfile({
             ...config,
@@ -1183,13 +1208,13 @@ export function registerSettingsHandlers() {
         );
 
         // ...and one sync trigger. Doc-sync membership is applied during
-        // reinitialization; a project that only gained session sync just needs
-        // its sessions pushed.
+        // reinitialization; a project that gained or lost session sync needs
+        // its sessions republished (transcripts uploaded, or marked withheld).
         try {
             if (docSyncChanged || !isSyncProviderReady()) {
                 await repositoryManager.reinitializeSyncWithNewConfig();
-            } else if (addedProjects.length > 0) {
-                triggerIncrementalSync().catch(err => {
+            } else if (addedProjects.length > 0 || removedProjects.length > 0) {
+                triggerIncrementalSync({ force: true }).catch(err => {
                     logger.store.error('[sync:set-project-selection] Failed to trigger sync:', err);
                 });
             }
@@ -1220,6 +1245,7 @@ export function registerSettingsHandlers() {
             // Add project to enabled list if not already present
             if (!enabledProjects.includes(workspacePath)) {
                 enabledProjects = [...enabledProjects, workspacePath];
+                transcriptBackfill.holdProjects([workspacePath]);
             }
         } else {
             // Remove project from enabled list
@@ -1236,12 +1262,13 @@ export function registerSettingsHandlers() {
         logger.store.info(`[sync:toggle-project] Project sync ${enabled ? 'enabled' : 'disabled'} for: ${workspacePath}`);
         void projectConfigSync.refresh(workspacePath).catch(err => logger.main.warn(`[sync:toggle-project] Failed to refresh config for ${workspacePath}`, err));
 
-        // If a project was enabled, trigger sync to push its sessions immediately
-        if (enabled) {
+        // Republish the project's sessions now: enabled uploads their
+        // transcripts, disabled marks them as withheld on the phone.
+        if (enabled || isSyncProviderReady()) {
             try {
                 if (isSyncProviderReady()) {
                     // Provider exists - trigger incremental sync directly
-                    triggerIncrementalSync().catch(err => {
+                    triggerIncrementalSync({ force: true }).catch(err => {
                         logger.store.error('[sync:toggle-project] Failed to trigger sync:', err);
                     });
                 } else {

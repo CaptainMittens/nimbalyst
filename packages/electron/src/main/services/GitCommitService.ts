@@ -2,7 +2,8 @@ import { execFile } from 'child_process';
 import log from 'electron-log/main';
 import { existsSync, readdirSync, rmSync, statSync } from 'fs';
 import { isAbsolute, join, relative, resolve, sep } from 'path';
-import simpleGit, { SimpleGit } from 'simple-git';
+import type { SimpleGit } from 'simple-git';
+import { createGit } from './gitClient';
 import {
   filterPatchToHunks,
   matchHunkRefs,
@@ -13,7 +14,6 @@ import {
 } from '@nimbalyst/runtime/ui/git/unifiedDiffModel';
 import { gitOperationLock } from './GitOperationLock';
 import { groupFilesByRepo } from './workspaceRepos';
-import { GIT_INHERITED_ENV_UNSAFE } from './gitInheritedEnvUnsafe';
 import { sanitizeGitRepositoryEnv } from './gitRepositoryEnv';
 
 export type { HunkRef, HunkSelection };
@@ -315,7 +315,7 @@ function applyPatchToIndex(
     const child = execFile(
       'git',
       ['--literal-pathspecs', 'apply', '--cached', '--whitespace=nowarn', '-'],
-      { cwd, env },
+      { windowsHide: true, cwd, env },
       (error, _stdout, stderr) => {
         if (error) {
           const detail = (typeof stderr === 'string' ? stderr : '').trim();
@@ -362,6 +362,11 @@ export async function executeGitCommit(
      * the whole-file path unchanged.
      */
     hunkSelections?: HunkSelection[];
+    /**
+     * #1682: the caller's turn was stopped. Checked once the repo lock is held;
+     * a commit that has started runs to completion.
+     */
+    signal?: AbortSignal;
   }
 ): Promise<GitCommitExecutionResult> {
   const logContext = options?.logContext || '[git:commit]';
@@ -379,6 +384,9 @@ export async function executeGitCommit(
   }
 
   return gitOperationLock.withLock(workspacePath, 'git:commit', async () => {
+    if (options?.signal?.aborted) {
+      return { success: false, error: 'Commit cancelled before it started: the turn was stopped. No commit was made.' };
+    }
     let lastLockError: unknown;
     // Retry the whole commit body when git fails because another process holds
     // .git/index.lock. Each iteration re-reads status, so it is idempotent.
@@ -404,7 +412,7 @@ export async function executeGitCommit(
           return instance;
         };
         const git: SimpleGit = withOutput(
-          simpleGit(workspacePath, { unsafe: GIT_INHERITED_ENV_UNSAFE }).env(gitEnv)
+          createGit(workspacePath, {}, gitEnv)
         );
         const repoHasCommits = await hasCommits(git);
         // log.info(`${logContext} Starting commit in ${workspacePath} with ${filesToStage?.length || 0} files (hasCommits: ${repoHasCommits})`);
@@ -489,8 +497,7 @@ export async function executeGitCommit(
         // GIT_INDEX_FILE, which would otherwise redirect the index the way a
         // hook-launched process does. Only ours is injected, and only here.
         const stagingGit: SimpleGit = withOutput(
-          simpleGit(workspacePath, { unsafe: GIT_INHERITED_ENV_UNSAFE })
-            .env({ ...gitEnv, GIT_INDEX_FILE: tempIndexPath })
+          createGit(workspacePath, {}, { ...gitEnv, GIT_INDEX_FILE: tempIndexPath })
         );
 
         // Seed the private index from HEAD so the commit carries the whole tree,

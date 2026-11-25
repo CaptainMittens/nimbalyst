@@ -129,3 +129,4 @@ describe('locating the calling session transcript', () => {
     expect(await locateTranscript('toolu_B', deps('../../etc/passwd', { env: { CLAUDE_CODE_SESSION_ID: '../x', CLAUDE_CONFIG_DIR: root } }))).toMatchObject({ ok: false });
   });
 });
+

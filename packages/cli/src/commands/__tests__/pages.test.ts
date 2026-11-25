@@ -1,6 +1,6 @@
 // @vitest-environment node
 /**
- * `nim pages <verb>` parses into exactly the Pages tool call a terminal agent
+ * `nim wiki <verb>` parses into exactly the Pages tool call a terminal agent
  * would make. Pure: no server, no checkout.
  */
 import * as fs from 'node:fs';
@@ -11,11 +11,29 @@ import { PAGE_TOOL_NAMES } from '@nimbalyst/collab-protocol';
 import { parseArgs } from '../../cli/parse.js';
 import { PAGES_VERBS, pagesToolCall } from '../pages.js';
 
-const call = (...argv: string[]) => pagesToolCall(parseArgs(['pages', ...argv]));
+const call = (...argv: string[]) => pagesToolCall(parseArgs(['wiki', ...argv]));
 
-describe('nim pages', () => {
+describe('nim wiki', () => {
   it('has a verb for every Pages tool', () => {
     expect([...new Set(Object.values(PAGES_VERBS))].sort()).toEqual([...PAGE_TOOL_NAMES].sort());
+  });
+
+  it('turns the team verbs into team tool calls and points import at move-to-team', () => {
+    expect(call('team-create', 'Acme')).toEqual({ tool: 'team_create', args: { name: 'Acme' } });
+    expect(call('invite', '--org', 'o1', 'a@x.com', 'b@y.com', '--project', 'p1', '--project-role', 'editor')).toEqual({
+      tool: 'team_invite',
+      args: { orgId: 'o1', emails: ['a@x.com', 'b@y.com'], projectId: 'p1', projectRole: 'editor' },
+    });
+    expect(call('invite-link', '--org', 'o1', '--expires-in', '86400', '--max-uses', '5')).toEqual({
+      tool: 'team_invite_link_create',
+      args: { orgId: 'o1', expiresIn: 86400, maxUses: 5 },
+    });
+    // `commenter` is short for the project role, like editor and viewer.
+    expect(call('invite', '--org', 'o1', 'a@x.com', '--project', 'p1', '--project-role', 'commenter').args.projectRole).toBe('project-commenter');
+    expect(call('invite-link', '--org', 'o1', '--project', 'p1', '--project-role', 'commenter').args.projectRole).toBe('project-commenter');
+    expect(() => call('invite', 'a@x.com')).toThrow(/--org/);
+    expect(() => call('import')).toThrow(/move-to-team/);
+    expect(() => call('import-token')).toThrow(/move-to-team/);
   });
 
   it('turns each verb into its tool call', () => {
@@ -85,6 +103,6 @@ describe('nim pages', () => {
     expect(() => call('delete', 'd1')).toThrow(/--kind/);
     expect(() => call('update-item', 'CFS-2')).toThrow(/Nothing to update/);
     expect(() => call('comments')).toThrow(/--page/);
-    expect(() => call('nope')).toThrow(/Unknown 'nim pages' subcommand/);
+    expect(() => call('nope')).toThrow(/Unknown 'nim wiki' subcommand/);
   });
 });

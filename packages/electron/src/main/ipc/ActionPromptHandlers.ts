@@ -80,6 +80,7 @@ export function registerActionPromptHandlers() {
         actionLabel?: string;
         config: {
           model?: string;
+          effort?: string;
           foreground: boolean;
           autoSubmit: boolean;
           worktree: boolean;
@@ -109,6 +110,7 @@ export function registerActionPromptHandlers() {
         prompt,
         title: payload.title || payload.actionLabel,
         model: config.model,
+        effortLevel: config.effort,
         autoSubmit: config.autoSubmit,
         useWorktree: !!config.worktree,
       });

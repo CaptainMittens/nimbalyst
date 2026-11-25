@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { asPersonalJwt, asPersonalMemberId } from '../../auth/jwtScopes';
 
 import { createCollabV3Sync } from '../CollabV3Sync';
+import { clearStableCiphertextCache } from '../stableCiphertext';
+import { decrypt } from '../collabV3Crypto';
+import type { PushChangeOutcome } from '../types';
 import { createProjectConfigSync } from '../../../../electron/src/main/services/sync/projectConfigSync';
 
 /**
@@ -79,7 +82,7 @@ function indexPackets(socket: FakeWebSocket): Array<Record<string, any>> {
     .filter((message) => INDEX_PACKET_TYPES.has(message.type));
 }
 
-async function createConnectedProvider() {
+async function createConnectedProvider(overrides: Partial<Parameters<typeof createCollabV3Sync>[0]> = {}) {
   const encryptionKey = await crypto.subtle.generateKey(
     { name: 'AES-GCM', length: 256 },
     true,
@@ -91,6 +94,7 @@ async function createConnectedProvider() {
     personalMemberId: asPersonalMemberId('user-1'),
     getJwt: async () => asPersonalJwt(jwtFor('user-1')),
     encryptionKey,
+    ...overrides,
   });
 
   await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
@@ -125,6 +129,15 @@ function baseSession(overrides: Record<string, any> = {}) {
 }
 
 describe('CollabV3 index publication gate', () => {
+  it('omits unknown recovery message counts on the v2 wire without clearing the cached count', async () => {
+    const { provider, indexSocket } = await createConnectedProvider();
+    try {
+      await publishBatch(provider, [baseSession({ messageCount: 9 })]);
+      await publishBatch(provider, [baseSession({ messageCount: 0, messageCountKnown: false })]);
+      expect(indexPackets(indexSocket).at(-1)?.session).not.toHaveProperty('messageCount');
+      expect(provider.getCachedIndexEntry?.('session-1')?.messageCount).toBe(9);
+    } finally { provider.disconnectAll(); }
+  });
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(10000);
@@ -189,6 +202,8 @@ describe('CollabV3 index publication gate', () => {
       });
       restoreEncrypt = () => { spy.mockRestore(); };
       let current = true;
+      // Unchanged fields reuse ciphertext; miss so every encryption stage is a real await.
+      clearStableCiphertextCache();
       const publishing = provider.pushChange('session-1', {type: 'metadata_updated', metadata: {parentSessionId: 'A', createdBySessionId: 'A'}}, {isCurrent: () => current});
       await vi.waitFor(() => expect(calls).toBeGreaterThanOrEqual(heldCall));
       indexSocket.receive({type: 'indexBroadcast', session: {...row, parentSessionId: 'B', createdBySessionId: 'B'}});
@@ -586,5 +601,275 @@ describe('CollabV3 index publication gate', () => {
     expect(queued.published).toBe(false);
     expect(queued.retryable).toBe(true);
     expect(queued.reason).toContain('queued');
+  });
+
+  /**
+   * NIM-7545: a session in a project the user did not enable stays listed on
+   * the phone, but its transcript is withheld, so every index publish has to
+   * say so -- bulk, full update, patch, and first-sight -- and stop saying so
+   * once the project is enabled.
+   */
+  it('marks sessions of a project not enabled for sync on every publish path, and clears the mark once enabled', async () => {
+    const enabled = new Set<string>();
+    const { provider, indexSocket, encryptionKey } = await createConnectedProvider({
+      isTranscriptSyncDisabled: projectId => !enabled.has(projectId),
+    });
+    const clientMetaOf = async (packet: Record<string, any> | undefined) => {
+      const body = packet?.session ?? packet?.patch;
+      if (!body?.encryptedClientMetadata) return {};
+      return JSON.parse(await decrypt(body.encryptedClientMetadata, body.clientMetadataIv, encryptionKey));
+    };
+    try {
+      await publishBatch(provider, [baseSession({ workspaceId: '/opted-out' })]);
+      expect(await clientMetaOf(indexPackets(indexSocket).at(-1))).toMatchObject({ transcriptSyncDisabled: true });
+
+      await provider.pushChange('session-1', { type: 'metadata_updated', metadata: { isExecuting: true } });
+      expect(indexPackets(indexSocket).at(-1)?.type).toBe('indexUpdate');
+      expect(await clientMetaOf(indexPackets(indexSocket).at(-1))).toMatchObject({ transcriptSyncDisabled: true });
+
+      await provider.pushChange('session-1', { type: 'metadata_updated', metadata: { draftInput: 'draft', draftUpdatedAt: 2_000 } as any });
+      expect(indexPackets(indexSocket).at(-1)?.type).toBe('indexClientMetadataPatch');
+      expect(await clientMetaOf(indexPackets(indexSocket).at(-1))).toMatchObject({ transcriptSyncDisabled: true });
+
+      await provider.pushChange('session-2', { type: 'metadata_updated', metadata: {
+        title: 'Created while opted out', provider: 'claude-code', workspaceId: '/opted-out', updatedAt: 3_000,
+      } });
+      expect(indexPackets(indexSocket).at(-1)?.session.sessionId).toBe('session-2');
+      expect(await clientMetaOf(indexPackets(indexSocket).at(-1))).toMatchObject({ transcriptSyncDisabled: true });
+
+      // The flag survives the round trip, so reconciliation can see which rows lack a transcript.
+      const flaggedRow = indexPackets(indexSocket).filter(p => p.session?.sessionId === 'session-1').at(-1)!.session;
+      const fetching = provider.fetchIndex!();
+      const pageRequests = () => indexSocket.send.mock.calls.map(([p]) => JSON.parse(p as string)).filter(m => m.type === 'indexPageRequest');
+      await vi.waitFor(() => expect(pageRequests()).toHaveLength(2));
+      indexSocket.receive({ type: 'indexPageResponse', protocolVersion: 2, requestId: pageRequests().at(-1)!.requestId, mode: 'delta',
+        entries: [{ entity: 'session', id: 'session-1', revision: 1, deleted: false, session: flaggedRow }], complete: true, cursor: 1 });
+      const index = await fetching;
+      expect(index.sessions.find(s => s.sessionId === 'session-1')?.transcriptSyncDisabled).toBe(true);
+
+      // Enabled in Settings > Sync: the next publish of either kind drops the mark.
+      enabled.add('/opted-out');
+      await provider.pushChange('session-1', { type: 'metadata_updated', metadata: { isExecuting: false } });
+      expect(indexPackets(indexSocket).at(-1)?.type).toBe('indexUpdate');
+      expect((await clientMetaOf(indexPackets(indexSocket).at(-1))).transcriptSyncDisabled).toBeUndefined();
+      await publishBatch(provider, [baseSession({ workspaceId: '/opted-out', updatedAt: 4_000 })]);
+      expect((await clientMetaOf(indexPackets(indexSocket).at(-1))).transcriptSyncDisabled).toBeUndefined();
+
+      // Disabled again: a patch alone must carry the change, not be suppressed as a no-op.
+      enabled.delete('/opted-out');
+      await provider.pushChange('session-1', { type: 'metadata_updated', metadata: { draftInput: 'draft', draftUpdatedAt: 2_000 } as any });
+      expect(indexPackets(indexSocket).at(-1)?.type).toBe('indexClientMetadataPatch');
+      expect(await clientMetaOf(indexPackets(indexSocket).at(-1))).toMatchObject({ transcriptSyncDisabled: true });
+    } finally {
+      provider.disconnectAll();
+    }
+  });
+
+  it('reports each requested transcript upload, including a failed load, so a backfill is never assumed delivered', async () => {
+    const { provider } = await createConnectedProvider();
+    const outcomes: Array<[string, PushChangeOutcome]> = [];
+    let failLoad = true;
+    try {
+      const sync = (ids: string[]) => provider.syncSessionsToIndex!(ids.map(id => baseSession({ id })) as never, {
+        syncMessages: true,
+        messageSyncRequests: ids.map(sessionId => ({ sessionId, sinceTimestamp: 0 })),
+        getMessagesForSync: async () => { if (failLoad) throw new Error('database busy'); return new Map(); },
+        onTranscriptSynced: (sessionId, outcome) => { outcomes.push([sessionId, outcome]); },
+      });
+      await sync(['owed-1']);
+      await vi.waitFor(() => expect(outcomes).toHaveLength(1));
+      expect(outcomes[0]).toEqual(['owed-1', expect.objectContaining({ published: false, retryable: true, reason: 'transcript load failed' })]);
+
+      failLoad = false;
+      await sync(['owed-1']);
+      // Nothing stored past the requested point: nothing left to deliver.
+      await vi.waitFor(() => expect(outcomes).toHaveLength(2));
+      expect(outcomes[1]).toEqual(['owed-1', { published: true }]);
+    } finally {
+      provider.disconnectAll();
+    }
+  });
+
+  /**
+   * NIM-7546: `isExecuting: false` pushed during an index 1006 drop came back
+   * `index publication deferred` and was never sent again, so the phone showed
+   * the session running for hours.
+   */
+  it('resends an execution-state change deferred while the index was down once the index is usable again', async () => {
+    const { provider, indexSocket } = await createConnectedProvider();
+    try {
+      await publishBatch(provider, [baseSession({ createdBySessionId: 'manager-1' })]);
+      await provider.pushChange('session-1', { type: 'metadata_updated', metadata: { isExecuting: true, updatedAt: 2_000 } });
+      expect(indexPackets(indexSocket).at(-1)?.session.isExecuting).toBe(true);
+
+      indexSocket.readyState = 3;
+      indexSocket.onclose?.({ code: 1006, reason: '', wasClean: false } as CloseEvent);
+      const deferred = await provider.pushChange('session-1', { type: 'metadata_updated', metadata: { isExecuting: false, updatedAt: 3_000 } });
+      expect(deferred).toMatchObject({ published: false, retryable: true });
+      // A model-only change and an explicit manager clear made offline must survive too.
+      await provider.pushChange('session-1', { type: 'metadata_updated', metadata: { model: 'claude-code:opus', createdBySessionId: null } });
+
+      await provider.reconnectIndex!();
+      await vi.waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(1));
+      const freshSocket = FakeWebSocket.instances.at(-1)!;
+      freshSocket.open();
+      await vi.waitFor(() => expect(indexPackets(freshSocket).at(-1)?.session).toMatchObject({ sessionId: 'session-1', isExecuting: false }), { timeout: 2_000 });
+      expect(indexPackets(freshSocket).at(-1)?.session).toMatchObject({ model: 'claude-code:opus', createdBySessionId: null });
+      expect(provider.getCachedIndexEntry?.('session-1')?.isExecuting).toBe(false);
+    } finally {
+      provider.disconnectAll();
+    }
+  });
+
+  /**
+   * GitHub #1901: a deleted session came back after an app restart. After a
+   * restart no session room is open, and the delete was dropped before it
+   * reached the index. These tests pin that a delete always reaches the server,
+   * or waits and is sent later, and is never reported as published when it was not.
+   */
+  describe('session delete (GitHub #1901)', () => {
+    const indexDeletes = (socket: FakeWebSocket) => socket.send.mock.calls
+      .map(([payload]) => JSON.parse(payload as string))
+      .filter((message) => message.type === 'indexDelete');
+
+    /** Close the index socket as a dropped connection, then bring up a fresh one. */
+    async function reconnectIndexSocket(provider: ReturnType<typeof createCollabV3Sync>): Promise<FakeWebSocket> {
+      const before = FakeWebSocket.instances.length;
+      await provider.reconnectIndex!();
+      await vi.waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(before));
+      const fresh = FakeWebSocket.instances.at(-1)!;
+      fresh.open();
+      return fresh;
+    }
+
+    function dropIndexSocket(socket: FakeWebSocket): void {
+      socket.readyState = 3;
+      socket.onclose?.({ code: 1006, reason: '', wasClean: false } as CloseEvent);
+    }
+
+    it('sends the index delete for a session whose room was never opened (the state after a restart)', async () => {
+      const { provider, indexSocket } = await createConnectedProvider();
+      try {
+        const outcome = await provider.pushChange('old-session', { type: 'session_deleted' });
+        expect(outcome).toMatchObject({ published: true });
+        expect(indexDeletes(indexSocket)).toEqual([{ type: 'indexDelete', sessionId: 'old-session' }]);
+      } finally { provider.disconnectAll(); }
+    });
+
+    it('does not call a delete published while the index is down, and sends it once the index is back', async () => {
+      const { provider, indexSocket } = await createConnectedProvider();
+      try {
+        // An open session room, so the old code reached its silent drop.
+        const connecting = provider.connect('session-1');
+        await vi.waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+        FakeWebSocket.instances[1].open();
+        await connecting;
+
+        dropIndexSocket(indexSocket);
+        const outcome = await provider.pushChange('session-1', { type: 'session_deleted' });
+        expect(outcome).toMatchObject({ published: false, retryable: true });
+
+        const fresh = await reconnectIndexSocket(provider);
+        await vi.waitFor(() => expect(indexDeletes(fresh)).toEqual([{ type: 'indexDelete', sessionId: 'session-1' }]), { timeout: 2_000 });
+      } finally { provider.disconnectAll(); }
+    });
+
+    it('keeps a delete made while the index was down across an app restart', async () => {
+      let saved: Record<string, number> = {};
+      const pendingSessionDeletes = { load: () => saved, save: (next: Record<string, number>) => { saved = { ...next }; } };
+
+      const first = await createConnectedProvider({ pendingSessionDeletes });
+      dropIndexSocket(first.indexSocket);
+      const outcome = await first.provider.pushChange('old-session', { type: 'session_deleted' });
+      expect(outcome).toMatchObject({ published: false, retryable: true });
+      expect(Object.keys(saved)).toEqual(['old-session']);
+      first.provider.disconnectAll();
+
+      // "Restart": a new provider, a new socket, the same saved list.
+      FakeWebSocket.instances = [];
+      const second = await createConnectedProvider({ pendingSessionDeletes });
+      try {
+        await vi.waitFor(() => expect(indexDeletes(second.indexSocket)).toEqual([{ type: 'indexDelete', sessionId: 'old-session' }]), { timeout: 2_000 });
+        await vi.waitFor(() => expect(saved).toEqual({}));
+      } finally { second.provider.disconnectAll(); }
+    });
+
+    it('does not delete a session that was created again with the same id after the delete was queued', async () => {
+      let saved: Record<string, number> = {};
+      const pendingSessionDeletes = { load: () => saved, save: (next: Record<string, number>) => { saved = { ...next }; } };
+      const { provider, indexSocket } = await createConnectedProvider({ pendingSessionDeletes });
+      try {
+        dropIndexSocket(indexSocket);
+        await provider.pushChange('session-1', { type: 'session_deleted' });
+        expect(Object.keys(saved)).toEqual(['session-1']);
+        // The delete was queued at fake time 10000. A create-shaped update stamped later is a new session.
+        await provider.pushChange('session-1', {
+          type: 'metadata_updated',
+          metadata: { title: 'Back again', provider: 'claude-code', updatedAt: 20_000 },
+        });
+        expect(saved).toEqual({});
+
+        const fresh = await reconnectIndexSocket(provider);
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        expect(indexDeletes(fresh)).toEqual([]);
+      } finally { provider.disconnectAll(); }
+    });
+
+    it('keeps a waiting delete when an upload built before the delete arrives later', async () => {
+      let saved: Record<string, number> = {};
+      const pendingSessionDeletes = { load: () => saved, save: (next: Record<string, number>) => { saved = { ...next }; } };
+      const { provider, indexSocket } = await createConnectedProvider({ pendingSessionDeletes });
+      try {
+        dropIndexSocket(indexSocket);
+        await provider.pushChange('session-1', { type: 'session_deleted' });
+        // Delete queued at fake time 10000; this create-shaped update was stamped before it.
+        await provider.pushChange('session-1', {
+          type: 'metadata_updated',
+          metadata: { title: 'Stale copy', provider: 'claude-code', updatedAt: 5_000 },
+        });
+        expect(Object.keys(saved)).toEqual(['session-1']);
+
+        const fresh = await reconnectIndexSocket(provider);
+        await vi.waitFor(() => expect(indexDeletes(fresh)).toEqual([{ type: 'indexDelete', sessionId: 'session-1' }]), { timeout: 2_000 });
+        expect(indexPackets(fresh).filter((packet) => packet.session?.sessionId === 'session-1')).toEqual([]);
+      } finally { provider.disconnectAll(); }
+    });
+
+    it('keeps a waiting delete when the socket refuses the send, and clears it once a send succeeds', async () => {
+      let saved: Record<string, number> = {};
+      const pendingSessionDeletes = { load: () => saved, save: (next: Record<string, number>) => { saved = { ...next }; } };
+      const { provider, indexSocket } = await createConnectedProvider({ pendingSessionDeletes });
+      try {
+        dropIndexSocket(indexSocket);
+        await provider.pushChange('session-1', { type: 'session_deleted' });
+        expect(Object.keys(saved)).toEqual(['session-1']);
+
+        // The reconnect drain hits a socket that throws on send.
+        const before = FakeWebSocket.instances.length;
+        await provider.reconnectIndex!();
+        await vi.waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(before));
+        const failing = FakeWebSocket.instances.at(-1)!;
+        failing.send.mockImplementation((payload: string) => {
+          if (JSON.parse(payload).type === 'indexDelete') throw new Error('socket is closing');
+        });
+        failing.open();
+        await vi.waitFor(() => expect(failing.send.mock.calls.some(([p]) => JSON.parse(p as string).type === 'indexDelete')).toBe(true), { timeout: 2_000 });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(Object.keys(saved)).toEqual(['session-1']);
+
+        // A socket that has started closing must not count as a send either.
+        failing.send.mockReset();
+        failing.readyState = 2;
+        const closing = await provider.pushChange('session-1', { type: 'session_deleted' });
+        expect(closing).toMatchObject({ published: false, retryable: true });
+        expect(indexDeletes(failing)).toEqual([]);
+        expect(Object.keys(saved)).toEqual(['session-1']);
+
+        dropIndexSocket(failing);
+        const healthy = await reconnectIndexSocket(provider);
+        await vi.waitFor(() => expect(indexDeletes(healthy)).toEqual([{ type: 'indexDelete', sessionId: 'session-1' }]), { timeout: 2_000 });
+        await vi.waitFor(() => expect(saved).toEqual({}));
+      } finally { provider.disconnectAll(); }
+    });
   });
 });

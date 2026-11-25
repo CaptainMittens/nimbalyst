@@ -16,6 +16,7 @@ import {
 import {
   type SharedDocument,
   type SharedFolder,
+  type SharedParentKind,
   buildCollabTreeAdaptive,
   collectFolderSubtree,
   collectPageSubtree,
@@ -47,9 +48,9 @@ import {
   type CollabRowDrop,
 } from './CollabTypeTreeRows';
 import { useFloatingMenu, FloatingPortal, virtualElement } from '../ui-primitives/useFloatingMenu';
-import { CollabSectionMenu, CollabTreeEmptyState } from './CollabSectionRoot';
+import { CollabSectionMenu, CollabTreeEmptyState, type CollabSectionMenuItem } from './CollabSectionRoot';
 import { CollabSidebarTrashEntry } from './CollabTrash';
-import { revealKeysFor } from './collabTreeReveal';
+import { itemRowIdForDocument, revealKeysFor } from './collabTreeReveal';
 import { usePageActionRequest, type CollabPageActionRequest } from './usePageActionRequest';
 
 const CYCLE_WARNING = 'A page cannot move inside one of its own child pages.';
@@ -135,6 +136,8 @@ export interface CollabSidebarProps {
   scopeName?: React.ReactNode;
   scopePath?: React.ReactNode;
   headerActions?: React.ReactNode;
+  /** Host entries appended to the section's right-click menu. */
+  extraSectionMenuItems?: readonly CollabSectionMenuItem[];
   /**
    * Hosts where a folder is an addressable surface (the browser console routes
    * `/docs/folder/:folderId`). Desktop leaves this unset, so a folder click
@@ -155,7 +158,7 @@ export interface CollabSidebarProps {
   typeResolver?: CollabTypeTreeResolver;
   /**
    * Archive a typed page (the tracker's own archive, which keeps its comments
-   * and sessions). Typed pages never go to Pages Trash; hosts without tracker
+   * and sessions). Typed pages never go to Wiki Trash; hosts without tracker
    * writes omit it and the row offers no Archive.
    */
   onArchiveItem?: (itemId: string) => Promise<void>;
@@ -201,6 +204,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   scopeName,
   scopePath,
   headerActions,
+  extraSectionMenuItems,
   onSelectFolder,
   registerCreateMenu,
   typeResolver,
@@ -255,7 +259,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   const [sectionMenu, setSectionMenu] = useState<{ x: number; y: number } | null>(null);
   // "New page inside" a typed page: it is not in the folder list the create
   // dialog picks from, so it is offered there as one extra location.
-  const [createInsideItem, setCreateInsideItem] = useState<{ itemId: string; name: string } | null>(null);
+  // Whether `createTargetFolderId` is a page or a typed page (page tree only).
+  const [createTargetKind, setCreateTargetKind] = useState<SharedParentKind>('page');
   const [draggedType, setDraggedType] = useState<string | null>(null);
   const [draggedItem, setDraggedItem] = useState<CollabTreeItemNode | null>(null);
   const [moveTarget, setMoveTarget] = useState<
@@ -380,18 +385,6 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     return ids;
   }, [tree]);
 
-  const createFolderOptions = useMemo(() => (createInsideItem
-    ? [...sharedFolders, {
-      folderId: createInsideItem.itemId,
-      parentFolderId: null,
-      name: createInsideItem.name,
-      sortOrder: 0,
-      createdBy: '',
-      createdAt: 0,
-      updatedAt: 0,
-    }]
-    : sharedFolders), [createInsideItem, sharedFolders]);
-
   // Docs visible under the active segmented filter (All / Favorites / Updated).
   const visibleDocuments = useMemo(() => {
     if (effectiveTreeFilter === 'favorites') {
@@ -440,7 +433,12 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     () => sharedDocuments.find(document => document.documentId === activeDocumentId) ?? null,
     [activeDocumentId, sharedDocuments]
   );
-  const activeRow = useMemo(() => ({ itemId: activeItemId, typeId: activeTypeId }), [activeItemId, activeTypeId]);
+  // An open local typed page has no page row; its item row is the one to mark.
+  const activeItemRowId = useMemo(
+    () => activeItemId ?? itemRowIdForDocument(tree, activeDocumentId ?? null),
+    [activeDocumentId, activeItemId, tree]
+  );
+  const activeRow = useMemo(() => ({ itemId: activeItemRowId, typeId: activeTypeId }), [activeItemRowId, activeTypeId]);
 
   const folderById = useMemo(
     () => new Map(sharedFolders.map(f => [f.folderId, f])),
@@ -526,8 +524,8 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   );
   const markdownDescriptor = sharedNewDocumentMenuItems.find(({ descriptor }) => descriptor.documentType === 'markdown')?.descriptor;
   // A new markdown page under `parentId` (null = this section's root).
-  const startNewPage = (parentId: string | null, insideItem: { itemId: string; name: string } | null = null) => {
-    setCreateInsideItem(insideItem);
+  const startNewPage = (parentId: string | null, parentKind: SharedParentKind = 'page') => {
+    setCreateTargetKind(parentKind);
     setCreateTargetFolderId(parentId);
     if (markdownDescriptor) setCreateDocumentDescriptor(markdownDescriptor);
     setContextMenu(null);
@@ -645,18 +643,22 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     });
   }, [activeDocument, treePathOf]);
 
-  // The same for the open typed page or type, once per target: the tree
-  // re-renders on every item edit, and a row the user closes stays closed.
+  // The same for the open typed page, type, or a page under a typed item (the
+  // path walk above cannot open id-keyed item and type rows), once per target:
+  // the tree re-renders on every item edit, and a row the user closes stays closed.
   const revealedRowRef = useRef<string | null>(null);
   useEffect(() => {
-    const targetKey = activeItemId ? `item:${activeItemId}` : activeTypeId ? `type:${activeTypeId}` : null;
+    const targetKey = activeItemRowId ? `item:${activeItemRowId}`
+      : activeTypeId ? `type:${activeTypeId}`
+      : activeDocumentId ? `document:${activeDocumentId}`
+      : null;
     if (!targetKey || revealedRowRef.current === targetKey) return;
-    const keys = revealKeysFor(tree, { itemId: activeItemId, typeId: activeTypeId });
+    const keys = revealKeysFor(tree, { itemId: activeItemRowId, typeId: activeTypeId, documentId: activeDocumentId ?? null });
     if (!keys) return;
     revealedRowRef.current = targetKey;
     if (keys.length === 0) return;
     setExpandedFolders((current) => (keys.every((key) => current.has(key)) ? current : new Set([...current, ...keys])));
-  }, [activeItemId, activeTypeId, tree]);
+  }, [activeDocumentId, activeItemRowId, activeTypeId, tree]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent, node: CollabTreeNode) => {
     e.preventDefault();
@@ -789,7 +791,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         return;
       }
       if (target.type === 'item') {
-        if (action === 'newPageInside') startNewPage(target.itemId, { itemId: target.itemId, name: target.name });
+        if (action === 'newPageInside') startNewPage(target.itemId, 'item');
         else if (action === 'moveTo') setMoveTarget({ kind: 'item', node: target });
         else if (action === 'backUnderType') moveItemTo(target.itemId, { underType: true });
         return;
@@ -935,33 +937,46 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     session.clearPendingFolder();
   }, [folderById, folderPathById, pendingCollabFolder, scope, session]);
 
-  const getCreationBaseFolderId = useCallback((): string | null => {
+  // Where a new item goes: the row the menu was opened on, else in a page
+  // tree the open page or typed page, else the selected folder.
+  const applyCreationBaseTarget = useCallback(() => {
+    if (pageTree && contextMenu?.node.type === 'item') {
+      setCreateTargetFolderId(contextMenu.node.itemId);
+      setCreateTargetKind('item');
+      return;
+    }
     const contextFolderId = contextMenu?.node.type === 'folder'
       ? (contextMenu.node.folderId ?? null)
       : pageTree && contextMenu?.node.type === 'document'
         ? contextMenu.node.document.documentId
         : undefined;
-    return resolveCollabCreateTargetFolderId(contextFolderId, selectedFolderId);
-  }, [contextMenu, pageTree, selectedFolderId]);
+    if (pageTree && contextFolderId === undefined && (activeItemId || activeDocumentId)) {
+      setCreateTargetFolderId(activeItemId ?? activeDocumentId ?? null);
+      setCreateTargetKind(activeItemId ? 'item' : 'page');
+      return;
+    }
+    setCreateTargetFolderId(resolveCollabCreateTargetFolderId(contextFolderId, selectedFolderId));
+    setCreateTargetKind('page');
+  }, [activeDocumentId, activeItemId, contextMenu, pageTree, selectedFolderId]);
 
   const openCreateFolderDialog = useCallback(() => {
-    setCreateTargetFolderId(getCreationBaseFolderId());
+    applyCreationBaseTarget();
     setIsCreateFolderOpen(true);
     setContextMenu(null);
-  }, [getCreationBaseFolderId]);
+  }, [applyCreationBaseTarget]);
 
   const openCreateDocumentMenu = useCallback((reference: HTMLElement) => {
-    setCreateTargetFolderId(getCreationBaseFolderId());
+    applyCreationBaseTarget();
     newDocumentMenu.refs.setReference(reference);
     newDocumentMenu.setIsOpen(true);
     setContextMenu(null);
-  }, [getCreationBaseFolderId, newDocumentMenu.refs, newDocumentMenu.setIsOpen]);
+  }, [applyCreationBaseTarget, newDocumentMenu.refs, newDocumentMenu.setIsOpen]);
 
   // Handlers via ref, effect keyed on a content signature. Depending on the
   // callbacks directly republishes on every render, and the host turns that
   // into a re-render, which loops.
-  const createHandlersRef = useRef({ getCreationBaseFolderId, openCreateFolderDialog });
-  createHandlersRef.current = { getCreationBaseFolderId, openCreateFolderDialog };
+  const createHandlersRef = useRef({ applyCreationBaseTarget, openCreateFolderDialog });
+  createHandlersRef.current = { applyCreationBaseTarget, openCreateFolderDialog };
 
   const sharedTypeSignature = sharedNewDocumentMenuItems
     .map(({ descriptor }) => `${descriptor.documentType}:${descriptor.defaultExtension}`)
@@ -978,7 +993,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
       destination: selectedFolderPath,
       primaryTrailing: markdown?.descriptor.defaultExtension,
       onPrimary: () => {
-        setCreateTargetFolderId(createHandlersRef.current.getCreationBaseFolderId());
+        createHandlersRef.current.applyCreationBaseTarget();
         if (markdown) setCreateDocumentDescriptor(markdown.descriptor);
       },
       onNewFolder: () => createHandlersRef.current.openCreateFolderDialog(),
@@ -992,7 +1007,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
           icon: descriptor.icon,
           trailing: descriptor.defaultExtension,
           onSelect: () => {
-            setCreateTargetFolderId(createHandlersRef.current.getCreationBaseFolderId());
+            createHandlersRef.current.applyCreationBaseTarget();
             setCreateDocumentDescriptor(descriptor);
           },
         })),
@@ -1039,12 +1054,17 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     setContextMenu(null);
   }, [canMutateMetadata, createTargetFolderId, existingPaths, folderPathById, host, session, showWarning]);
 
+  const changeCreateTarget = useCallback((parentId: string | null, parentKind: SharedParentKind = 'page') => {
+    setCreateTargetFolderId(parentId);
+    setCreateTargetKind(parentKind);
+  }, []);
+
   const handleCreateDocument = useCallback(async (documentName: string) => {
     if (!canMutateMetadata('create documents')) return;
     const descriptor = createDocumentDescriptor;
     if (!descriptor) return;
     const parentId = createTargetFolderId;
-    const insideItem = parentId !== null && createInsideItem?.itemId === parentId;
+    const insideItem = parentId !== null && createTargetKind === 'item';
     const parentPath = insideItem ? `item:${parentId}` : parentId ? (folderPathById.get(parentId) ?? '') : '';
     try {
       await session.createDocument({
@@ -1071,9 +1091,9 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
     setSelectedFolderPath(insideItem ? null : parentPath || null);
     setSelectedFolderId(insideItem ? null : parentId);
     setCreateDocumentDescriptor(null);
-    setCreateInsideItem(null);
+    setCreateTargetKind('page');
     setContextMenu(null);
-  }, [canMutateMetadata, createDocumentDescriptor, createInsideItem, createTargetFolderId, folderPathById, host, scope, session]);
+  }, [canMutateMetadata, createDocumentDescriptor, createTargetFolderId, createTargetKind, folderPathById, host, scope, session]);
 
   const handleRenameDocument = useCallback(async (documentName: string) => {
     if (!documentToRename) return;
@@ -1672,7 +1692,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
   ]);
   renderTreeRef.current = renderTree;
 
-  const selectedFolderLabel = selectedFolderPath ? getCollabNodeName(selectedFolderPath) : 'Pages';
+  const selectedFolderLabel = selectedFolderPath ? getCollabNodeName(selectedFolderPath) : 'Wiki';
   const contextDocument = contextMenu?.node.type === 'document' ? contextMenu.node.document : null;
   const useLocalOrigin = controller.useLocalOrigin ?? useUnavailableLocalOrigin;
   const contextLocalOrigin = useLocalOrigin(
@@ -1732,6 +1752,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         if (collapsed) onToggleCollapsed?.();
         setPlaceTypeMenu({ ...sectionMenu, parentFolderId: null });
       } : undefined}
+      extraItems={extraSectionMenuItems}
       onClose={() => setSectionMenu(null)}
     />
   );
@@ -2097,7 +2118,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
             <CollabItemMenu
               onNewPageInside={() => {
                 if (contextMenu.node.type !== 'item') return;
-                startNewPage(contextMenu.node.itemId, { itemId: contextMenu.node.itemId, name: contextMenu.node.name });
+                startNewPage(contextMenu.node.itemId, 'item');
               }}
               onPlaceType={typeResolver ? () => {
                 if (contextMenu.node.type !== 'item') return;
@@ -2125,7 +2146,7 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
                 setContextMenu(null);
                 void confirmDestructive(
                   'Archive page',
-                  `Archive "${name}"? It leaves Pages and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
+                  `Archive "${name}"? It leaves the Wiki and its type's table, with its comments and sessions kept. Restore it from its tracker's Archived view.`,
                   'Archive',
                 ).then((accepted) => {
                   if (accepted) onArchiveItem(itemId).catch(reportTypePlacementError);
@@ -2314,13 +2335,17 @@ export const CollabSidebar: React.FC<CollabSidebarProps> = ({
         isOpen={createDocumentDescriptor !== null}
         kind="document"
         documentDescriptor={createDocumentDescriptor ?? undefined}
-        folders={createFolderOptions}
+        folders={sharedFolders}
+        tree={pageTree ? tree : undefined}
+        documentTypeDescriptors={documentTypeDescriptors}
+        rootLabel={pageTree ? (personal ? 'Personal' : 'Team') : undefined}
         targetFolderId={createTargetFolderId}
-        onTargetFolderChange={setCreateTargetFolderId}
+        targetParentKind={createTargetKind}
+        onTargetFolderChange={changeCreateTarget}
         onConfirm={handleCreateDocument}
         onCancel={() => {
           setCreateDocumentDescriptor(null);
-          setCreateInsideItem(null);
+          setCreateTargetKind('page');
           setContextMenu(null);
         }}
       />

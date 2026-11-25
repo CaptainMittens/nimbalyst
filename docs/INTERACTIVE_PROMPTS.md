@@ -88,6 +88,17 @@ This fallback is intentionally narrow:
 - It is only used if no exact waiter channel matches.
 - For `RequestUserInput`, the waiter still validates ids when possible and only accepts unrelated ids outright when it is already blocked on a synthetic `rui-...` fallback id.
 
+## Dismissing An SDK-Native AskUserQuestion
+
+The Claude Agent SDK's own `AskUserQuestion` (the `canUseTool` path in `claudeCode/askUserQuestion.ts`) is held by `ClaudeCodeProvider`. When the user cancels it on desktop or mobile, `rejectAskUserQuestion` rejects the waiter with `AskUserQuestionDismissedError`.
+
+- If the CLI's `system/init` frame advertised `ask_user_question_unanswered_v1`, the tool is allowed with `annotations[question].unanswered = 'dismissed'` and dismissal text in `answers` for every question. The model never sees `unanswered`, so the `answers` text is what tells it the user dismissed the question.
+  `rejectAskUserQuestion` then returns `'dismissed'`, and the desktop cancel handler skips its `provider.abort()` so the turn continues and the model reads the dismissal. The Stop button still stops the turn.
+- Otherwise it is denied with the cancel message, and desktop cancel aborts the turn, as before. Older CLIs on a strict host refuse an answer carrying the field.
+- A turn abort (`rejectAllPendingQuestions`, or the turn's signal) always denies; that turn is ending.
+
+`replied_in_chat` and `skipped` are not sent: no path delivers a chat message to a pending SDK question, and the widget has no per-question skip.
+
 ## Durable Rendering Rules
 
 Interactive widgets should follow these rules:
@@ -107,6 +118,7 @@ When adding a new interactive prompt, keep the correlation path unified:
 4. If Codex is involved, reuse the shared resolver instead of parsing `_meta` or synthetic ids locally.
 5. If the prompt blocks an MCP call, decide what the fallback wakeup path is before shipping it.
 6. Add at least one regression test that covers the full request -> persist response -> waiter resume path.
+7. Set and clear the session's pending-prompt bit with `setSessionPendingPrompt` (directly, or through `openPromptRegistry`) on open and on every settle. A lead blocked on the user must not be woken by a background-task result: `idleWakeSignals.ts` holds those wakes while the bit, the open-prompt registry, or MCP prompt liveness says the session is blocked, and releases them on each clear (#1557): a direct wake when no turn is running, or a queued prompt behind a turn the answer already started. A prompt that never clears the bit holds those results until it does.
 
 ## What Broke Before
 

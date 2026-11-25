@@ -2,7 +2,7 @@
  * Decision and open-question marks across the pages this device can read
  * locally: typed pages (tracker item bodies, including teammates' edits once
  * the remote body indexer has cached them), Personal pages and Personal type
- * pages. Plain team pages and team type pages live only in their rooms; the
+ * pages, and the Local wiki's page files. Plain team pages and team type pages live only in their rooms; the
  * renderer adds them from the server's marks index (`desktopPageMarksSource`).
  *
  * Bodies are read on demand and parsed with the same scanner the editor uses
@@ -40,7 +40,7 @@ function isTrue(value: unknown): boolean {
   return value === true || value === 1 || value === '1' || value === 't' || value === 'true';
 }
 
-function marksIn(
+export function marksIn(
   markdown: string,
   page: PageMarkRecord['page'],
 ): PageMarkRecord[] {
@@ -116,15 +116,23 @@ async function personalPageMarks(db: PageMarksDb, workspacePath: string): Promis
   return out;
 }
 
-/** Every mark in the workspace's readable pages that matches `query`. */
+/**
+ * Every mark in the workspace's readable pages that matches `query`.
+ * `localWikiMarks` adds the Local wiki's files; a page exported to the wiki
+ * keeps its database row with the same id, and the file wins.
+ */
 export async function queryPageMarks(
   db: PageMarksDb,
   workspacePath: string,
   query: PageMarksQuery = {},
+  localWikiMarks?: () => Promise<PageMarkRecord[]>,
 ): Promise<PageMarkRecord[]> {
+  const wiki = localWikiMarks ? await localWikiMarks() : [];
+  const inWiki = new Set(wiki.map((record) => record.page.id));
   const records = [
-    ...(await typedPageMarks(db, workspacePath)),
-    ...(await personalPageMarks(db, workspacePath)),
+    ...(await typedPageMarks(db, workspacePath)).filter((record) => !inWiki.has(record.page.id)),
+    ...(await personalPageMarks(db, workspacePath)).filter((record) => !inWiki.has(record.page.id)),
+    ...wiki,
   ];
   return filterPageMarks(records, query);
 }

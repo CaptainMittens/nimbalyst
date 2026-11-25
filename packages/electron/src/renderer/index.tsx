@@ -13,6 +13,7 @@ const isCaptureMode = new URLSearchParams(window.location.search).get('mode') ==
 import './devtools/installRenderProfiler';
 import { installRendererJankMonitor } from './devtools/rendererJankMonitor';
 import { installBodyOverflowMonitor } from './devtools/bodyOverflowMonitor';
+import { installUserTimingTrimmer } from './devtools/userTimingTrimmer';
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
@@ -59,6 +60,8 @@ import {
   initExternalEditorSettings,
 } from './store/atoms/appSettings';
 import { initVoiceModeListeners } from './store/listeners/voiceModeListeners';
+import { dictationSettingsAtom, initDictationSettings } from './store/atoms/dictation';
+import { initDeepLinkNoticeListeners } from './store/listeners/deepLinkNoticeListeners';
 import {
   autoCommitEnabledAtom,
   initAutoCommitSetting,
@@ -126,9 +129,11 @@ if (isCaptureMode) {
 // Logs `[PERF] Renderer jank` to main.log: long frames, slow keystrokes, slow commits.
 installRendererJankMonitor();
 
-// Dev only: warns when something is left in <body> outside the viewport.
+// Dev only: warns when something is left in <body> outside the viewport, and
+// clears the per-render measures React's dev build leaves in the timeline.
 if (process.env.NODE_ENV?.toLowerCase() === 'development') {
   installBodyOverflowMonitor();
+  installUserTimingTrimmer();
 }
 
 // Material Symbols uses text ligatures. Wait for the bundled font before any
@@ -218,6 +223,9 @@ await Promise.allSettled([
   initDiffPeekSize().then((size) => {
     if (size) store.set(diffPeekSizeAtom, size);
   }),
+  initDictationSettings().then((settings) => {
+    store.set(dictationSettingsAtom, settings);
+  }),
   initTrackerAutomationSettings().then((settings) => {
     store.set(trackerAutomationAtom, settings);
   }),
@@ -263,6 +271,11 @@ const posthogClient = posthog.init(
     // so they produced 241,643 events in 30 days that nothing consumed.
     capture_pageview: false,
     capture_pageleave: false,
+    // The renderer reads no feature flags, but posthog-js calls /flags on every
+    // window load by default, and PostHog bills each call that evaluates an
+    // active flag. Any flag created for the main process would make every
+    // window open billable.
+    advanced_disable_flags: true,
     session_idle_timeout_seconds: 30 * 60, // 30 minutes
     loaded: (posthog) => {
       console.log(`[RENDERER] PostHog loaded (analytics ID: ${posthog.get_distinct_id()}, session: ${posthog.get_session_id()}, official build: ${isOfficialBuild})`);
@@ -283,8 +296,9 @@ const posthogClient = posthog.init(
     // gate here (rather than relying only on opt_out_capturing) means no
     // existing or future `posthog.capture(...)` call site can leak an event
     // while the user has analytics turned off.
+    // E2E launches are covered here too: main reports consent as denied under
+    // the test environment (see analyticsSuppression.ts).
     before_send: (event) => {
-      if (process.env.PLAYWRIGHT_TEST) return null;
       if (!isAnalyticsConsentGranted()) return null;
       // Mark users as dev users if they've ever used a non-official build.
       // Attached to an event that was going to be sent anyway rather than
@@ -324,6 +338,13 @@ onAnalyticsConsentChange((enabled) => {
 // Settings live in one window but the renderer client is per-window, so main
 // broadcasts the change to every window rather than only the one that toggled.
 initAnalyticsListeners();
+
+// With no project open the Project Manager is the only window, so it shows deep
+// links main could not route. Project windows start the same listener through
+// `initDeepLinkListeners`.
+if (new URLSearchParams(window.location.search).get('mode') === 'workspace-manager') {
+  initDeepLinkNoticeListeners();
+}
 
 // syncs the session ID from posthog-js to the electron-side analytics service
 posthog.onSessionId(async (sessionId: string, windowId, changeReason) => {

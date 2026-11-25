@@ -9,6 +9,7 @@ import { AnalyticsService } from './analytics/AnalyticsService';
 import { hasActiveStreamingSessions } from '../ipc/SessionStateHandlers';
 import { getSessionStateManager } from '@nimbalyst/runtime/ai/server/SessionStateManager';
 import { getDatabase } from '../database/initialize';
+import { stopAllBackendTerminals } from '../extensions/backendTerminals';
 import {
   categorizeDownloadDuration,
   classifyUpdateError,
@@ -19,6 +20,8 @@ import {
   type UpdateAnalyticsState,
 } from './autoUpdaterUtils';
 import { installAtomFeedFilter } from './electronUpdaterPatch';
+import { createWindowsSignatureVerifier } from './windowsSignatureVerifier';
+import type { NsisUpdater } from 'electron-updater';
 
 // Install the atom-feed filter before any AutoUpdaterService is constructed
 // (which is the first thing that triggers electron-updater to read the feed).
@@ -33,7 +36,8 @@ export { classifyUpdateError, categorizeDownloadDuration, isWindowsRenameLockErr
 const REMINDER_SUPPRESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 const GITHUB_UPDATE_PROVIDER = {
   provider: 'github' as const,
-  owner: 'nimbalyst',
+  // Fork build: update from the fork, which has no releases, so an upstream release never replaces this build.
+  owner: 'CaptainMittens',
   repo: 'nimbalyst'
 };
 
@@ -69,6 +73,12 @@ export class AutoUpdaterService {
     // single "Ready to install" toast. Per maintainer direction on #327.
     autoUpdater.autoDownload = true;
     autoUpdater.autoInstallOnAppQuit = true;
+
+    // electron-updater's stock Authenticode check times out at 20s, which a
+    // freshly downloaded installer can exceed while Defender scans it.
+    if (process.platform === 'win32') {
+      (autoUpdater as NsisUpdater).verifyUpdateCodeSignature = createWindowsSignatureVerifier(log);
+    }
 
     // Configure feed URL based on release channel
     this.configureFeedURL();
@@ -387,6 +397,15 @@ export class AutoUpdaterService {
           log.info('Session state saved before quit-and-install');
         } catch (saveErr) {
           log.error('Failed to save session state before quit-and-install:', saveErr);
+        }
+
+        // Removing the `before-quit` listener below also skips the stop of
+        // extension-started commands. Do it here, or their process groups
+        // outlive the app and keep their ports through the update.
+        try {
+          await stopAllBackendTerminals();
+        } catch (stopErr) {
+          log.error('Failed to stop extension command terminals before quit-and-install:', stopErr);
         }
 
         await this.closeDatabaseBeforeQuit();

@@ -9,6 +9,8 @@
  */
 
 import { app, BrowserWindow } from 'electron';
+import { getWindowIdForWindow, listScheduledProjectPaths } from '../window/windowState';
+import { resolveSenderWorkspacePath } from '../window/captureWindowWorkspace';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { logger } from '../utils/logger';
@@ -57,6 +59,7 @@ import type {
   ExtensionManifest,
 } from '@nimbalyst/extension-sdk';
 import { resolveClaudeConfigDir } from '@nimbalyst/runtime/ai/server/providers/claudeCode/claudeConfigDir';
+import { runExtensionCommand } from './extensionExec';
 
 /**
  * Validate the SHAPE of `contributions.backendModules` on a parsed manifest.
@@ -307,6 +310,8 @@ export interface ResolvedExtensionBackendModules {
    * first use of the provider.
    */
   agentProviderModuleIds: string[];
+  /** Manifest `requiresDeveloperMode`: the modules run only while Developer Mode is on. */
+  requiresDeveloperMode?: boolean;
 }
 
 /**
@@ -377,6 +382,7 @@ export async function listExtensionBackendModules(): Promise<ResolvedExtensionBa
           extensionPath,
           modules,
           agentProviderModuleIds,
+          ...(manifest.requiresDeveloperMode === true ? { requiresDeveloperMode: true } : {}),
         });
       } catch {
         // Skip directories without a valid manifest
@@ -986,6 +992,22 @@ export function registerExtensionHandlers(): void {
     return isExtensionVisibleForChannel({ requiredReleaseChannel: requiredChannel as ReleaseChannel | undefined }, currentChannel);
   });
 
+  // The project a relative path from non-tool extension code resolves against:
+  // the sender's on-screen project, or the capture window's mounted file's
+  // project. Asked per call; the renderer must not cache it (#1299).
+  safeHandle('extensions:get-active-project-path', (event) => {
+    return resolveSenderWorkspacePath({
+      windowId: getWindowIdForWindow(BrowserWindow.fromWebContents(event.sender)),
+      webContentsId: event.sender.id,
+    }) ?? null;
+  });
+
+  // The rail projects whose automations this window schedules (#1299). A
+  // project open in several windows is listed by only one of them.
+  safeHandle('extensions:list-scheduled-project-paths', (event) => {
+    return listScheduledProjectPaths(getWindowIdForWindow(BrowserWindow.fromWebContents(event.sender)));
+  });
+
   // Find files matching a glob pattern
   safeHandle(
     'extensions:find-files',
@@ -1522,27 +1544,7 @@ export function registerExtensionHandlers(): void {
       return { success: false, stdout: '', stderr: `Extension ${extensionId} not found or lacks filesystem permission`, exitCode: -1 };
     }
 
-    const { exec } = await import('child_process');
-    const { promisify } = await import('util');
-    const execAsync = promisify(exec);
-
-    try {
-      const { stdout, stderr } = await execAsync(command, {
-        cwd,
-        timeout,
-        maxBuffer,
-        env: env ? { ...process.env, ...env } : process.env,
-      });
-      return { success: true, stdout, stderr, exitCode: 0 };
-    } catch (execError: unknown) {
-      const err = execError as { stdout?: string; stderr?: string; code?: number; message?: string };
-      return {
-        success: false,
-        stdout: err.stdout || '',
-        stderr: err.stderr || err.message || '',
-        exitCode: err.code || 1,
-      };
-    }
+    return runExtensionCommand({ command, cwd, timeout, maxBuffer, env });
   });
 
   // ============================================================================

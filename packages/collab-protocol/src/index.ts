@@ -25,6 +25,7 @@ export * from "./teamDocumentHistory.js";
 export * from "./teamTracker.js";
 export * from "./pageFields.js";
 export * from "./teamRoom.js";
+export * from "./teamRecovery.js";
 export * from "./projectSync.js";
 
 export * from "./documentDecision.js";
@@ -35,3 +36,5 @@ export * from "./indexReplication.js";
 export * from "./sessionRetention.js";
 export * from './jwtScopes.js';
 export * from './syncClientInfo.js';
+export * from './htmlEmbedProtocol.js';
+export * from './htmlEmbedShell.js';

@@ -28,6 +28,7 @@ import {
 import { applyExternalMarkdown } from '../editor/applyExternalMarkdown';
 import type { EditorHost } from '../extensions/editorHost';
 import { $getRoot, $setSelection } from 'lexical';
+import { createLexicalDictationTarget } from './lexicalDictationTarget';
 
 export interface MarkdownEditorConfig {
   /**
@@ -44,6 +45,9 @@ export interface MarkdownEditorConfig {
 
   /** Document header element to render at top of scroll area */
   documentHeader?: React.ReactNode;
+
+  /** False when the host lists the page's citations itself. Default true. */
+  showCitationSourcesLine?: boolean;
 
   /** Callback when user double-clicks an image */
   onImageDoubleClick?: (src: string, nodeKey: string) => void;
@@ -305,6 +309,15 @@ export function MarkdownEditor({
     });
   }, [editorInstance, onContentController]);
 
+  // Accept dictated text at the cursor. The host paints the pending partial
+  // next to the caret; only committed finals touch the document.
+  useEffect(() => {
+    if (!editorInstance || !host.registerDictationTarget) return;
+    if (config.editable === false || host.readOnly) return;
+    host.registerDictationTarget(createLexicalDictationTarget(editorInstance));
+    return () => host.registerDictationTarget?.(null);
+  }, [editorInstance, host, config.editable]);
+
   // NOTE: We intentionally do NOT subscribe to diff requests here.
   // Markdown diff handling is fully implemented in TabEditor.tsx using Lexical's
   // APPLY_MARKDOWN_REPLACE_COMMAND. If we subscribed here, TabEditor would take
@@ -355,6 +368,7 @@ export function MarkdownEditor({
       showToolbar: config.showToolbar,
       showTreeView: config.showTreeView,
       documentHeader: config.documentHeader,
+      showCitationSourcesLine: config.showCitationSourcesLine,
       onImageDoubleClick: config.onImageDoubleClick,
       onImageDragStart: config.onImageDragStart,
       onUploadAsset: config.onUploadAsset,
@@ -415,6 +429,7 @@ export function MarkdownEditor({
       config.showToolbar,
       config.showTreeView,
       config.documentHeader,
+      config.showCitationSourcesLine,
       config.onImageDoubleClick,
       config.onImageDragStart,
       config.onUploadAsset,

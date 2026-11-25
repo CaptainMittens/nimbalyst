@@ -64,6 +64,9 @@ targets:
       path: Sources/NimbalystApp.entitlements
       properties:
         aps-environment: production
+        # Team console pages open in Pages (AASA in web-console/public/.well-known).
+        com.apple.developer.associated-domains:
+          - applinks:console.nimbalyst.com
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.nimbalyst.app
@@ -110,7 +113,7 @@ targets:
           # Copy editor dist to Resources (clean first to remove stale hashed assets)
           rm -rf "${SRCROOT}/Resources/editor-dist"
           mkdir -p "${SRCROOT}/Resources/editor-dist"
-          cp dist-editor/editor.html "${SRCROOT}/Resources/editor-dist/"
+          cp dist-editor/editor.html dist-editor/html-embed-shell.html dist-editor/html-embed-shell.csp "${SRCROOT}/Resources/editor-dist/"
           cp -R dist-editor/assets "${SRCROOT}/Resources/editor-dist/"
         basedOnDependencyAnalysis: false
 

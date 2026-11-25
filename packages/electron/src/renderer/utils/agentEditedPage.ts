@@ -68,6 +68,27 @@ function openTypedPage(itemId: string, workspacePath: string, { source, options 
   });
 }
 
+/**
+ * Opens a file in Pages mode when it is a Local wiki page, so a transcript
+ * link or Quick Open lands on the page rather than the raw file in Files.
+ * Returns false, opening nothing, for any other file.
+ */
+export async function openFileAsWikiPage(filePath: string, workspacePath: string, source: CollabOpenSource): Promise<boolean> {
+  const host = getPersonalCollabHost(workspacePath);
+  try {
+    const documentId = await host.source().pageIdForFile(filePath);
+    if (!documentId) return false;
+    const scope = await host.resolveScope();
+    store.set(setWindowModeAtom, 'collab');
+    host.openArtifact({ kind: 'document', scope, documentId, teamProjectId: null }, source);
+    return true;
+  } catch (error) {
+    // The file still opens in Files; only the Pages view is lost.
+    console.warn('[openFileAsWikiPage] Could not open the file as a wiki page:', error);
+    return false;
+  }
+}
+
 export async function openAgentEditedPage(uri: string, workspacePath: string, request: PageOpenRequest = AGENT_OPEN): Promise<void> {
   const personal = parsePersonalPageUri(uri);
   if (personal?.kind === 'typed-page') return openTypedPage(personal.itemId, workspacePath, request);
@@ -82,7 +103,7 @@ export async function openAgentEditedPage(uri: string, workspacePath: string, re
   if (uri.startsWith(TRACKER_CONTENT_PREFIX)) return openTypedPage(uri.slice(TRACKER_CONTENT_PREFIX.length), workspacePath, request);
   if (isCollabUri(uri)) {
     if (!openSharedDocumentInTab(parseCollabUri(uri).documentId, request.source, request.options)) {
-      throw new Error('Open the team\'s Pages to view this page.');
+      throw new Error('Open the team\'s Wiki to view this page.');
     }
     return;
   }

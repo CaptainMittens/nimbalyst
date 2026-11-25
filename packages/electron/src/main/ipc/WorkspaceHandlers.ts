@@ -1,26 +1,34 @@
-import { BrowserWindow, shell, clipboard, nativeImage } from 'electron';
+import { BrowserWindow, shell } from 'electron';
+import { copyImageToClipboard, copyTextToClipboard, readTextFromClipboard } from '../utils/systemClipboard';
+import { systemShell } from '../utils/systemShell';
+import { readWindowsClipboardImage } from '../utils/windowsClipboard';
 import { readFileSync, readdirSync, statSync, existsSync, promises as fsPromises } from 'fs';
 import { join, basename, dirname, extname } from 'path';
 import * as path from 'path';
-import { exec, execFile, spawn } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { AnalyticsService } from '../services/analytics/AnalyticsService';
 import { openWorkspaceFile, openFile } from '../file/FileOpener';
-import { fuzzyMatchPath } from '@nimbalyst/runtime';
+import { fuzzyMatchPath } from '@nimbalyst/runtime/utils/fuzzyMatch';
 import { parseFileMask, matchesFileMask } from '@nimbalyst/extension-sdk/file-mask';
 import { getSyncId, removeFileFromIndex } from '../services/DocSyncService';
 
 const { writeFile, mkdir, rename, unlink, rmdir, copyFile, readFile, rm, stat, cp } = fsPromises;
 
 const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
 import { windowStates, getWindowId, createWindow, markRecentlyDeleted, clearRecentlyDeleted } from '../window/WindowManager';
 // Aliased: this module has a local `windows` (BrowserWindow[]) further down.
-import { syncRepresentedFilename, windows as windowsById } from '../window/windowState';
+import {
+    syncRepresentedFilename,
+    windows as windowsById,
+    getWindowProjectPaths,
+    resolveActiveWorkspacePath,
+    resolveProjectForFile,
+} from '../window/windowState';
+import { WORKSPACE_ACTIVATE_CHANNEL } from '../window/workspaceWindowMatch';
 import { startFileWatcher, stopFileWatcher } from '../file/FileWatcher';
 import { getFolderContents, listFolderFilesRecursive } from '../utils/FileTree';
 import { decodeTextFileBuffer } from '../utils/textEncoding';
-import { RIPGREP_EXCLUDE_ARGS_ARRAY, QUICKOPEN_FILE_TYPE_ARGS } from '../utils/fileFilters';
 import {
     getWorkspaceRecentFiles,
     addWorkspaceRecentFile,
@@ -38,8 +46,7 @@ import {
 } from '../services/tracker/localKeyAllocator';
 import { workspaceLocalKeyStore } from '../services/tracker/workspaceLocalKeyStore';
 import { database } from '../database/PGLiteDatabaseWorker';
-import { getRipgrepPath } from '../services/ripgrepPath';
-import { findWorkspaceFiles } from '../file/QuickOpenFileScanner';
+import { findWorkspaceFiles, listContentSearchRoots, searchFileContent } from '../file/QuickOpenFileScanner';
 import { quickOpenFileNameCache } from '../file/QuickOpenFileNameCache';
 
 /**
@@ -171,7 +178,7 @@ export function registerWorkspaceHandlers() {
             let isBinary = forceBinary;
             if (!forceBinary) {
                 const ext = extname(filePath).toLowerCase();
-                const binaryExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.zip', '.tar', '.gz', '.woff', '.woff2', '.ttf', '.eot'];
+                const binaryExtensions = ['.pdf', '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.ico', '.zip', '.tar', '.gz', '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mov', '.m4v', '.webm', '.mkv', '.mp3', '.wav', '.m4a', '.aac', '.ogg', '.webp', '.avif', '.heic'];
                 isBinary = binaryExtensions.includes(ext);
             }
 
@@ -225,9 +232,13 @@ export function registerWorkspaceHandlers() {
             // Use unified FileOpener API with skipFileWatcher=true
             // File watchers are managed separately by start-watching-file/stop-watching-file
             // when tabs are opened/closed, not when switching between them
+            // The file's own rail project, which need not be the window's
+            // first one; openFile records the recent file under it.
+            const fileWorkspacePath = resolveProjectForFile(state ?? undefined, filePath)
+                ?? resolveActiveWorkspacePath(state ?? undefined);
             const result = await openFile({
                 filePath,
-                workspacePath: state?.workspacePath || undefined,
+                workspacePath: fileWorkspacePath || undefined,
                 source: 'tab_switch',
                 targetWindow: window,
                 skipFileWatcher: true,  // Tabs manage their own watchers
@@ -275,9 +286,18 @@ export function registerWorkspaceHandlers() {
             const maskPatterns = parseFileMask(options?.fileMask);
 
             // Union the per-root caches: quick open spans every root the
-            // workspace shows, in root order.
+            // workspace shows, in root order. A clone nested in a root is
+            // scanned from that root (#1449) and again when it is also attached
+            // as a root of its own, so keep each path once.
             const roots = getWorkspaceRoots(workspacePath);
-            const cache = (await Promise.all(roots.map(rootPath => quickOpenFileNameCache.get(rootPath)))).flat();
+            const seenPaths = new Set<string>();
+            const cache = (await Promise.all(roots.map(rootPath => quickOpenFileNameCache.get(rootPath))))
+                .flat()
+                .filter(item => {
+                    if (seenPaths.has(item.path)) return false;
+                    seenPaths.add(item.path);
+                    return true;
+                });
             if (cache.length === 0) {
                 return [];
             }
@@ -338,61 +358,7 @@ export function registerWorkspaceHandlers() {
             const trimmedQuery = query.trim();
             if (!trimmedQuery) return [];
 
-            const rgPath = getRipgrepPath();
-            const rgArgs = [
-                ...QUICKOPEN_FILE_TYPE_ARGS,
-                '-i',
-                '--json',
-                ...RIPGREP_EXCLUDE_ARGS_ARRAY,
-                trimmedQuery,
-                // ripgrep takes N search roots directly, so a multi-root
-                // workspace is one invocation, not one per root.
-                ...getWorkspaceRoots(workspacePath)
-            ];
-
-            let stdout = '';
-            try {
-                const result = await execFileAsync(rgPath, rgArgs, { maxBuffer: 5 * 1024 * 1024 });
-                stdout = result.stdout;
-            } catch (execError: any) {
-                // ripgrep returns exit code 1 when no matches found, which is not an error
-                if (execError.code === 1) {
-                    stdout = execError.stdout || '';
-                } else {
-                    throw execError;
-                }
-            }
-
-            const contentMatches = new Map<string, any>();
-            if (stdout) {
-                const lines = stdout.split('\n').filter(line => line.trim());
-                for (const line of lines) {
-                    try {
-                        const item = JSON.parse(line);
-                        if (item.type === 'match') {
-                            const filePath = item.data.path.text;
-                            if (!contentMatches.has(filePath)) {
-                                contentMatches.set(filePath, {
-                                    path: path.normalize(filePath),
-                                    isContentMatch: true,
-                                    matches: []
-                                });
-                            }
-
-                            contentMatches.get(filePath).matches.push({
-                                line: item.data.line_number,
-                                text: item.data.lines.text.trim(),
-                                start: item.data.submatches[0]?.start || 0,
-                                end: item.data.submatches[0]?.end || item.data.lines.text.length
-                            });
-                        }
-                    } catch (e) {
-                        // Skip invalid JSON lines
-                    }
-                }
-            }
-
-            return Array.from(contentMatches.values()).slice(0, 50);
+            return await searchFileContent(await listContentSearchRoots(getWorkspaceRoots(workspacePath)), trimmedQuery);
         } catch (error) {
             console.error('Error searching file content:', error);
             return [];
@@ -412,7 +378,7 @@ export function registerWorkspaceHandlers() {
                 const perRoot = await Promise.all(
                     getWorkspaceRoots(workspacePath).map(rootPath => findWorkspaceFiles(rootPath)),
                 );
-                const allFiles = perRoot.flat();
+                const allFiles = Array.from(new Set(perRoot.flat()));
                 const queryLower = trimmedQuery.toLowerCase();
                 const matchingFiles = allFiles
                     .filter(file => basename(file).toLowerCase().includes(queryLower))
@@ -431,67 +397,18 @@ export function registerWorkspaceHandlers() {
 
             // Then search content using ripgrep
             try {
-                const rgPath = getRipgrepPath();
-                const rgArgs = [
-                    '--type', 'md',
-                    '-i',
-                    '--json',
-                    ...RIPGREP_EXCLUDE_ARGS_ARRAY,
+                const contentMatches = await searchFileContent(
+                    await listContentSearchRoots(getWorkspaceRoots(workspacePath)),
                     trimmedQuery,
-                    ...getWorkspaceRoots(workspacePath)
-                ];
-
-                let stdout = '';
-                try {
-                    const result = await execFileAsync(rgPath, rgArgs, { maxBuffer: 5 * 1024 * 1024 });
-                    stdout = result.stdout;
-                } catch (execError: any) {
-                    // ripgrep returns exit code 1 when no matches found, which is not an error
-                    if (execError.code === 1) {
-                        stdout = execError.stdout || '';
+                    { typeArgs: ['--type', 'md'] },
+                );
+                for (const data of contentMatches) {
+                    const existing = allResults.find(r => r.path === data.path);
+                    if (existing) {
+                        existing.matches = data.matches;
+                        existing.isContentMatch = true;
                     } else {
-                        throw execError;
-                    }
-                }
-
-                if (stdout) {
-                    const lines = stdout.split('\n').filter(line => line.trim());
-                    const contentMatches = new Map<string, any>();
-
-                    for (const line of lines) {
-                        try {
-                            const item = JSON.parse(line);
-                            if (item.type === 'match') {
-                                const filePath = path.normalize(item.data.path.text);
-                                if (!contentMatches.has(filePath)) {
-                                    contentMatches.set(filePath, {
-                                        path: filePath,
-                                        isContentMatch: true,
-                                        matches: []
-                                    });
-                                }
-
-                                contentMatches.get(filePath).matches.push({
-                                    line: item.data.line_number,
-                                    text: item.data.lines.text.trim(),
-                                    start: item.data.submatches[0]?.start || 0,
-                                    end: item.data.submatches[0]?.end || item.data.lines.text.length
-                                });
-                            }
-                        } catch (e) {
-                            // Skip invalid JSON lines
-                        }
-                    }
-
-                    // Merge content matches with existing results
-                    for (const [filePath, data] of contentMatches) {
-                        const existing = allResults.find(r => r.path === filePath);
-                        if (existing) {
-                            existing.matches = data.matches;
-                            existing.isContentMatch = true;
-                        } else {
-                            allResults.push(data);
-                        }
+                        allResults.push(data);
                     }
                 }
             } catch (error: any) {
@@ -540,9 +457,9 @@ export function registerWorkspaceHandlers() {
             const windowId = getWindowId(window);
             if (windowId === null) return [];
 
-            const state = windowStates.get(windowId);
-            if (!state || !state.workspacePath) return [];
-            scope = state.workspacePath;
+            const activeWorkspacePath = resolveActiveWorkspacePath(windowStates.get(windowId));
+            if (!activeWorkspacePath) return [];
+            scope = activeWorkspacePath;
         }
 
         // Get recent files for this workspace from store
@@ -554,8 +471,9 @@ export function registerWorkspaceHandlers() {
             return [];
         }
 
-        // Filter to only existing files
-        return workspaceRecentFiles.filter(filePath => existsSync(filePath)).slice(0, 20);
+        // Filter to only existing files. No extra cut here: the store already
+        // caps the list, and the @-mention picker should show all of it (#303).
+        return workspaceRecentFiles.filter(filePath => existsSync(filePath));
     });
 
     // Add to workspace recent files
@@ -567,9 +485,10 @@ export function registerWorkspaceHandlers() {
         if (windowId === null) return;
 
         const state = windowStates.get(windowId);
-        if (!state || !state.workspacePath) return;
+        const workspacePath = resolveProjectForFile(state, filePath) ?? resolveActiveWorkspacePath(state);
+        if (!workspacePath) return;
 
-        addWorkspaceRecentFile(state.workspacePath, filePath);
+        addWorkspaceRecentFile(workspacePath, filePath);
     });
 
     // Get entire workspace state - no routing, no BS
@@ -752,9 +671,9 @@ export function registerWorkspaceHandlers() {
             if (!isDirectory && filePath.endsWith('.md')) {
               const window = BrowserWindow.fromWebContents(event.sender);
               const wId = window ? getWindowId(window) : null;
-              const wState = wId !== null ? windowStates.get(wId) : null;
-              if (wState?.workspacePath) {
-                deletedSyncId = getSyncId(filePath, wState.workspacePath);
+              const ownerPath = wId !== null ? resolveProjectForFile(windowStates.get(wId), filePath) : null;
+              if (ownerPath) {
+                deletedSyncId = getSyncId(filePath, ownerPath);
               }
             }
 
@@ -956,7 +875,21 @@ export function registerWorkspaceHandlers() {
             if (!window) {
                 throw new Error('No window found for event sender');
             }
-            window.webContents.send('open-document', { path: absoluteFilePath });
+            // Name the rail project so the open lands in that project's
+            // editor, not whichever one is on screen. A root outside the rail
+            // (an attached folder) has no editor of its own, so it is omitted.
+            const windowId = getWindowId(window);
+            const state = windowId !== null ? windowStates.get(windowId) : undefined;
+            const railWorkspacePath = workspacePath && state && getWindowProjectPaths(state).includes(workspacePath)
+                ? workspacePath
+                : undefined;
+            if (railWorkspacePath && railWorkspacePath !== resolveActiveWorkspacePath(state)) {
+                // The open waits for that project's editor, so bring it on screen.
+                window.webContents.send(WORKSPACE_ACTIVATE_CHANNEL, { workspacePath: railWorkspacePath });
+            }
+            window.webContents.send('open-document', railWorkspacePath
+                ? { path: absoluteFilePath, workspacePath: railWorkspacePath }
+                : { path: absoluteFilePath });
 
             return { success: true };
         } catch (error: any) {
@@ -968,7 +901,7 @@ export function registerWorkspaceHandlers() {
     safeHandle('open-in-default-app', async (event, filePath: string) => {
         try {
             // Open file in the OS default application
-            const result = await shell.openPath(filePath);
+            const result = await systemShell.openPath(filePath);
             if (result) {
                 // openPath returns an error string if it failed, empty string on success
                 return { success: false, error: result };
@@ -981,42 +914,21 @@ export function registerWorkspaceHandlers() {
     });
 
 
-    safeHandle('copy-to-clipboard', async (_event, text: string) => {
-        clipboard.writeText(text);
-        return { success: true };
-    });
+    safeHandle('copy-to-clipboard', async (_event, text: string) => copyTextToClipboard(text));
 
-    safeHandle('copy-image-to-clipboard', async (_event, payload: { filePath?: string; dataUrl?: string }) => {
-        try {
-            let image;
-            if (payload.filePath) {
-                image = nativeImage.createFromPath(payload.filePath);
-            } else if (payload.dataUrl) {
-                image = nativeImage.createFromDataURL(payload.dataUrl);
-            } else {
-                return { success: false, error: 'No image source provided' };
-            }
+    safeHandle('copy-image-to-clipboard', async (_event, payload: { filePath?: string; dataUrl?: string }) =>
+        copyImageToClipboard(payload));
 
-            if (image.isEmpty()) {
-                return { success: false, error: 'Failed to decode image for clipboard' };
-            }
+    safeHandle('read-from-clipboard', async () => readTextFromClipboard());
 
-            clipboard.writeImage(image);
-            return { success: true };
-        } catch (error: any) {
-            console.error('Error copying image to clipboard:', error);
-            return { success: false, error: error.message };
-        }
-    });
-
-    safeHandle('read-from-clipboard', async () => {
-        return { success: true, text: clipboard.readText() };
+    safeHandle('read-image-from-windows-clipboard', async () => {
+        return readWindowsClipboardImage();
     });
 
     safeHandle('show-in-finder', async (event, filePath: string) => {
 
         try {
-            shell.showItemInFolder(filePath);
+            systemShell.showItemInFolder(filePath);
             return { success: true };
         } catch (error: any) {
             console.error('Error showing in finder:', error);

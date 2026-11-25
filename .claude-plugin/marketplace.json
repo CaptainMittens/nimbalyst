@@ -7,9 +7,12 @@
   },
   "plugins": [
     {
-      "name": "nimbalyst-pages",
-      "source": "./plugins/nimbalyst-pages",
-      "description": "Your team's Nimbalyst Pages from Claude Code: read them for context and record decisions where they belong."
+      "name": "nimbalyst-wiki",
+      "source": {
+        "source": "github",
+        "repo": "nimbalyst/nimbalyst-wiki"
+      },
+      "description": "A local wiki your agents write for you, so you can think, organize, and set direction. Capture decisions, track typed pages, edit locally, and optionally share with your team."
     }
   ]
 }

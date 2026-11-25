@@ -41,6 +41,7 @@ import {
 } from '@nimbalyst/runtime/editor';
 import { $getRoot, $setSelection } from 'lexical';
 import { resolveDesktopCollabConfigForUri } from '../utils/collabDocumentOpener';
+import { collabPresenceName } from '../utils/collabPresenceName';
 import { getBodyDocCache, type BodyDocAcquisition, type BodyDocConfigFactory } from '../services/BodyDocCache';
 import { exportCollabRecoveryPlaintext, getCollabContentAdapter } from '@nimbalyst/collab-adapters';
 import { store } from '@nimbalyst/runtime/store';
@@ -54,6 +55,17 @@ import {
   setCollabOutboxState,
 } from '../store/listeners/collabStateListeners';
 import { getTeamSyncProviderForScopeKey } from '../store/atoms/collabDocuments';
+import { getCollabDocsSession } from '@nimbalyst/collab-client/docs';
+import {
+  COMMENT_NOT_SAVED_MESSAGE,
+  COMMENT_NOT_SAVED_TITLE,
+  COMMENT_REFUSAL_STOPPED_MESSAGE,
+  bodyCommentCapabilitiesWithVerdict,
+  commentRefusalPlan,
+  useDocumentServerAccess,
+  useTeamBodyCommentCapabilities,
+} from '../services/teamBodyCommentCapabilities';
+import { errorNotificationService } from '../services/ErrorNotificationService';
 import { buildCollabUri } from '@nimbalyst/collab-protocol';
 import { CollabHistoryClient } from '@nimbalyst/runtime/sync/collabHistoryClient';
 import { notifyDocumentCommentRecipients } from '../services/documentCommentNotifier';
@@ -167,6 +179,12 @@ export function useTrackerContentCollab({
   const [bodyCacheMarkdown, setBodyCacheMarkdown] = useState<string | null>(null);
   const [allowBootstrap, setAllowBootstrap] = useState(false);
   const syncProviderRef = useRef<DocumentSyncProvider | null>(null);
+  // Reopens caused by a refused commenter update, per item; capped.
+  const [refusalReopen, setRefusalReopen] = useState(0);
+  const commentRefusalReloadsRef = useRef({ itemId, count: 0 });
+  if (commentRefusalReloadsRef.current.itemId !== itemId) {
+    commentRefusalReloadsRef.current = { itemId, count: 0 };
+  }
   const collabProviderRef = useRef<CollabLexicalProvider | null>(null);
   const acquisitionConfigRef = useRef<BodyDocAcquisition['config'] | null>(null);
   const cursorColor = useMemo(() => randomCursorColor(), []);
@@ -253,7 +271,7 @@ export function useTrackerContentCollab({
       // no factory call) still has the right display name. The cache is
       // per-window; the same user owns every entry, so caching once is
       // safe.
-      userNameRef.current = config.userName || config.userEmail || 'Anonymous';
+      userNameRef.current = collabPresenceName(config);
       return {
         serverUrl: config.serverUrl,
         getJwt: config.getJwt,
@@ -350,7 +368,7 @@ export function useTrackerContentCollab({
       acquisition = acq;
       syncProviderRef.current = acq.syncProvider;
       acquisitionConfigRef.current = acq.config;
-      userNameRef.current = acq.config.userName || acq.config.userEmail || acq.config.teamMemberId;
+      userNameRef.current = collabPresenceName(acq.config);
       // `deferInitialSync` suppresses the immediate `sync(true)` that
       // CollabLexicalProvider normally fires on listener registration.
       // Instead, sync(true) fires only when the DocumentSyncProvider reaches
@@ -383,7 +401,7 @@ export function useTrackerContentCollab({
       collabProviderRef.current = null;
       setStatus('disconnected');
     };
-  }, [itemId, workspacePath, isCollabActive, isCollabPending, collabStateKey]);
+  }, [itemId, workspacePath, isCollabActive, isCollabPending, collabStateKey, refusalReopen]);
 
   const collaboration = useMemo(() => {
     if (!collabProviderRef.current || providerEpoch === 0) return null;
@@ -420,6 +438,35 @@ export function useTrackerContentCollab({
     };
   }, [cursorColor, providerEpoch, bodyCacheMarkdown, allowBootstrap]);
 
+  // A typed page body in a team project follows the project role: a
+  // `project-commenter` comments but never writes the body. The project comes
+  // from the workspace's team pages session; without one (Pages never started
+  // in this window) the answer stays open and the server remains the gate.
+  const teamProjectId = workspacePath && providerEpoch > 0
+    ? getCollabDocsSession(workspacePath)?.scope.indexConfig.teamProjectId ?? null
+    : null;
+  const projectedBodyCapabilities = useTeamBodyCommentCapabilities(teamOrgId, teamProjectId);
+  const handleCommentUpdateRefused = () => {
+    const reloads = commentRefusalReloadsRef.current;
+    if (commentRefusalPlan(reloads.count) === 'stop') {
+      errorNotificationService.showError(COMMENT_NOT_SAVED_TITLE, COMMENT_REFUSAL_STOPPED_MESSAGE);
+      return;
+    }
+    reloads.count += 1;
+    errorNotificationService.showWarning(COMMENT_NOT_SAVED_TITLE, COMMENT_NOT_SAVED_MESSAGE);
+    // Re-acquire: the release lets BodyDocCache drop the refused provider and
+    // build a fresh one with a new Y.Doc.
+    setRefusalReopen((n) => n + 1);
+  };
+  const serverAccessVerdict = useDocumentServerAccess(
+    providerEpoch > 0 ? syncProviderRef.current : null,
+    handleCommentUpdateRefused,
+  );
+  const bodyCommentCapabilities = useMemo(
+    () => bodyCommentCapabilitiesWithVerdict(projectedBodyCapabilities, serverAccessVerdict),
+    [projectedBodyCapabilities, serverAccessVerdict],
+  );
+
   const commentsConfig = useMemo<CommentsConfig | null>(() => {
     const config = acquisitionConfigRef.current;
     if (!config || providerEpoch === 0 || !workspacePath) return null;
@@ -431,7 +478,7 @@ export function useTrackerContentCollab({
     const documentUri = buildCollabUri(config.orgId, config.documentId);
     return {
       getYDoc: () => syncProviderRef.current?.getYDoc() ?? null,
-      getCapabilities: () => ({ read: true, comment: true }),
+      getCapabilities: () => bodyCommentCapabilities,
       isHydrated: () => syncProviderRef.current?.isSynced() ?? false,
       currentUser,
       getMembers: () => {
@@ -467,7 +514,7 @@ export function useTrackerContentCollab({
         });
       },
     };
-  }, [providerEpoch, title, workspacePath]);
+  }, [providerEpoch, title, workspacePath, bodyCommentCapabilities]);
 
   // The body room serves the same revision API as any shared page.
   const history = useMemo(() => {

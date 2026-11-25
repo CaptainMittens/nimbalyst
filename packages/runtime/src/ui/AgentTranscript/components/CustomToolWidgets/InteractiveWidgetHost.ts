@@ -340,6 +340,19 @@ export interface InteractiveWidgetHost {
   setAutoCommitEnabled(enabled: boolean): void;
 
   // ============================================================
+  // Usage-limit auto-resume
+  // ============================================================
+
+  /** Whether sessions resume on their own once a Claude usage limit resets. Optional: desktop only. */
+  usageLimitAutoResumeEnabled?: boolean;
+
+  /**
+   * The usage-limit card's switch. Enabling also schedules this session's
+   * resume for `resetsAtMs`; disabling cancels every pending resume.
+   */
+  setUsageLimitAutoResume?(enabled: boolean, resetsAtMs: number | null): Promise<void>;
+
+  // ============================================================
   // Super Loop Blocked Feedback
   // ============================================================
 
@@ -391,6 +404,14 @@ export interface InteractiveWidgetHost {
    * the "Updated <page>" line as plain text.
    */
   openPage?(uri: string): Promise<void>;
+
+  /**
+   * Open the terminal panel on the command terminal an extension owns under
+   * `key` (for a run target, its id): the tab that is its log. Resolves false
+   * when this project has no such tab. Optional: a host without a terminal
+   * panel (mobile) shows no "Show logs" link.
+   */
+  revealCommandTerminal?(owner: { extensionId: string; key: string }): Promise<boolean>;
 
   /**
    * Track an analytics event

@@ -153,7 +153,7 @@ async function editCsvCell(
     : 8;
   const cell = page.locator('revogr-data [role="gridcell"]').nth(cellIndex);
   await cell.dblclick();
-  const input = page.locator('revo-grid input').filter({ visible: true });
+  const input = page.locator('revo-grid textarea').filter({ visible: true });
   await expect(input).toBeVisible({ timeout: 2_000 });
   await input.fill(marker);
   await input.press('Enter');
@@ -1180,8 +1180,8 @@ async function promoteLocalFileAndAssertRoundTrip(
   await pageA
     .locator('.file-tree-name', { hasText: sourceName })
     .click({ button: 'right' });
-  await pageA.getByText('Copy to Pages...', { exact: true }).last().click();
-  const shareDialog = pageA.getByRole('dialog', { name: 'Copy to Pages' });
+  await pageA.getByText('Copy to Wiki...', { exact: true }).last().click();
+  const shareDialog = pageA.getByRole('dialog', { name: 'Copy to Wiki' });
   await expect(shareDialog).toBeVisible({ timeout: 10_000 });
   await shareDialog.getByRole('button', { name: /Copy to Team$/ }).click();
   await expect(shareDialog).toBeHidden({ timeout: 20_000 });

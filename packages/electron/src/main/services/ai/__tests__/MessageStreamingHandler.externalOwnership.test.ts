@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
     updateActivity: vi.fn(),
     endSession: vi.fn(),
     isSessionActive: vi.fn(() => false),
+    // No follow-up adopted the turn's query: the not-executing publish proceeds.
+    getSessionState: vi.fn(() => undefined),
   },
 }));
 
@@ -157,6 +159,8 @@ vi.mock("../supersedeOpenQuestions", () => ({
 }));
 vi.mock("../pendingPromptPersistence", () => ({
   setSessionPendingPrompt: vi.fn(),
+  hasSessionPendingPrompt: vi.fn(() => false),
+  onPendingPromptCleared: vi.fn(() => () => {}),
 }));
 vi.mock("../sessionInboxService", () => ({
   sessionInbox: {
@@ -186,6 +190,8 @@ vi.mock("../../../mcp/devAgentTools", () => ({
 vi.mock("../../MetaAgentService", () => ({
   MetaAgentService: { getInstance: vi.fn() },
 }));
+
+vi.mock("../wikiSkillAvailability", () => ({ isWikiSkillAvailable: () => false }));
 
 vi.mock("../../../utils/store", () => ({
   getDefaultEffortLevel: vi.fn(() => undefined),
@@ -314,6 +320,18 @@ describe("MessageStreamingHandler external ownership", () => {
     vi.clearAllMocks();
     mocks.providerFactory.getProvider.mockReturnValue(null);
     mocks.claim.mockResolvedValue(undefined);
+  });
+  it("refuses to run a turn on a workstream container before any provider or transcript side effect", async () => {
+    const provider = new RecordingProvider();
+    const addMessage = vi.fn();
+    await expect(runTurn({
+      session: openCodeSession({ id: "ws", provider: "claude-code", sessionType: "workstream" }),
+      provider,
+      sessionManager: { addMessage },
+    })).rejects.toThrow(/workstream/);
+    expect(addMessage).not.toHaveBeenCalled();
+    expect(mocks.providerFactory.createProvider).not.toHaveBeenCalled();
+    expect(provider.requestConfigs).toEqual([]);
   });
   it("aborts before user raw/provider side effects when the durable claim fails, then permits retry", async () => {
     const provider = new RecordingProvider();

@@ -1,5 +1,5 @@
 /**
- * `nimbalyst-session`: the nimbalyst-pages plugin's local stdio MCP server.
+ * `nimbalyst-session`: the nimbalyst-wiki plugin's local stdio MCP server.
  * One tool, `list_session_inputs`, lists what the person at this terminal
  * typed in the calling Claude Code session (prompts and question answers), so
  * a page can cite their words. It reads only the transcript it can prove is
@@ -7,15 +7,13 @@
  * from the model, and sends nothing anywhere: the only text that leaves the
  * machine is a quote the agent decides to paste into a page.
  *
- * Bundled into plugins/nimbalyst-pages/scripts/session-inputs.mjs by
- * scripts/build-wiki-plugin.mjs. Newline-delimited JSON-RPC on stdio, no SDK.
+ * The plugin starts it as `nim hook session-inputs` (packages/cli), which
+ * calls `main`. Newline-delimited JSON-RPC on stdio, no SDK.
  */
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
 
 import { citableInputsFromTranscript, selectInputs, type SessionInputKind } from './claudeTranscriptInputs';
 import { locateTranscript, type LocatorDeps } from './claudeTranscriptLocator';
@@ -116,7 +114,8 @@ export async function handleMessage(message: JsonRpcRequest, deps: ServerDeps): 
   }
 }
 
-function main(): void {
+/** Serves `list_session_inputs` on stdio until stdin closes. */
+export function main(): void {
   const env = process.env;
   const deps: ServerDeps = {
     env: {
@@ -142,5 +141,3 @@ function main(): void {
     });
   });
 }
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

@@ -245,6 +245,15 @@ export interface ExtensionManifest {
   defaultEnabled?: boolean;
 
   /**
+   * Show this extension's surfaces only while Developer Mode is on. With it
+   * off, the extension's panels and their gutter buttons are hidden and its
+   * backend modules are not started, so their MCP tools are not offered to
+   * agents. The extension still appears in Settings > Extensions, where it can
+   * be turned off independently of Developer Mode.
+   */
+  requiresDeveloperMode?: boolean;
+
+  /**
    * Marketplace metadata for publishing to the extension marketplace.
    * Only used when packaging extensions for distribution.
    */
@@ -623,7 +632,7 @@ export interface NewFileMenuContribution {
 }
 
 export interface CustomEditorContribution {
-  /** Glob patterns for files this editor handles (e.g., ['*.csv', '*.tsv']) */
+  /** File name suffix patterns this editor handles (e.g., ['*.csv', '*.tsv']), or a 'virtual://' prefix for fileless tabs. Globs like '*.{csv,tsv}' or 'data/*.json' never match */
   filePatterns: string[];
 
   /** Display name shown in UI */
@@ -726,7 +735,7 @@ export interface DocumentHeaderContribution {
   /** Unique identifier for this header (e.g., 'astro-frontmatter') */
   id: string;
 
-  /** Glob patterns for files this header applies to (e.g., ['*.astro']) */
+  /** '*.ext' or path patterns containing '/' this header applies to (e.g., ['*.astro']) */
   filePatterns: string[];
 
   /** Display name shown in UI */
@@ -1140,8 +1149,19 @@ export interface ExtensionFileSystemService {
   /** Check if a file exists */
   fileExists(path: string): Promise<boolean>;
 
-  /** Find files matching a pattern */
-  findFiles(pattern: string): Promise<string[]>;
+  /**
+   * Find files matching a pattern. Searches `rootDir` when given (an absolute
+   * project path, e.g. one from listProjectPaths), otherwise the window's
+   * first project. Returns absolute paths.
+   */
+  findFiles(pattern: string, rootDir?: string): Promise<string[]>;
+
+  /**
+   * Absolute paths of the projects open in this window that this window runs
+   * background work for. A project open in several windows is listed by only
+   * one of them, so scheduled work keyed on this list runs once.
+   */
+  listProjectPaths?(): Promise<string[]>;
 }
 
 export interface ExtensionUIService {
@@ -1214,8 +1234,9 @@ export interface ExtensionAIService {
    * resolves the active workspace, routes to the backend module, and returns the
    * tool's result. Throws if the tool errors or the module is not running.
    *
-   * Requires the `ai` manifest permission. `workspacePath` is optional — the
-   * host falls back to the window's active workspace when omitted.
+   * Requires the `ai` manifest permission. Pass `workspacePath`, the project
+   * the tool acts on; the call fails without it. Inside an AI tool handler it
+   * defaults to the calling session's project.
    */
   callBackendTool(
     toolName: string,
@@ -1231,6 +1252,12 @@ export interface ExtensionAIService {
     provider?: 'claude-code' | 'claude' | 'openai' | 'openai-codex';
     /** Model ID (e.g. 'claude-code:opus', 'openai-codex:gpt-5.6-sol'). Uses provider default if omitted. */
     model?: string;
+    /**
+     * Project to run the session in. Required, and must be a project open in
+     * the calling window. Inside an AI tool handler it defaults to the calling
+     * session's project.
+     */
+    workspacePath: string;
   }): Promise<{
     sessionId: string;
     response: string;

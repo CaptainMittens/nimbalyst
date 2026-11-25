@@ -2,8 +2,9 @@
  * Build `nim` as a self-contained bundle.
  *
  * The CLI is published to npm as ONE artifact. Everything it needs from this
- * monorepo -- today that is `@nimbalyst/tracker-core`, which holds the tracker
- * record/lifecycle/key/release semantics the app and the CLI must agree on --
+ * monorepo -- `@nimbalyst/tracker-core` (the tracker record/lifecycle/key/release
+ * semantics the app and the CLI must agree on), `@nimbalyst/local-wiki` (the
+ * local wiki file format) and the page tool contract from `@nimbalyst/collab-protocol` --
  * is inlined into `dist` at build time. Nothing in this repo that is not
  * published to npm may appear in the tarball's `dependencies`, and inlining is
  * what guarantees that: a published `nim` carries the exact tracker semantics
@@ -21,7 +22,7 @@
  * declares only `main` and `VERSION` and so references nothing from a package
  * a consumer will not have.
  */
-import { rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import * as path from 'node:path';
@@ -31,6 +32,9 @@ import { build } from 'esbuild';
 const require = createRequire(import.meta.url);
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dist = path.join(packageDir, 'dist');
+// `nim --version`, `nim mcp`'s serverInfo and the wiki-web install hint all read
+// this, so it comes from package.json rather than a constant someone must bump.
+const { version } = JSON.parse(readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
 
 rmSync(dist, { recursive: true, force: true });
 
@@ -65,6 +69,19 @@ await build({
   // segfault rather than erroring on an older host, so this floor is load-bearing.
   target: 'node22',
   external: ['better-sqlite3'],
+  define: { __NIM_VERSION__: JSON.stringify(version) },
+  // The app's mark parser is pure but not a package of its own; see src/types/pageMarkSyntax.d.ts.
+  alias: {
+    '@nimbalyst/runtime/core/pageMarkSyntax': path.join(packageDir, '../runtime/src/core/pageMarkSyntax.ts'),
+    // `nim hook session-inputs` runs the knowledge extension's server; see src/types/wikiPlugin.d.ts.
+    '@nimbalyst/wiki-plugin/session-inputs': path.join(packageDir, '../extensions/knowledge/src/sessionInputs/server.ts'),
+    // The session-inputs server's citation format, as the plugin bundle resolves it.
+    '@nimbalyst/runtime/core/citationSyntax': path.join(packageDir, '../runtime/src/core/citationSyntax.ts'),
+    // The static export's colored-text parser; see src/types/textColorSyntax.d.ts.
+    '@nimbalyst/runtime/core/textColorSyntax': path.join(packageDir, '../runtime/src/core/textColorSyntax.ts'),
+    // The editor's comment quote matcher, for anchor states in `nim wiki comments`; see src/types/quoteMatch.d.ts.
+    '@nimbalyst/runtime/editor/commenting/quoteMatch': path.join(packageDir, '../runtime/src/editor/commenting/quoteMatch.ts'),
+  },
   // Each entry is bundled independently rather than sharing chunks: the two bin
   // entries differ only in whether they declare the bundled SQLite channel
   // before anything opens a database, and that declaration is module state.

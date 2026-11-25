@@ -1,17 +1,20 @@
 /**
- * Acceptance for the Pages Personal section on a fresh install with no account
- * and no collaboration server, on the one page tree (Phase 3b).
+ * Acceptance for the Wiki's Local section on a fresh install with no account
+ * and no collaboration server. Local pages are files in the wiki folder
+ * (`nimbalyst-local/wiki`, local-wiki plan Phase 3).
  *
  * On a fresh user-data dir (signed out, no wrangler), Pages mode must show the
- * Personal section with no error toast and no scope-resolution console error.
+ * Local section with no error toast and no scope-resolution console error.
  * The user creates a root page and a page inside it, places the seeded
  * personal tracker type (the "Place type..." menu must not offer the seeded
- * team type) and drags it under the root page, creates an item of that type
- * and moves it under the child page, writes a sentence into a plain page, and
- * gives a second page with a body a type in place. After a relaunch on the same
- * user-data dir and workspace, the nesting, the placed type, the moved item,
- * the plain page with its text and restored tab, and the typed page with its
- * body are all still there.
+ * team type; placing it makes it a wiki type, with no row of its own in the
+ * tree), creates an item of that type and moves it under the child page, writes
+ * a sentence into a plain page, and gives a second page a type in place right
+ * after typing into it, without saving first: the unsaved text must reach the
+ * file along with the type. After a relaunch on the same user-data dir and
+ * workspace, the nesting, the wiki type, the moved item, the plain page with
+ * its text and restored tab, and the typed page with its body are all still
+ * there, in the tree and in the files.
  *
  * Run with:
  *   npx playwright test e2e/sync/pages-personal-offline.spec.ts --max-failures=1
@@ -35,7 +38,7 @@ const ITEM_TITLE = 'Offline item survives restart';
 const PAGE_NAME = 'Offline Page';
 const PAGE_SENTENCE = 'Personal pages work with no account.';
 const TYPED_PAGE = 'Offline Typed';
-const TYPED_SENTENCE = 'This personal page keeps its words when it gets a type.';
+const TYPED_SENTENCE = 'This local page keeps its words when it gets a type.';
 
 function typeYaml(type: string, name: string, plural: string, sharing: 'personal' | 'team', prefix: string): string {
   return `type: ${type}
@@ -101,10 +104,6 @@ function namedPageRow(page: Page, name: string): Locator {
   });
 }
 
-function typeRow(page: Page): Locator {
-  return personalSidebar(page).locator(`[data-testid="collab-tree-type-row"][data-type-id="${PERSONAL_TYPE_ID}"]`);
-}
-
 function itemRow(page: Page): Locator {
   return personalSidebar(page).locator('[data-testid="collab-tree-item-row"]', { hasText: ITEM_TITLE });
 }
@@ -117,8 +116,17 @@ function typedItemRow(page: Page): Locator {
   return personalSidebar(page).locator('[data-testid="collab-tree-item-row"]', { hasText: TYPED_PAGE });
 }
 
-function personalPageTab(page: Page): Locator {
-  return page.locator('[data-testid="personal-page-tab"]:visible');
+/** The editor of a Local page's file tab. */
+function fileEditor(page: Page, file: string): Locator {
+  return page.locator(`[data-file-path="${file}"]`).locator(selectors.contentEditable).first();
+}
+
+async function readText(file: string): Promise<string> {
+  try {
+    return await fs.readFile(file, 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 async function openPagesMode(page: Page): Promise<void> {
@@ -169,14 +177,19 @@ async function ensureExpanded(row: Locator): Promise<void> {
 
 test('signed-out personal page tree: nesting, placed type, moved item, page text and set type survive a relaunch', async ({}, testInfo) => {
   test.setTimeout(180_000);
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'pages-personal-offline-'));
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pages-personal-offline-')));
   const workspace = path.join(root, 'workspace');
+  const wikiRoot = path.join(workspace, 'nimbalyst-local', 'wiki');
+  const pageFile = path.join(wikiRoot, `${PAGE_NAME}.md`);
+  const typedFile = path.join(wikiRoot, `${TYPED_PAGE}.md`);
+  const itemFile = path.join(wikiRoot, ROOT_PAGE, CHILD_PAGE, `${ITEM_TITLE}.md`);
+  const personalTypeFile = path.join(workspace, '.nimbalyst', 'trackers', `${PERSONAL_TYPE_ID}.yaml`);
   const userDataDir = path.join(root, 'user-data');
   const databaseDir = path.join(root, 'database');
   await fs.mkdir(path.join(workspace, '.nimbalyst', 'trackers'), { recursive: true });
   await fs.writeFile(path.join(workspace, 'README.md'), '# Offline pages\n');
   await fs.writeFile(
-    path.join(workspace, '.nimbalyst', 'trackers', `${PERSONAL_TYPE_ID}.yaml`),
+    personalTypeFile,
     typeYaml(PERSONAL_TYPE_ID, PERSONAL_TYPE_NAME, PERSONAL_TYPE_PLURAL, 'personal', 'offn'),
   );
   await fs.writeFile(
@@ -209,24 +222,21 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
     return page;
   };
 
-  let documentId = '';
   try {
     let page = await launch('run1');
 
-    await test.step('Pages mode shows the Personal section, signed out, with no error', async () => {
+    await test.step('Pages mode shows the Local section, signed out, with no error', async () => {
       await expect(page.getByTestId('collab-mode-button')).toBeVisible({ timeout: 15_000 });
       await openPagesMode(page);
       await expect(page.getByTestId('collab-sidebar-section-personal')).toBeVisible();
-      await expect(page.getByTestId('collab-sidebar-section-personal')).toContainText('Personal');
+      await expect(page.getByTestId('collab-sidebar-section-personal')).toContainText('Local');
       await expect(page.getByTestId('pages-sidebar-team-note')).toBeVisible();
       await expect(page.getByTestId('collab-sidebar-section-team')).toHaveCount(0);
-      // The seeded Personal Home page.
-      await expect(namedPageRow(page, 'Home')).toBeVisible({ timeout: 10_000 });
       // Give a failed scope resolution time to surface before asserting its absence.
       await page.waitForTimeout(1_500);
       await expect(page.locator('.error-toast--error')).toHaveCount(0);
       expect(consoleLines.filter((line) => line.includes(SCOPE_ERROR))).toEqual([]);
-      log('step 1 ok: Pages button visible, Personal section shown, team note shown, no error toast, no scope error');
+      log('step 1 ok: Pages button visible, Local section shown, team note shown, no error toast, no scope error');
     });
 
     /** Title-bar "+" creates a root page; "New page inside" creates a child. */
@@ -250,37 +260,25 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       await expect(namedPageRow(page, name)).toBeVisible({ timeout: 10_000 });
     };
 
-    /** Type into the open personal page tab and wait until the body is stored. */
-    const writePageBody = async (sentence: string): Promise<string> => {
-      const tab = personalPageTab(page);
-      await expect(tab).toBeVisible({ timeout: 10_000 });
-      const id = (await tab.getAttribute('data-document-id')) ?? '';
-      expect(id).not.toBe('');
-      const editor = tab.locator(selectors.contentEditable).first();
+    /** Opens the page's file tab (creating a page may already have) and types into it. */
+    const typeIntoPage = async (name: string, file: string, sentence: string): Promise<void> => {
+      if (!(await fileEditor(page, file).isVisible())) await namedPageRow(page, name).click();
+      const editor = fileEditor(page, file);
       await expect(editor).toBeVisible({ timeout: 10_000 });
       await editor.click();
       await page.keyboard.type(sentence);
       await expect(editor).toContainText(sentence);
-      await expect
-        .poll(
-          async () =>
-            ((await page.evaluate(
-              ([ws, docId]) => window.electronAPI.invoke('personal-pages:get-body', ws, docId),
-              [workspace, id] as const,
-            )) as { content?: string } | null)?.content ?? '',
-          { timeout: 10_000 },
-        )
-        .toContain(sentence);
-      return id;
     };
 
     await test.step('create a root page and a page inside it', async () => {
       await createPage(ROOT_PAGE);
       await createPage(CHILD_PAGE, ROOT_PAGE);
-      log('step 2 ok: root page and nested child page visible');
+      expect(await readText(path.join(wikiRoot, `${ROOT_PAGE}.md`))).toMatch(/^---\nid: \S+/);
+      expect(await readText(path.join(wikiRoot, ROOT_PAGE, `${CHILD_PAGE}.md`))).toMatch(/^---\nid: \S+/);
+      log('step 2 ok: root page and nested child page visible, both files on disk');
     });
 
-    await test.step('place the personal type and drag it under the root page; the team type is not offered', async () => {
+    await test.step('place the personal type; the team type is not offered and the type becomes a wiki type', async () => {
       const tree = personalSidebar(page).locator('.collab-sidebar-tree');
       await expect(tree).toBeVisible();
       const box = await tree.boundingBox();
@@ -295,12 +293,11 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       await expect(menu.locator('.collab-place-type-option', { hasText: PERSONAL_TYPE_PLURAL })).toHaveCount(1);
       await expect(menu.locator('.collab-place-type-option', { hasText: TEAM_TYPE_PLURAL })).toHaveCount(0);
       await menu.locator('.collab-place-type-option', { hasText: PERSONAL_TYPE_PLURAL }).click();
-      await expect(typeRow(page)).toBeVisible({ timeout: 10_000 });
-      await typeRow(page).dragTo(namedPageRow(page, ROOT_PAGE));
-      await ensureExpanded(namedPageRow(page, ROOT_PAGE));
-      // Under the root page, the type row is indented past the root row.
-      await expect.poll(() => indentPast(namedPageRow(page, ROOT_PAGE), typeRow(page)), { timeout: 10_000 }).toBeGreaterThan(4);
-      log('step 3 ok: personal type placed and moved under the root page; team type absent from the menu');
+      // Placing a type in the wiki makes it a wiki type: its items are files.
+      // A page type gets no row of its own in the Local tree (its items are
+      // files wherever they sit; a known gap of the files-backed section).
+      await expect.poll(() => readText(personalTypeFile), { timeout: 10_000 }).toMatch(/^storage: pages$/m);
+      log('step 3 ok: personal type placed (storage: pages); team type absent from the menu');
     });
 
     await test.step('create an item of the personal type and move it under the child page', async () => {
@@ -314,9 +311,10 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       await title.press('ControlOrMeta+Enter');
       await expect(title).not.toBeVisible({ timeout: 10_000 });
       await openPagesMode(page);
-      await ensureExpanded(typeRow(page));
       await expect(itemRow(page)).toBeVisible({ timeout: 10_000 });
-      log('step 4 item row visible under the personal type');
+      await expect.poll(() => readText(path.join(wikiRoot, `${ITEM_TITLE}.md`)), { timeout: 10_000 })
+        .toMatch(new RegExp(`^type: ${PERSONAL_TYPE_ID}$`, 'm'));
+      log('step 4 item row visible; the item is a typed page file at the wiki root');
 
       await itemRow(page).click({ button: 'right' });
       await page.locator('.collab-item-move-to').click();
@@ -329,25 +327,22 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       await expect(itemRow(page)).toHaveCount(1);
       await expect(itemRow(page)).toBeVisible({ timeout: 10_000 });
       await expect.poll(() => indentPast(namedPageRow(page, CHILD_PAGE), itemRow(page)), { timeout: 10_000 }).toBeGreaterThan(4);
-      log('step 4 ok: item moved under the child page');
+      await expect.poll(() => readText(itemFile), { timeout: 10_000 }).toMatch(new RegExp(`^type: ${PERSONAL_TYPE_ID}$`, 'm'));
+      log('step 4 ok: item moved under the child page; its file moved into the child page folder');
     });
 
-    await test.step('create a personal page and type a sentence into its tab', async () => {
+    await test.step('create a Local page and type a sentence into its file tab', async () => {
       await createPage(PAGE_NAME);
-      if (!(await personalPageTab(page).isVisible())) {
-        log('step 5 note: creating the page did not open it; opening it from the tree');
-        await pageRow(page).click();
-      }
-      documentId = await writePageBody(PAGE_SENTENCE);
-      log(`step 5 ok: personal page ${documentId} saved with the sentence (personal-pages:get-body)`);
+      await typeIntoPage(PAGE_NAME, pageFile, PAGE_SENTENCE);
+      await page.keyboard.press('ControlOrMeta+s');
+      await expect.poll(() => readText(pageFile), { timeout: 10_000 }).toContain(PAGE_SENTENCE);
+      log('step 5 ok: the page file holds the sentence');
     });
 
-    await test.step('set type on a personal page with a body', async () => {
+    await test.step('set type on a page right after typing, without saving first', async () => {
       await createPage(TYPED_PAGE);
-      if (!(await personalPageTab(page).getAttribute('data-document-id').catch(() => null))) {
-        await namedPageRow(page, TYPED_PAGE).click();
-      }
-      await writePageBody(TYPED_SENTENCE);
+      await typeIntoPage(TYPED_PAGE, typedFile, TYPED_SENTENCE);
+      // No save: Set type must write the open editor's text to the file first.
       await namedPageRow(page, TYPED_PAGE).click({ button: 'right' });
       await page.locator('.collab-page-set-type').click();
       const dialog = page.getByTestId('set-page-type-dialog');
@@ -357,10 +352,14 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       await expect(dialog).toHaveCount(0, { timeout: 20_000 });
       await expect(typedItemRow(page)).toBeVisible({ timeout: 10_000 });
       await expect(namedPageRow(page, TYPED_PAGE)).toHaveCount(0);
-      const view = page.locator('[data-testid="tracker-page-view"]:visible');
-      await expect(view).toBeVisible({ timeout: 10_000 });
-      await expect(view).toContainText(TYPED_SENTENCE, { timeout: 10_000 });
-      log('step 6 ok: typed page replaced the page in place with the same body');
+      // Same file, now typed, with the text typed before Set type; the editor's
+      // later saves keep the type.
+      await page.waitForTimeout(3_000);
+      const typed = await readText(typedFile);
+      expect(typed).toMatch(new RegExp(`^type: ${PERSONAL_TYPE_ID}$`, 'm'));
+      expect(typed).toContain(TYPED_SENTENCE);
+      await expect(fileEditor(page, typedFile)).toContainText(TYPED_SENTENCE);
+      log('step 6 ok: the page file gained the type in place and kept the unsaved sentence');
     });
 
     // Let tab persistence settle, then relaunch on the same user data and workspace.
@@ -377,11 +376,9 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       await ensureExpanded(namedPageRow(page, ROOT_PAGE));
       await expect(namedPageRow(page, CHILD_PAGE)).toBeVisible({ timeout: 10_000 });
       log('step 7 root and child pages present');
-      await expect(typeRow(page)).toBeVisible({ timeout: 10_000 });
-      log('step 7 placed type present under the root page');
+      expect(await readText(personalTypeFile)).toMatch(/^storage: pages$/m);
       await ensureExpanded(namedPageRow(page, CHILD_PAGE));
       await expect(itemRow(page)).toBeVisible({ timeout: 10_000 });
-      expect(await indentPast(namedPageRow(page, ROOT_PAGE), typeRow(page))).toBeGreaterThan(4);
       expect(await indentPast(namedPageRow(page, CHILD_PAGE), itemRow(page))).toBeGreaterThan(4);
       log('step 7 moved item present under the child page');
       await expect(typedItemRow(page)).toBeVisible({ timeout: 10_000 });
@@ -391,14 +388,14 @@ test('signed-out personal page tree: nesting, placed type, moved item, page text
       const restoredTab = page.locator(`.tab[data-filename]:visible`, { hasText: PAGE_NAME });
       await expect(restoredTab).toHaveCount(1, { timeout: 15_000 });
       log('step 7 page tab restored');
-      const tab = page.locator(`[data-testid="personal-page-tab"][data-document-id="${documentId}"]:visible`);
-      if (!(await tab.isVisible())) await restoredTab.click();
-      await expect(tab).toBeVisible({ timeout: 10_000 });
-      await expect(tab.locator(selectors.contentEditable).first()).toContainText(PAGE_SENTENCE, { timeout: 10_000 });
+      if (!(await fileEditor(page, pageFile).isVisible())) await restoredTab.click();
+      await expect(fileEditor(page, pageFile)).toContainText(PAGE_SENTENCE, { timeout: 10_000 });
       await typedItemRow(page).click();
-      await expect(page.locator('[data-testid="tracker-page-view"]:visible')).toContainText(TYPED_SENTENCE, { timeout: 10_000 });
+      await expect(fileEditor(page, typedFile)).toContainText(TYPED_SENTENCE, { timeout: 10_000 });
+      expect(await readText(typedFile)).toMatch(new RegExp(`^type: ${PERSONAL_TYPE_ID}$`, 'm'));
+      expect(await readText(itemFile)).toMatch(new RegExp(`^type: ${PERSONAL_TYPE_ID}$`, 'm'));
       expect(consoleLines.filter((line) => line.includes(SCOPE_ERROR))).toEqual([]);
-      log('step 7 ok: page text and typed page body restored; no scope error in either run');
+      log('step 7 ok: page text and typed page body restored from their files; no scope error in either run');
     });
   } catch (error) {
     console.log(`[P2-E] renderer console (last 80 relevant lines):\n${consoleLines.slice(-80).join('\n')}`);

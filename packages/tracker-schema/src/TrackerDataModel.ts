@@ -313,6 +313,21 @@ export interface TrackerDataModel {
    * Read-only is the only behavioral consequence.
    */
   archived?: boolean;
+  /**
+   * Set to false to stop giving items of this type machine-private local
+   * numbers (`NIM.75`). On unless the type opts out: an opt-in default left
+   * every type unnumbered for weeks because no type set it. Team
+   * issue keys (`NIM-123`) are unaffected, and a number already issued stays
+   * readable and resolvable after opting out.
+   */
+  localNumbers?: boolean;
+  /**
+   * Where the type's items live in a Local wiki (`@nimbalyst/local-wiki`
+   * FORMAT.md): one markdown page per item, or one CSV for the type. Only a
+   * type that declares it is a wiki type; without it the items stay in the app
+   * database. Kept as written so the `nim` CLI and the app agree.
+   */
+  storage?: 'pages' | 'table';
   /** If false, items of this type cannot be created via tracker_create. Defaults to true. */
   creatable?: boolean;
   /**
@@ -322,6 +337,14 @@ export interface TrackerDataModel {
    * workspace defines `claim`.
    */
   hiddenUntilType?: string;
+  /**
+   * If false, keep this type out of type lists and create menus for good. It
+   * stays registered and resolvable, so its items render with real statuses.
+   * The GitHub overlay builtins use it: their items are written by the GitHub
+   * panel, not created by hand. A workspace schema that replaces the builtin
+   * without the flag lists the type again. Defaults to true.
+   */
+  listed?: boolean;
   /** Whether this type can be used as a primary type. Defaults to true. */
   primaryCapable?: boolean;
   /**
@@ -814,9 +837,10 @@ export class TrackerDataModelRegistry {
     return this.get(type) !== undefined;
   }
 
-  /** The types a user should be offered: `getAll()` minus types still waiting on `hiddenUntilType`. */
+  /** The types a user should be offered: `getAll()` minus `listed: false` types and types still waiting on `hiddenUntilType`. */
   getListed(): TrackerDataModel[] {
-    return this.getAll().filter(model => !model.hiddenUntilType || this.has(model.hiddenUntilType));
+    return this.getAll().filter(model =>
+      model.listed !== false && (!model.hiddenUntilType || this.has(model.hiddenUntilType)));
   }
 
   isBuiltin(type: string): boolean {

@@ -6,6 +6,8 @@ export interface TreeSession {
   workspaceId?: string;
   remoteHostDeviceId?: string;
   sessionType?: string;
+  /** A workstream the user created on purpose; never merged into its child. */
+  userWorkstream?: boolean;
   isPinned?: boolean;
   createdAt: number;
   updatedAt?: number;
@@ -20,6 +22,9 @@ export interface SessionTreeNode<T extends TreeSession> {
   uncommittedCount: number;
   ids: string[];
 }
+
+/** Mirrors MAX_SESSION_DEPTH in main/services/sessionHierarchy.ts, which enforces it. */
+export const MAX_TREE_DEPTH = 256;
 
 export function treeIndent(depth: number) {
   return { level: Math.min(Math.max(0, depth), 3), rail: depth > 3 };
@@ -77,8 +82,37 @@ function compareNodes<T extends TreeSession>(a: SessionTreeNode<T>, b: SessionTr
   );
 }
 
+/** True for the folder-style grouping row, as opposed to a session that has children. */
+export function isWorkstreamContainer(session: Pick<TreeSession, 'sessionType'>): boolean {
+  return session.sessionType === 'workstream';
+}
+
+/** The sidebar renders a row as a tree when it groups sessions; an empty workstream still does. */
+export function rendersAsSessionTree(session: { sessionType?: string; childCount?: number }): boolean {
+  return isWorkstreamContainer(session) || (session.childCount ?? 0) > 0;
+}
+
+/** Ids of every node that has children, whether or not it is currently expanded. */
+export function treeParentIds<T extends TreeSession>(rows: readonly T[]): string[] {
+  const ids: string[] = [];
+  const visit = (node: SessionTreeNode<T>) => {
+    if (!node.children.length) return;
+    ids.push(node.session.id);
+    node.children.forEach(visit);
+  };
+  buildSessionTree(rows).forEach(visit);
+  return ids;
+}
+
+/**
+ * Wrappers the app created automatically before the session tree carry no meaning
+ * with one session in them, so they are hidden behind that session. A workstream
+ * the user made (`userWorkstream`) always keeps its row.
+ */
 export function mergedTreeHeader<T extends TreeSession>(node: SessionTreeNode<T>): SessionTreeNode<T> {
-  return node.session.sessionType === 'workstream' && node.children.length === 1 ? node.children[0] : node;
+  return isWorkstreamContainer(node.session) && !node.session.userWorkstream && node.children.length === 1
+    ? node.children[0]
+    : node;
 }
 
 /** Visible preorder is also the range-selection order; hidden wrappers never participate. */
@@ -160,5 +194,5 @@ export function sessionMoveError(
   const node = find(forest);
   const height = (n: SessionTreeNode<TreeSession>): number =>
     n.children.length ? 1 + Math.max(...n.children.map(height)) : 0;
-  return depth + (node ? height(node) : 0) > 8 ? 'The moved tree would exceed 8 levels' : null;
+  return depth + (node ? height(node) : 0) > MAX_TREE_DEPTH ? `The moved tree would exceed ${MAX_TREE_DEPTH} levels` : null;
 }

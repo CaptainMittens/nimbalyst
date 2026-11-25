@@ -68,7 +68,7 @@ export function useResolvedTrackerReference(
  * in place (Pages) can open the item there, in a new tab when `newTab`.
  */
 export function navigateToTrackerReference(
-  reference: ResolvedTrackerReference,
+  reference: Pick<ResolvedTrackerReference, 'id'> & Partial<ResolvedTrackerReference>,
   origin?: { fromPage: true; newTab: boolean },
 ): void {
   if (typeof window === 'undefined') return;

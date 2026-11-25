@@ -310,7 +310,7 @@ export async function listPagesTool(env: PageTreeToolEnv, args: Record<string, u
   const context = await readTree(env, sectionOf(args.section));
   let root: string | null = null;
   if (args.root !== undefined) {
-    if (typeof args.root !== 'string' || !(root = resolveNodeRef(env, context, args.root))) return fail('No such subtree in this Pages section.');
+    if (typeof args.root !== 'string' || !(root = resolveNodeRef(env, context, args.root))) return fail('No such subtree in this Wiki section.');
   }
   let listing;
   try {
@@ -551,7 +551,7 @@ export async function searchPagesTool(env: PageTreeToolEnv, args: Record<string,
   const context = await readTree(env, section);
   const nodes = describeTree(context, env);
   const session = context.session;
-  if (!session.searchPages) return { success: false, error: 'This Pages section cannot search page text.' };
+  if (!session.searchPages) return { success: false, error: 'This Wiki section cannot search page text.' };
   // Only the types the tree shows: a typed page it would drop must not use up the limit.
   const typeIds = [...new Set(nodes.flatMap((node) => (node.kind === 'typedPage' ? [node.typeId] : [])))];
   const found = await session.searchPages({ query, limit, typeIds });
