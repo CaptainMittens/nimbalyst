@@ -1374,6 +1374,8 @@ importers:
         specifier: ^7.3.6
         version: 7.3.6(@types/node@20.19.43)(jiti@2.7.0)(terser@5.46.1)(yaml@2.8.3)
 
+  packages/extensions/evolution: {}
+
   packages/extensions/excalidraw:
     dependencies:
       '@excalidraw/excalidraw':

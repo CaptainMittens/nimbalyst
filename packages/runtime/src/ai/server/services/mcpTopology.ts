@@ -147,6 +147,7 @@ export const HOST_TOOLS: readonly string[] = [
   // Session-context (was nimbalyst-session-context)
   'get_session_summary',
   'get_session_coaching_signals',
+  'get_tool_failures',
   'get_workstream_overview',
   'get_workstream_edited_files',
   'list_recent_sessions',

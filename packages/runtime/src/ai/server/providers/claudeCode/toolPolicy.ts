@@ -41,11 +41,17 @@ export const INTERNAL_MCP_TOOLS: readonly string[] = [
   'mcp__nimbalyst-trackers__tracker_add_comment',
   'mcp__nimbalyst-trackers__tracker_define_type',
   'mcp__nimbalyst-trackers__tracker_delete_type',
+  // Automations (`nimbalyst-automations`) — the evolution-pass skill sets up its
+  // daily automation with these two. The extension registers them as
+  // `automations.list` and `automations.create`; the agent sees the underscore names.
+  'mcp__nimbalyst-automations__automations_list',
+  'mcp__nimbalyst-automations__automations_create',
   // Host (`nimbalyst-host`) — session-context reads.
   'mcp__nimbalyst-host__get_session_summary',
   'mcp__nimbalyst-host__get_workstream_overview',
   'mcp__nimbalyst-host__list_recent_sessions',
   'mcp__nimbalyst-host__get_workstream_edited_files',
+  'mcp__nimbalyst-host__get_tool_failures',
 ];
 
 export const TEAM_TOOLS: readonly string[] = [

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 <!-- New features go here -->
+- Evolution extension: a daily pass that files tracker items for blocked and broken tool calls, writes short lessons for repeated agent failures into Claude Code's memory, and retires lessons that did not help.
 
 ### Changed
 <!-- Changes to existing functionality go here -->

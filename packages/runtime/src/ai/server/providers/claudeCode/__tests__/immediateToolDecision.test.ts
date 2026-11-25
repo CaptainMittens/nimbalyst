@@ -163,6 +163,22 @@ describe('resolveImmediateToolDecision', () => {
       });
     }
 
+    // The evolution-pass skill creates its daily automation through these two
+    // tools. An unattended automation run has nobody to answer a permission
+    // prompt, so both must be auto-allowed. The names are the agent-facing ones.
+    for (const toolName of [
+      'mcp__nimbalyst-automations__automations_list',
+      'mcp__nimbalyst-automations__automations_create',
+    ]) {
+      it(`${toolName} is auto-allowed via the real INTERNAL_MCP_TOOLS list`, async () => {
+        expect(INTERNAL_MCP_TOOLS).toContain(toolName);
+        const deps = createDeps({ internalMcpTools: INTERNAL_MCP_TOOLS as readonly string[] as string[] });
+        const result = await resolveImmediateToolDecision(deps, createParams({ toolName, input: { id: 'x' } }));
+        assertZodCompliantAllow(result);
+        expect(result!.updatedInput).toEqual({ id: 'x' });
+      });
+    }
+
     it('does NOT broaden to third-party MCP tools in non-auto modes', async () => {
       const deps = createDeps({
         internalMcpTools: INTERNAL_MCP_TOOLS as readonly string[] as string[],
@@ -204,6 +220,18 @@ describe('resolveImmediateToolDecision', () => {
       const params = createParams({ toolName: 'Bash', input: { command: 'rm -rf /' } });
       const result = await resolveImmediateToolDecision(deps, params);
       expect(result).toBeNull();
+    });
+
+    it('mcp__nimbalyst-host__get_tool_failures is auto-allowed with no prompt', async () => {
+      expect(INTERNAL_MCP_TOOLS).toContain('mcp__nimbalyst-host__get_tool_failures');
+
+      const deps = createDeps({ internalMcpTools: INTERNAL_MCP_TOOLS as readonly string[] as string[] });
+      const params = createParams({
+        toolName: 'mcp__nimbalyst-host__get_tool_failures',
+        input: { since: '2026-11-10T00:00:00.000Z' },
+      });
+      const result = await resolveImmediateToolDecision(deps, params);
+      assertZodCompliantAllow(result);
     });
 
     it('still auto-allows the core internal tools (regression guard)', async () => {
