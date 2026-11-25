@@ -156,11 +156,14 @@ layout: balanced
 ## 11 Gap review 2 (2026-11-24) {color: red}
 > Second pair of reviews (Sonnet and Fable 5.2; Mythos is not offered) of main at be28396f8, with section 10 excluded. The lead checked each line marked checked.
 - Blocks learning {status: todo}
-  - No daily home: the installed app (0.84.4) has no evolution extension, and dev:user2 reads a frozen copy, so no pass sees new sessions (Fable, checked)
-  - A lesson starts at 3 hits but a final verdict needs 5 before-failures, so a 3- or 4-hit lesson stays live and inconclusive forever and fills the 1,400 characters (Fable, checked, toolFailures.ts:736, SKILL.md:65)
+  - No daily home: the installed app (0.84.4) has no evolution extension, and dev:user2 reads a frozen copy, so no pass sees new sessions (Fable, checked) {status: done}
+    > Owner chose: install a fork build. Branch sync/upstream-0.84.4 merges upstream 0.84.4 into the fork (13e2d8b35; gate: 19,431 tests passed, 30 skipped) and takes updates from CaptainMittens/nimbalyst, which has no releases (1e174c8ac). Built as release/mac-arm64/Nimbalyst.app. Install waits on the owner. Each upstream release needs a merge and a rebuild.
+  - A lesson starts at 3 hits but a final verdict needs 5 before-failures, so a 3- or 4-hit lesson stays live and inconclusive forever and fills the 1,400 characters (Fable, checked, toolFailures.ts:736, SKILL.md:65) {status: done}
+    > Owner chose: retire a lesson still inconclusive after day 45, with no tracker item (90897fa7f).
   - This workspace has 1 eligible habit key in 14 days (Bash:exit-code, 16 hits), so 5 final verdicts cannot happen here (Fable, database query)
 - First run {status: todo}
-  - Split state: the dev run writes the real lessons.json and MEMORY.md, but its tracker items stay in the database copy; `filed` then blocks the real items (Fable, checked)
+  - Split state: the dev run writes the real lessons.json and MEMORY.md, but its tracker items stay in the database copy; `filed` then blocks the real items (Fable, checked) {status: done}
+    > The checklist now backs up both files before the run and puts them back after it (975079fc5). With the fork build installed, the run can use the real database, and this gap goes away.
   - The 7 checks test plumbing only; none checks a count, a verdict or a run started by the automation (Fable)
   - Tip: add one lesson dated 16 days back, so the judging step runs (Fable)
 - Bugs and risks {status: todo}
