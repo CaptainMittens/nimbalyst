@@ -78,7 +78,8 @@ export interface DayCount {
  *     otherSamples::`{ day: string; sessionId: string; text: string }[]`
  *         Up to 3 failure texts for each day that no pattern matched.
  *     truncated::boolean
- *         True when a cap cut the text or the key list.
+ *         True only when the 200-key cap dropped some keys. Cutting one sample
+ *         text to 200 characters does not set it, because that loses no key.
  */
 export interface ToolFailureCounts {
   days: DayCount[];
@@ -309,12 +310,19 @@ function pairCodexCalls(rows: ToolFailureRow[]): PairedCall[] {
   return calls;
 }
 
+/** A bracket tag such as `[plan-gate]` at the very start of a text. */
+const BRACKET_TAG_AT_START = /^\[([a-z][\w-]*)\]/i;
+
 /**
  * Names the hook that blocked a call, from the result text
  *
  * The first rule that fits wins: Claude Code's own block; the script file name
  * in `hooks/<name>.py`; a bracket tag such as `[plan-gate]`; the word after
- * `RPG `; and last the first 40 characters after `hook error: `.
+ * `RPG `; and last the first 40 characters after `hook error: `. A bracket tag
+ * counts only at the start of the text, or at the start of what follows
+ * `hook error: `. A tag that sits later in the message is part of its wording.
+ * In the 40-character fallback each run of digits becomes `#`, so a number that
+ * changes from call to call does not make a new key.
  *
  * Args:
  *     text::string
@@ -328,13 +336,14 @@ function hookKey(text: string): string {
   if (text.startsWith('<tool_use_error>Blocked:')) return 'claude-code-builtin';
   const script = /hooks\/([^/"\s]+)\.py/.exec(text);
   if (script) return script[1];
-  const tag = /\[([a-z][\w-]*)\]/i.exec(text);
+  const marker = 'hook error: ';
+  const at = text.indexOf(marker);
+  const afterMarker = at === -1 ? text : text.slice(at + marker.length);
+  const tag = BRACKET_TAG_AT_START.exec(text) ?? BRACKET_TAG_AT_START.exec(afterMarker);
   if (tag) return tag[1];
   const rpg = /(?:^|hook error: )RPG ([\w-]+)/.exec(text);
   if (rpg) return rpg[1];
-  const marker = 'hook error: ';
-  const at = text.indexOf(marker);
-  return (at === -1 ? text : text.slice(at + marker.length)).slice(0, 40);
+  return afterMarker.replace(/\d+/g, '#').slice(0, 40);
 }
 
 /** One failed call with the bucket and key the sorter gave it. */
@@ -589,24 +598,21 @@ const MAX_SAMPLE_CHARS = 200;
  * Returns:
  *     samples::`{ key: string; sessionId: string; text: string }[]`
  *         Up to 3 samples for each key.
- *     truncated::boolean
- *         True when a kept text was cut.
+ *
+ * A text cut to 200 characters is not reported as `truncated`: no key is lost.
  */
 function collectSamples(sorted: SortedFailure[]): {
   samples: { key: string; sessionId: string; text: string }[];
-  truncated: boolean;
 } {
   const perKey = new Map<string, number>();
   const samples: { key: string; sessionId: string; text: string }[] = [];
-  let truncated = false;
   for (const { call, key } of sorted) {
     const seen = perKey.get(key) ?? 0;
     if (seen >= MAX_SAMPLES_PER_KEY) continue;
     perKey.set(key, seen + 1);
-    if (call.text.length > MAX_SAMPLE_CHARS) truncated = true;
     samples.push({ key, sessionId: call.sessionId, text: call.text.slice(0, MAX_SAMPLE_CHARS) });
   }
-  return { samples, truncated };
+  return { samples };
 }
 
 /**
@@ -618,30 +624,26 @@ function collectSamples(sorted: SortedFailure[]): {
  *
  * Returns:
  *     otherSamples::`{ day: string; sessionId: string; text: string }[]`
- *         Up to 3 samples for each day, each text cut to 200 characters.
- *     truncated::boolean
- *         True when a kept text was cut.
+ *         Up to 3 samples for each day, each text cut to 200 characters. The cut
+ *         does not set `truncated`.
  */
 function collectOtherSamples(sorted: SortedFailure[]): {
   otherSamples: { day: string; sessionId: string; text: string }[];
-  truncated: boolean;
 } {
   const perDay = new Map<string, number>();
   const otherSamples: { day: string; sessionId: string; text: string }[] = [];
-  let truncated = false;
   for (const { call, klass } of sorted) {
     if (klass !== 'other') continue;
     const seen = perDay.get(call.day) ?? 0;
     if (seen >= MAX_SAMPLES_PER_KEY) continue;
     perDay.set(call.day, seen + 1);
-    if (call.text.length > MAX_SAMPLE_CHARS) truncated = true;
     otherSamples.push({
       day: call.day,
       sessionId: call.sessionId,
       text: call.text.slice(0, MAX_SAMPLE_CHARS),
     });
   }
-  return { otherSamples, truncated };
+  return { otherSamples };
 }
 
 /**
@@ -659,15 +661,15 @@ function collectOtherSamples(sorted: SortedFailure[]): {
 export function deriveToolFailures(rows: ToolFailureRow[]): ToolFailureCounts {
   const calls = pairCalls(rows);
   const { kept: sorted, truncated: keysCut } = capKeys(sortFailures(calls));
-  const { samples, truncated: textCut } = collectSamples(sorted);
-  const { otherSamples, truncated: otherCut } = collectOtherSamples(sorted);
+  const { samples } = collectSamples(sorted);
+  const { otherSamples } = collectOtherSamples(sorted);
   return {
     days: countDays(calls, sorted),
     habitCounts: countHabits(sorted),
     brokenToolKeys: listBrokenTools(calls, sorted),
     samples,
     otherSamples,
-    truncated: keysCut || textCut || otherCut,
+    truncated: keysCut,
   };
 }
 

@@ -308,6 +308,33 @@ describe('deriveToolFailures: the hook key rule', () => {
     expect(result.days.map((d) => [d.bucket, d.key])).toEqual([['blocked', key]]);
   });
 
+  it('reads a bracket tag only at the start of the text after "hook error: ", not one that sits later', () => {
+    const later = deriveToolFailures(
+      claudeCall('h2', 'Bash', 'PreToolUse:Bash hook error: RPG destructive-guard: see [docs] for help'),
+    );
+    expect(later.days.map((d) => d.key)).toEqual(['destructive-guard']);
+    const midText = deriveToolFailures(
+      claudeCall('h3', 'Bash', 'PreToolUse:Bash hook error: Some hook said [note] stop'),
+    );
+    expect(midText.days.map((d) => d.key)).toEqual(['Some hook said [note] stop']);
+  });
+
+  it('puts the RPG rule after the bracket tag rule when both sit at the start', () => {
+    const result = deriveToolFailures(
+      claudeCall('h4', 'Bash', 'PreToolUse:Bash hook error: [plan-gate] RPG destructive-guard: no'),
+    );
+    expect(result.days.map((d) => d.key)).toEqual(['plan-gate']);
+  });
+
+  it('replaces runs of digits with # in the 40-character fallback so a changing number keeps one key', () => {
+    const rows = [
+      ...claudeCall('n1', 'Bash', 'PreToolUse:Bash hook error: Too many calls, 12 in the last 30s'),
+      ...claudeCall('n2', 'Bash', 'PreToolUse:Bash hook error: Too many calls, 4071 in the last 9s'),
+    ];
+    const keys = deriveToolFailures(rows).days.map((d) => d.key);
+    expect(keys).toEqual(['Too many calls, # in the last #s']);
+  });
+
   it('matches every blocked-call text of the spec table with BLOCKED_PATTERNS', () => {
     const texts = [
       'PreToolUse:Bash hook error: RPG destructive-guard: nope',
@@ -393,12 +420,19 @@ describe('deriveToolFailures: samples and caps', () => {
     expect(result.truncated).toBe(false);
   });
 
-  it('cuts a sample text to 200 characters and sets truncated', () => {
+  it('cuts a sample text to 200 characters but does not set truncated (only the key cut does)', () => {
     const result = deriveToolFailures(sessionFail(1, `Exit code 1\n${'x'.repeat(500)}`));
     expect(result.samples).toHaveLength(1);
     expect(result.samples[0].text).toHaveLength(200);
     expect(result.samples[0].text.startsWith('Exit code 1\nxxx')).toBe(true);
-    expect(result.truncated).toBe(true);
+    expect(result.truncated).toBe(false);
+  });
+
+  it('does not set truncated when an unmatched ("other") sample text is cut', () => {
+    const result = deriveToolFailures(sessionFail(1, `Something odd happened ${'y'.repeat(500)}`));
+    expect(result.otherSamples).toHaveLength(1);
+    expect(result.otherSamples[0].text).toHaveLength(200);
+    expect(result.truncated).toBe(false);
   });
 
   it('returns at most 200 keys, most failures first, and sets truncated', () => {
