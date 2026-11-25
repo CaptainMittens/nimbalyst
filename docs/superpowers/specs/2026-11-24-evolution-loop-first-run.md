@@ -9,12 +9,22 @@ The checklist for the first manual run of the `evolution-pass` skill (spec unit 
 1. Quit the installed Nimbalyst, so nothing writes to its database during the copy.
 2. Move the old `electron-user2/sqlite-db` folder to `~/.claude/rpg/trash/<date>/`, if it exists.
 3. Copy `~/Library/Application Support/@nimbalyst/electron/sqlite-db` to `~/Library/Application Support/@nimbalyst/electron-user2/sqlite-db`.
-4. Start the dev app from the build worktree: `cd packages/electron && pnpm run dev:user2`.
-5. Open the Nimbalyst workspace folder (`/Volumes/josh_external/Projects/Nimbalyst`) in the dev app.
-6. In a new Claude Code session, type: "Run the evolution-pass skill."
-7. Watch the run to the end. Do not answer any dialog until you write it down below.
+4. Copy `nimbalyst-local/evolution/lessons.json` (if it exists) and the Claude Code `MEMORY.md` of this workspace to `~/.claude/rpg/trash/<date>/first-run-backup/`. The run writes both real files, but it files its tracker items only in the database copy (see "After the run").
+5. Optional: add one lesson to `lessons.json` with `activatedAt` 16 days ago, `habitKey` `Bash:exit-code`, status `live` and `verdict: null`, so the judging step runs too.
+6. Start the dev app from the build worktree: `cd packages/electron && pnpm run dev:user2`.
+7. Open the Nimbalyst workspace folder (`/Volumes/josh_external/Projects/Nimbalyst`) in the dev app.
+8. In a new Claude Code session, type: "Run the evolution-pass skill."
+9. Watch the run to the end. Do not answer any dialog until you write it down below.
 
 The run counts only the history up to the copy. Sessions after the copy stay in the installed app's database.
+
+## After the run
+
+Score the checks first. Then put the real files back, or the next real pass sees `filed` entries for tracker items that exist only in the copy, and never files them in the real tracker.
+
+1. Move the run's `lessons.json` and `MEMORY.md` to `~/.claude/rpg/trash/<date>/first-run-output/`.
+2. Copy the two files from `first-run-backup/` back to their places. If no `lessons.json` existed before, leave none.
+3. Quit the dev app, then start the installed Nimbalyst again.
 
 ## Checks
 
