@@ -21,6 +21,7 @@
  */
 
 import type { ParsedContextUsage } from '../../utils/contextUsage';
+import type { BlockingUsageLimit } from './usageLimit';
 
 /** Token counts as the SDK reports them (snake_case wire shape). */
 export interface TurnUsage {
@@ -28,6 +29,11 @@ export interface TurnUsage {
   output_tokens?: number;
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
+  /** Anthropic's per-lifetime breakdown of cache_creation_input_tokens. */
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number;
+    ephemeral_1h_input_tokens?: number;
+  } | null;
 }
 
 /** Per-model usage from the SDK's `result` chunk (camelCase, unlike `TurnUsage`). */
@@ -36,6 +42,9 @@ export interface TurnModelUsage {
   outputTokens?: number;
   cacheReadInputTokens?: number;
   cacheCreationInputTokens?: number;
+  /** SDK 0.3.311+; absent on older CLIs. Both are inside cacheCreationInputTokens. */
+  cacheCreationEphemeral5mInputTokens?: number;
+  cacheCreationEphemeral1hInputTokens?: number;
   costUSD?: number;
   contextWindow?: number;
   webSearchRequests?: number;
@@ -115,6 +124,8 @@ export interface TurnState {
    * end of the turn. NIM-1470.
    */
   sawTaskNotificationThisTurn: boolean;
+  /** A `rate_limit_event` blocked this turn; the terminal error carries its reset. */
+  blockingUsageLimit: BlockingUsageLimit | null;
 
   /** Latest usage seen; overwritten by the cumulative `result.usage`. */
   usageData: TurnUsage | undefined;
@@ -159,6 +170,7 @@ export function createTurnState(init: {
     completeEmitted: false,
     sawAssistantOutputThisTurn: false,
     sawTaskNotificationThisTurn: false,
+    blockingUsageLimit: null,
 
     usageData: undefined,
     lastAssistantUsage: undefined,

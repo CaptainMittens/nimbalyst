@@ -8,6 +8,10 @@ The SDK is versioned independently of the Nimbalyst app. Each release declares i
 
 | SDK version | Minimum Nimbalyst app version |
 | --- | --- |
+| 0.8.0 | 0.84.2 |
+| 0.7.2 | 0.79.0 |
+| 0.7.1 | 0.79.0 |
+| 0.7.0 | 0.79.0 |
 | 0.6.0 | 0.78.0 |
 | 0.5.0 | 0.70.0 |
 | 0.4.0 | 0.70.0 |
@@ -19,6 +23,61 @@ The SDK is versioned independently of the Nimbalyst app. Each release declares i
 | 0.1.0 | 0.58.5 |
 
 ## [Unreleased]
+
+## [0.8.0] - 2026-11-23
+
+Requires Nimbalyst 0.84.2. The project fields below take effect from the next app release after 0.84.3; on earlier apps `host.workspacePath` is undefined and an unnamed call still uses the on-screen project.
+
+### Added
+
+- `EditorHost.workspacePath`: the local project the editor's tab is open in. For a shared document `workspaceId` is a collaboration scope key, not a path.
+- `filesystem.findFiles(pattern, rootDir)` searches a given project, and `filesystem.listProjectPaths()` lists the projects this window runs background work for, each project in exactly one window.
+- `ctx.services.terminals.createCommandTerminal()` lets a backend module run a command in a terminal tab Nimbalyst owns and follow its output, read its log as plain text, stop its process group, and reveal the tab. Requires the new `terminals` permission.
+- Manifest field `requiresDeveloperMode` hides an extension's panels and keeps its backend modules stopped while Developer Mode is off.
+- Gutter badge tones `success` and `error`, in `host.setGutterBadge` and `ctx.services.panels.setGutterBadge`. Bottom-placement panels now show their gutter badge.
+
+### Changed
+
+- `services.ai.sendPrompt` requires `workspacePath`, the project the session runs in. The app refuses a call without one, or with a project the window does not have open.
+- `callBackendTool` must name its project. Inside an AI tool handler it defaults to the calling session's project; elsewhere pass `host.workspacePath`.
+- Inside an AI tool handler, relative paths in `services.filesystem` resolve against the calling session's project.
+
+## [0.7.2] - 2026-11-10
+
+Requires Nimbalyst 0.79.0. The new APIs are optional; hosts that lack them omit them.
+
+### Added
+
+- `EditorHost.registerDictationTarget()` and `DictationTarget` let a custom editor receive dictated text at its cursor while it has focus.
+- `CommentCapabilities.editBody` tells an editor whether the user may change the document body. Absent means true.
+
+### Changed
+
+- `useCollaborativeEditor` never seeds an empty shared document from a read-only host, such as a commenter's, and still binds the editor to it.
+
+## [0.7.1] - 2026-10-16
+
+Requires Nimbalyst 0.79.0.
+
+### Changed
+
+- The `filePatterns` documentation on `CustomEditorContribution` and `DocumentHeaderContribution` now lists the forms that match (`*.ext` suffixes, paths containing `/` for headers, and a `virtual://` prefix for fileless editor tabs); general globs such as `*.{csv,tsv}` never matched.
+
+## [0.7.0] - 2026-10-09
+
+Requires Nimbalyst 0.79.0.
+
+### Added
+
+- `BackendSessionsService` lets an extension backend create and own agent sessions and workstreams, send prompts, read status, results and usage, notify the user, and react when a session settles; it needs the new `ai-sessions` permission.
+- Backend extensions can define MCP tools (`BackendMcpToolDefinition`), and panels call them with `PanelHost.callBackendTool()`.
+- `PanelHost.setGutterBadge()` and `BackendPanelsService` show a count or warning badge on a panel's gutter icon.
+- `PanelHost.setPanes()` and `onPaneToggle()` give a panel resizable, hideable left and right panes like the built-in modes, and `PanelHostComponents` exposes the host's session transcript.
+- Agent usage events can report `cache_read_input_tokens` and `cache_creation_input_tokens` separately from uncached input.
+
+### Changed
+
+- The `yjs` peer dependency is pinned to 13.6.32, the version the app ships, so an extension cannot load a second copy.
 
 ## [0.6.0] - 2026-09-14
 

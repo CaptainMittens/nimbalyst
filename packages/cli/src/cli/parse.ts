@@ -31,9 +31,22 @@ const BOOLEAN_FLAGS = new Set([
   'confirm-destructive',
   'archive',
   'unarchive',
+  'create',
+  'root',
+  'local',
+  'team',
+  'open',
+  'no-open',
   'help',
   'h',
   'version',
+  'dry-run',
+  'check',
+  'versions',
+  'refresh-cache',
+  'keep-identity',
+  'init',
+  'confirm-removals',
 ]);
 
 /**

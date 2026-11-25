@@ -40,7 +40,6 @@ import type {
 } from './browserEditorCapabilities';
 import { resolveCollabEditorUser } from './presence';
 import { createCollabDocumentSession } from './session';
-import { deriveCollabEditorCommentsState } from './commenting';
 import {
   createExtensionCommentsService,
   type HostedExtensionComments,
@@ -156,6 +155,8 @@ export interface ExtensionEditorHandle {
   getEditorAPI(): unknown | null;
   getMenuItems(): readonly EditorMenuItem[];
   setPresenceActive(active: boolean): void;
+  /** Relabel this participant once the host resolves a name; see `CollabEditorHandle.setUser`. */
+  setUser(user: CollabEditorUser): void;
   setTheme(theme: string): void;
   setVisible(visible: boolean): void;
   setReadOnly(readOnly: boolean): void;
@@ -253,6 +254,7 @@ export function mountExtensionEditor(
   };
 
   const hostCanComment = (): boolean => options.comments?.canComment?.() ?? true;
+  const hostCanEditBody = (): boolean => options.comments?.canEditBody?.() ?? true;
 
   const session = createCollabDocumentSession({
     source: options.source,
@@ -260,6 +262,7 @@ export function mountExtensionEditor(
     readOnly: options.readOnly,
     lifecycleElement: options.element,
     hostCanComment,
+    hostCanEditBody,
     onStateChange: options.onStateChange,
     onPresenceChange: (presence) => options.onPresenceChange?.(presence),
     onWriteRejected: options.onWriteRejected,
@@ -312,12 +315,8 @@ export function mountExtensionEditor(
         // Two tabs on one document must not share anchor registrations.
         instanceId: `${commentsOptions.documentUri}#${crypto.randomUUID()}`,
         getMembers: () => commentsOptions.getMembers(),
-        getCapabilities: () => deriveCollabEditorCommentsState({
-          connection: session.getState().connection,
-          serverAccess: session.getState().serverAccess,
-          hasConnectedOnce: session.hasConnectedOnce(),
-          hostCanComment: hostCanComment(),
-        }).capabilities,
+        // Includes `editBody`, false for a commenter.
+        getCapabilities: () => session.commentCapabilities(),
         isHydrated: () => session.hasConnectedOnce(),
         onMention: commentsOptions.onMention,
         onReply: commentsOptions.onReply,
@@ -413,6 +412,7 @@ export function mountExtensionEditor(
     getEditorAPI: () => browserHost.getEditorAPI(),
     getMenuItems: () => browserHost.getMenuItems(),
     setPresenceActive: (active) => { session.presence.setActive(active); },
+    setUser: (user) => { session.presence.setDisplayName(resolveCollabEditorUser(user).displayName); },
     setTheme: (nextTheme) => {
       if (destroyed || theme === nextTheme) return;
       theme = nextTheme;
@@ -430,7 +430,10 @@ export function mountExtensionEditor(
     flushContent: () => flushBrowserCollaborativeContent(collaboration),
     flush: (flushOptions) => session.flush(flushOptions),
     markClean: () => session.markClean(),
-    refreshCommentAccess: () => hostedComments?.notifyCapabilitiesChanged(),
+    refreshCommentAccess: () => {
+      session.refreshHostAccess();
+      hostedComments?.notifyCapabilitiesChanged();
+    },
     isSourceModeActive: () => sourceModeActive,
     setSourceMode: (active) => setSourceMode(active),
     destroy() {

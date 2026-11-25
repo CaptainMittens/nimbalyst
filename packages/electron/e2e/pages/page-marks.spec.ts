@@ -6,8 +6,9 @@
  *    floating toolbar, fill who / not chosen in the small editor, and save:
  *    the chip and the faint line draw, and the file holds
  *    `[sentence]{decided by="..." on=... over="..."}` with the rest unchanged.
- * 2. A Personal page whose body holds an open mark is listed by
- *    `page-marks:list`, and its tab draws the mark.
+ * 2. A Local wiki page (a markdown file in the wiki folder) whose body holds
+ *    an open mark is listed by `page-marks:list` under its `personal://` uri,
+ *    and its file tab draws the mark.
  *
  * Runs signed out on a temp workspace; no account or server needed.
  *
@@ -75,7 +76,7 @@ test('marking a sentence decided draws the chip and the faint line and saves the
     .toMatch(new RegExp(`^# Flags\\n\\n\\[${SENTENCE.replace('.', '\\.')}\\]\\{decided by="Greg" on=\\d{4}-\\d{2}-\\d{2} over="our own engine"\\} Exposure is logged by us\\.\\n\\nLast line\\.`));
 });
 
-test('a Personal page with an open question is listed by the marks query', async () => {
+test('a Local page with an open question is listed by the marks query', async () => {
   await page.getByTestId('collab-mode-button').click();
   await expect(page.getByTestId('collab-sidebar-section-personal')).toBeVisible({ timeout: 15_000 });
 
@@ -88,16 +89,18 @@ test('a Personal page with an open question is listed by the marks query', async
   await dialog.locator('.collab-create-confirm').click();
   await expect(dialog).toHaveCount(0);
 
-  const tab = page.locator('[data-testid="personal-page-tab"]:visible');
+  // The page is a file in the wiki folder; its id is in the frontmatter.
+  // The workspace path the app was launched with (not its realpath): tabs key on it.
+  const pageFile = path.join(workspace, 'nimbalyst-local', 'wiki', 'Flag notes.md');
+  await expect.poll(() => fs.readFile(pageFile, 'utf8').catch(() => ''), { timeout: 10_000 }).toMatch(/^---\nid: \S+/);
+  const frontmatter = (await fs.readFile(pageFile, 'utf8')).match(/^---\n[\s\S]*?\n---\n/)![0];
+  const documentId = frontmatter.match(/^id: (\S+)$/m)![1];
+  const tab = page.locator(`[data-file-path="${pageFile}"]`);
+  if (!(await tab.isVisible())) await page.locator('[data-testid="collab-sidebar-personal"]:visible').locator('.file-tree-name', { hasText: /^Flag notes(\.md)?$/ }).click();
   await expect(tab).toBeVisible({ timeout: 10_000 });
-  const documentId = (await tab.getAttribute('data-document-id')) ?? '';
-  expect(documentId).not.toBe('');
 
-  // Write the body through the store, as an agent edit would.
-  await page.evaluate(
-    ([ws, id, body]) => window.electronAPI.invoke('personal-pages:update-body', ws, id, body),
-    [workspace, documentId, OPEN_BODY] as const,
-  );
+  // Write the body to the file, as an agent edit would.
+  await fs.writeFile(pageFile, `${frontmatter}${OPEN_BODY}`, 'utf8');
 
   await expect
     .poll(async () => {

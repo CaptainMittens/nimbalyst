@@ -3,7 +3,12 @@ import { sessionMetadataMergeSql } from './sessionMetadataMerge';
 import type { SessionStore, CreateSessionPayload } from '@nimbalyst/runtime/ai/adapters/sessionStore';
 import { parseJsonObjectColumn } from '../utils/jsonColumn';
 
-export const MAX_SESSION_DEPTH = 8;
+// A runaway-recursion bound, not a product limit: agents that hand off to a
+// successor build one level per handoff, and a cap of 8 broke those chains.
+export const MAX_SESSION_DEPTH = 256;
+export class SessionDepthLimitError extends Error {
+  constructor(message: string) { super(message); this.name = 'SessionDepthLimitError'; }
+}
 export type HierarchyStatement = { sql: string; params?: any[]; expectedRows?: number };
 export type HierarchyDatabase = {
   query<T = any>(sql: string, params?: any[]): Promise<{ rows: T[] }>;
@@ -29,15 +34,37 @@ export function withHierarchyWrite<T>(write: () => Promise<T>): Promise<T> {
   return result;
 }
 
-export async function readHierarchy(db: HierarchyDatabase, workspaceId: string): Promise<HierarchyRow[]> {
+/**
+ * The metadata keys hierarchy writes read: the pending intent, and the original
+ * spawner. The spawner key is emitted only when the row has it, because an
+ * explicit null and an absent key mean different things to
+ * `managerReassignmentMetadata`. `->` yields JSON null, not SQL NULL, for an
+ * explicit null on both backends. Selecting the whole column parsed every
+ * session's task history on each remote snapshot.
+ */
+export const HIERARCHY_METADATA_SQL = `CASE WHEN metadata->'originalSpawnerSessionId' IS NOT NULL
+  THEN jsonb_build_object('hierarchySyncIntent', metadata->'hierarchySyncIntent', 'originalSpawnerSessionId', metadata->'originalSpawnerSessionId')
+  ELSE jsonb_build_object('hierarchySyncIntent', metadata->'hierarchySyncIntent') END AS metadata`;
+
+/** The workspace graph. Placement checks need no metadata; only the one-time tree migration asks for it. */
+export async function readHierarchy(db: HierarchyDatabase, workspaceId: string, options?: { withMetadata?: boolean }): Promise<HierarchyRow[]> {
   return (await db.query<HierarchyRow>(
-    `SELECT id, workspace_id, parent_session_id, worktree_id, created_by_session_id, session_type, title, metadata
+    `SELECT id, workspace_id, parent_session_id, worktree_id, created_by_session_id, session_type, title${options?.withMetadata ? ', metadata' : ''}
      FROM ai_sessions WHERE workspace_id = $1
        OR parent_session_id IN (SELECT id FROM ai_sessions WHERE workspace_id = $1)`, [workspaceId],
   )).rows;
 }
 
-export async function assertSessionCreation(db: HierarchyDatabase, payload: CreateSessionPayload, existing?: { workspace_id?: string }): Promise<void> {
+/**
+ * A workstream container only groups peers. It never runs, so it can never
+ * receive completion reports; any caller naming one as manager gets none.
+ */
+function containerFreeManager(rows: HierarchyRow[], managerId: string | null): string | null {
+  return managerId && rows.some(row => row.id === managerId && row.session_type === 'workstream') ? null : managerId;
+}
+
+/** Validates placement and returns the manager to store (never a workstream container). */
+export async function assertSessionCreation(db: HierarchyDatabase, payload: CreateSessionPayload, existing?: { workspace_id?: string }): Promise<string | null> {
   if (existing?.workspace_id && existing.workspace_id !== payload.workspaceId) throw new Error('Cannot recreate a session in a different workspace');
   const node: HierarchyRow = { id: payload.id, workspace_id: payload.workspaceId,
     worktree_id: payload.worktreeId ?? null, parent_session_id: payload.parentSessionId ?? null,
@@ -45,6 +72,7 @@ export async function assertSessionCreation(db: HierarchyDatabase, payload: Crea
   const hierarchy = node.parent_session_id || node.created_by_session_id || existing ? await readHierarchy(db, payload.workspaceId) : [];
   assertHierarchyPlacement(hierarchy, node, node.parent_session_id);
   if (node.created_by_session_id && (node.created_by_session_id === node.id || !hierarchy.some(row => row.id === node.created_by_session_id && row.workspace_id === node.workspace_id))) throw new Error('Invalid session manager in this workspace');
+  return containerFreeManager(hierarchy, node.created_by_session_id ?? null);
 }
 
 /** Validate the proposed edge against the entire moved subtree, not just its root. */
@@ -65,7 +93,7 @@ export function assertHierarchyPlacement(rows: HierarchyRow[], node: HierarchyRo
     if (!ancestor || ancestor.workspace_id !== node.workspace_id) throw new Error('Parent session is not in this workspace');
     if (ancestor.session_type !== 'blitz' && (ancestor.worktree_id ?? null) !== (node.worktree_id ?? null)) throw new Error('Parent session is in a different worktree');
     targetDepth++;
-    if (targetDepth > MAX_SESSION_DEPTH) throw new Error('Session hierarchy depth exceeds 8');
+    if (targetDepth > MAX_SESSION_DEPTH) throw new SessionDepthLimitError(`Session hierarchy depth exceeds ${MAX_SESSION_DEPTH}`);
     ancestorId = ancestor.parent_session_id;
   }
   const children = new Map<string, string[]>();
@@ -81,12 +109,30 @@ export function assertHierarchyPlacement(rows: HierarchyRow[], node: HierarchyRo
     const [id, depth] = pending.pop()!;
     if (seen.has(id)) throw new Error('Session hierarchy cycle');
     seen.add(id);
-    if (depth > MAX_SESSION_DEPTH) throw new Error('Session subtree depth exceeds 8');
+    if (depth > MAX_SESSION_DEPTH) throw new SessionDepthLimitError(`Session subtree depth exceeds ${MAX_SESSION_DEPTH}`);
     const row = byId.get(id)!;
     if (row.workspace_id !== node.workspace_id) throw new Error('Session subtree spans different workspaces');
     const parent = row.parent_session_id ? byId.get(row.parent_session_id) : null;
     if (parent && parent.session_type !== 'blitz' && (row.worktree_id ?? null) !== (parent.worktree_id ?? null)) throw new Error('Session subtree spans different worktrees');
     for (const child of children.get(id) ?? []) pending.push([child, depth + 1]);
+  }
+}
+
+/**
+ * A spawn must not fail on tree shape: when nesting under the spawner would
+ * pass the depth bound, the new session goes beside the spawner instead.
+ * Returns the parent the row was actually created under.
+ */
+export async function createUnderParentOrBeside(create: (parentId: string | null) => Promise<void>,
+  parentId: string | null, besideParentId: string | null): Promise<string | null> {
+  try {
+    await create(parentId);
+    return parentId;
+  } catch (error) {
+    if (!(error instanceof SessionDepthLimitError) || parentId === besideParentId) throw error;
+    console.warn(`[SessionHierarchy] ${error.message}; placing the new session beside ${parentId} instead`);
+    await create(besideParentId);
+    return besideParentId;
   }
 }
 
@@ -144,11 +190,12 @@ export async function findSessionTreeRoot(db: HierarchyDatabase, sessionId: stri
     WHERE p.workspace_id = $2 AND a.depth < ${MAX_SESSION_DEPTH}
   ) SELECT id, parent_session_id FROM ancestors ORDER BY depth DESC LIMIT 1`, [sessionId, workspaceId]);
   if (!rows.length) throw new Error('Session not found in this workspace');
-  if (rows[0].parent_session_id) throw new Error('Invalid session tree: cycle or depth exceeds 8');
+  if (rows[0].parent_session_id) throw new Error(`Invalid session tree: cycle or depth exceeds ${MAX_SESSION_DEPTH}`);
   return rows[0].id;
 }
 
-export interface HierarchyMove { source?: 'remote'; sessionId: string; workspaceId: string; title: string; previousParentId: string | null; previousManagerId: string | null; parentId: string | null; managerId: string | null }
+/** `source` is unset for a local user move. 'remote' (snapshot apply) and 'system' (delete-lift) are not user moves. No move notifies a session (#1858). */
+export interface HierarchyMove { source?: 'remote' | 'system'; sessionId: string; workspaceId: string; title: string; previousParentId: string | null; previousManagerId: string | null; parentId: string | null; managerId: string | null }
 const moveListeners = new Set<(move: HierarchyMove) => Promise<void>>();
 const archiveListeners = new Set<(sessionIds: string[], archived: boolean) => Promise<void>>();
 export function onSubtreeArchive(listener: (sessionIds: string[], archived: boolean) => Promise<void>): () => void {
@@ -170,6 +217,24 @@ export async function publishHierarchyMove(move: HierarchyMove): Promise<void> {
   }
 }
 
+/**
+ * Tree placement is organizational and never assigns a manager (#1858): a
+ * manager receives the session's completion reports and is woken by them, so
+ * only a spawn may create that relationship. A moved session keeps its manager
+ * while the manager is still an ancestor at the new position, and loses it
+ * once moved out from under it.
+ */
+export function managerAfterMove(rows: Array<Pick<HierarchyRow, 'id' | 'parent_session_id'>>, managerId: string | null, parentId: string | null): string | null {
+  if (!managerId) return null;
+  const parents = new Map(rows.map(row => [row.id, row.parent_session_id ?? null]));
+  const seen = new Set<string>();
+  for (let id = parentId; id && !seen.has(id); id = parents.get(id) ?? null) {
+    if (id === managerId) return managerId;
+    seen.add(id);
+  }
+  return null;
+}
+
 export function managerReassignmentMetadata(node: HierarchyRow, managerId: string | null): Record<string, unknown> {
   const metadata = parseJsonObjectColumn(node.metadata);
   return { originalSpawnerSessionId: Object.prototype.hasOwnProperty.call(metadata, 'originalSpawnerSessionId') ? metadata.originalSpawnerSessionId : node.created_by_session_id ?? null,
@@ -188,7 +253,7 @@ export function wrapSessionHierarchyWrites(store: SessionStore, db: HierarchyDat
       if (!changesHierarchy) return patch.isArchived !== undefined ? withHierarchyWrite(() => store.updateMetadata(sessionId, patch)) : store.updateMetadata(sessionId, patch);
       return withHierarchyWrite(async () => {
         await ensureReady();
-        const { rows } = await db.query<HierarchyRow>('SELECT id, workspace_id, parent_session_id, worktree_id, created_by_session_id, session_type, title, metadata FROM ai_sessions WHERE id = $1', [sessionId]);
+        const { rows } = await db.query<HierarchyRow>(`SELECT id, workspace_id, parent_session_id, worktree_id, created_by_session_id, session_type, title, ${HIERARCHY_METADATA_SQL} FROM ai_sessions WHERE id = $1`, [sessionId]);
         const current = rows[0];
         if (!current) throw new Error('Session not found');
         if (patch.expectedParentSessionId !== undefined && patch.expectedParentSessionId !== (current.parent_session_id ?? null)) throw new Error('Session parent changed; refresh before moving it');
@@ -200,7 +265,8 @@ export function wrapSessionHierarchyWrites(store: SessionStore, db: HierarchyDat
         const hierarchy = await readHierarchy(db, current.workspace_id);
         assertHierarchyPlacement(hierarchy, proposed, parentId);
         const moved = patch.parentSessionId !== undefined && (current.parent_session_id ?? null) !== parentId;
-        const managerId = patch.createdBySessionId !== undefined ? patch.createdBySessionId : moved ? parentId : current.created_by_session_id ?? null;
+        const currentManagerId = current.created_by_session_id ?? null;
+        const managerId = containerFreeManager(hierarchy, patch.createdBySessionId !== undefined ? patch.createdBySessionId : moved ? managerAfterMove(hierarchy, currentManagerId, parentId) : currentManagerId);
         if (managerId && (managerId === sessionId || !hierarchy.some(row => row.id === managerId && row.workspace_id === current.workspace_id))) throw new Error('Invalid session manager in this workspace');
         const managerChanged = (current.created_by_session_id ?? null) !== managerId;
         const authoritativePatch = moved || managerChanged ? { ...patch, createdBySessionId: managerId,
@@ -222,7 +288,7 @@ export async function deleteSessionAndLiftChildren(db: HierarchyDatabase, sessio
   if (!db.runTransaction) throw new Error('Session deletion requires transactional storage');
   const { rows: deletedRows } = await db.query<HierarchyRow>('SELECT id, workspace_id, parent_session_id FROM ai_sessions WHERE id = $1', [sessionId]);
   const deleted = deletedRows[0];
-  const { rows: children } = await db.query<HierarchyRow>('SELECT id, workspace_id, title, parent_session_id, created_by_session_id, metadata FROM ai_sessions WHERE parent_session_id = $1 OR created_by_session_id = $1', [sessionId]);
+  const { rows: children } = await db.query<HierarchyRow>(`SELECT id, workspace_id, title, parent_session_id, created_by_session_id, ${HIERARCHY_METADATA_SQL} FROM ai_sessions WHERE parent_session_id = $1 OR created_by_session_id = $1`, [sessionId]);
   const changes = children.map(child => ({ child,
     parentId: child.parent_session_id === sessionId ? deleted?.parent_session_id ?? null : child.parent_session_id ?? null,
     managerId: child.created_by_session_id === sessionId
@@ -241,5 +307,5 @@ export async function deleteSessionAndLiftChildren(db: HierarchyDatabase, sessio
     { sql: 'DELETE FROM ai_sessions WHERE id=$1', params: [sessionId] },
   ]);
   if (deleted) for (const { child, parentId, managerId } of changes) await publishHierarchyMove({ sessionId: child.id, workspaceId: child.workspace_id, title: child.title || 'Untitled Session',
-    previousParentId: child.parent_session_id ?? null, previousManagerId: child.created_by_session_id ?? null, parentId, managerId });
+    previousParentId: child.parent_session_id ?? null, previousManagerId: child.created_by_session_id ?? null, parentId, managerId, source: 'system' });
 }

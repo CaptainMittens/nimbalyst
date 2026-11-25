@@ -2,19 +2,30 @@
  * Electron wiring for `consoleLinkRouter`: the one router instance, the
  * window's answer channel, and the deep-link entry.
  */
-import { shell, type BrowserWindow, type WebContents } from 'electron';
+import type { BrowserWindow, WebContents } from 'electron';
 
 import { safeOn } from '../../utils/ipcRegistry';
+import { openExternalInBackground } from '../../utils/systemShell';
 import {
   CONSOLE_LINK_RESULT_CHANNEL,
   createConsoleLinkRouter,
   type ConsoleLinkResult,
 } from './consoleLinkRouter';
 
+type FeedbackRequestOpener = (target: { orgId: string; requestId: string }) => Promise<boolean>;
+
+/** Set by the deep-link routing; until then a feedback link goes to the browser. */
+let feedbackRequestOpener: FeedbackRequestOpener | null = null;
+
+export function setConsoleFeedbackRequestOpener(opener: FeedbackRequestOpener): void {
+  feedbackRequestOpener = opener;
+}
+
 const router = createConsoleLinkRouter({
   openExternal: (url) => {
-    void shell.openExternal(url);
+    openExternalInBackground(url);
   },
+  openFeedbackRequest: (target) => (feedbackRequestOpener ? feedbackRequestOpener(target) : Promise.resolve(false)),
 });
 
 export function registerConsoleLinkHandlers(): void {

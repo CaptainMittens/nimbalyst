@@ -1,6 +1,7 @@
 import React from 'react';
 import './collabSidebarTree.css';
 import { type SharedDocument, type CollabTypeTreeResolver } from '../docs/index';
+import { type CollabSectionMenuItem } from './CollabSectionRoot';
 import { type CollabPageActionRequest } from './usePageActionRequest';
 export interface CollabSidebarProps {
     activeDocumentId?: string | null;
@@ -13,6 +14,8 @@ export interface CollabSidebarProps {
     scopeName?: React.ReactNode;
     scopePath?: React.ReactNode;
     headerActions?: React.ReactNode;
+    /** Host entries appended to the section's right-click menu. */
+    extraSectionMenuItems?: readonly CollabSectionMenuItem[];
     /**
      * Hosts where a folder is an addressable surface (the browser console routes
      * `/docs/folder/:folderId`). Desktop leaves this unset, so a folder click
@@ -33,7 +36,7 @@ export interface CollabSidebarProps {
     typeResolver?: CollabTypeTreeResolver;
     /**
      * Archive a typed page (the tracker's own archive, which keeps its comments
-     * and sessions). Typed pages never go to Pages Trash; hosts without tracker
+     * and sessions). Typed pages never go to Wiki Trash; hosts without tracker
      * writes omit it and the row offers no Archive.
      */
     onArchiveItem?: (itemId: string) => Promise<void>;

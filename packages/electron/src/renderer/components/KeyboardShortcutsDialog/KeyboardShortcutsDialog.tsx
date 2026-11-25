@@ -9,6 +9,7 @@ import {
 import { getExtensionLoader } from '@nimbalyst/runtime';
 import { CANVAS_SHORTCUT_TABLE } from '@nimbalyst/runtime/canvas/canvasKeymap';
 import { developerModeAtom } from '../../store/atoms/appSettings';
+import { dictationEnabledAtom } from '../../store/atoms/dictation';
 
 interface KeyboardShortcutsDialogProps {
   isOpen: boolean;
@@ -105,6 +106,7 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
   const [activeTab, setActiveTab] = useState<TabId>('general');
   const [extensionGroups, setExtensionGroups] = useState<ShortcutGroup[]>([]);
   const developerMode = useAtomValue(developerModeAtom);
+  const dictationEnabled = useAtomValue(dictationEnabledAtom);
 
   // Handle Escape key to close dialog
   useEffect(() => {
@@ -167,8 +169,13 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
         { label: 'Approve Current Action', shortcut: KeyboardShortcuts.edit.approve }, // shared/KeyboardShortcuts.ts:35 - Cmd+Enter
         { label: 'Reject Current Action', shortcut: KeyboardShortcuts.edit.reject }, // shared/KeyboardShortcuts.ts:36 - Cmd+Shift+Backspace
         { label: 'Toggle Plan Mode (Claude Code)', shortcut: 'Shift+Tab' }, // AIInput.tsx - toggle between Plan/Agent mode
+        { label: 'Fill in suggested next prompt (empty input)', shortcut: 'Tab' }, // AIInput.tsx - promptSuggestionKeys.ts
         { label: 'Choose AI Model (AI input focused)', shortcut: 'Cmd+Shift+M' }, // AIInput.tsx
         { label: 'Next / Previous AI menu (model, effort, actions)', shortcut: 'Tab / Shift+Tab' }, // AIInputControls.tsx
+        // Hidden when Dictation is off in Settings: no hints for a disabled feature.
+        ...(dictationEnabled
+          ? [{ label: 'Dictate: hold to talk, tap to toggle (Esc discards)', shortcut: KeyboardShortcuts.dictation.holdToTalk }] // dictation/dictationShortcut.ts
+          : []),
       ],
     },
     {
@@ -182,7 +189,7 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
         { label: 'Toggle Terminal Panel', shortcut: KeyboardShortcuts.view.toggleTerminalPanel }, // shared/KeyboardShortcuts.ts:48 - Ctrl+`
         { label: 'Toggle Claude CLI Terminal Drawer', shortcut: KeyboardShortcuts.view.toggleCliTerminalDrawer }, // Ctrl+Shift+` — active claude-code-cli session only
         { label: 'Tracker Mode', shortcut: KeyboardShortcuts.view.trackerMode }, // shared/KeyboardShortcuts.ts:49 - Cmd+T
-        { label: 'Pages', shortcut: KeyboardShortcuts.view.collabMode }, // shared/KeyboardShortcuts.ts:50 - Cmd+D
+        { label: 'Wiki', shortcut: KeyboardShortcuts.view.collabMode }, // shared/KeyboardShortcuts.ts:50 - Cmd+D
         { label: 'Organization', shortcut: KeyboardShortcuts.view.orgMode }, // Cmd+Alt+M — only when the project belongs to an organization
         { label: 'Toggle Sidebar', shortcut: KeyboardShortcuts.view.toggleSidebar }, // shared/KeyboardShortcuts.ts:51 - Cmd+B
         { label: 'Toggle Expanded Tab', shortcut: KeyboardShortcuts.view.toggleExpandedTab }, // Shift+Escape — same as double-clicking a tab
@@ -199,6 +206,7 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
     {
       title: 'Window',
       shortcuts: [
+        { label: 'Project menu (focused rail icon)', shortcut: 'Shift+F10' },
         { label: 'Project Manager', shortcut: KeyboardShortcuts.window.workspaceManager }, // shared/KeyboardShortcuts.ts:75 - Cmd+P
         { label: 'Switch Project', shortcut: KeyboardShortcuts.window.projectQuickOpen }, // shared/KeyboardShortcuts.ts - Cmd+Shift+P
         { label: 'Session Quick Open', shortcut: KeyboardShortcuts.window.sessionQuickOpen }, // shared/KeyboardShortcuts.ts:77 - Cmd+L
@@ -228,7 +236,7 @@ export function KeyboardShortcutsDialog({ isOpen, onClose }: KeyboardShortcutsDi
     },
     {
       // Pages navigates like a wiki: a click shows the page in the current tab.
-      title: 'Pages',
+      title: 'Wiki',
       shortcuts: [
         { label: 'Back in the current tab', shortcut: KeyboardShortcuts.view.navigateBack }, // App.tsx -> pagesTabNavigation.ts - Cmd+[
         { label: 'Forward in the current tab', shortcut: KeyboardShortcuts.view.navigateForward }, // App.tsx -> pagesTabNavigation.ts - Cmd+]

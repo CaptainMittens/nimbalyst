@@ -59,6 +59,24 @@ export interface HistoryTag {
  */
 const PENDING_REVIEW_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
+/**
+ * File types that are never snapshotted. gzip cannot shrink them, so a few
+ * images edited by an agent cost tens of megabytes of history, and nothing
+ * reads a binary snapshot back as a document.
+ */
+const NON_TEXT_SNAPSHOT_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.tif', '.tiff', '.heic', '.avif',
+  '.pdf', '.zip', '.gz', '.tgz', '.7z', '.rar', '.dmg', '.iso',
+  '.mp3', '.mp4', '.mov', '.wav', '.m4a', '.webm', '.ogg',
+  '.woff', '.woff2', '.ttf', '.otf', '.eot',
+  '.exe', '.dll', '.so', '.dylib', '.wasm', '.bin', '.class', '.jar',
+  '.sqlite', '.db', '.psd',
+]);
+
+export function isNonTextSnapshotPath(filePath: string): boolean {
+  return NON_TEXT_SNAPSHOT_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+}
+
 export class HistoryManager {
   private maxSnapshots = 250;
   private maxAgeDays = 30;
@@ -194,13 +212,15 @@ export class HistoryManager {
     }
   }
 
+  /**
+   * Retention (`cleanup`) is not run here: this is awaited during startup, and
+   * the history handlers schedule it daily after first-usable instead.
+   */
   async initialize(): Promise<void> {
     // Ensure database is initialized
     if (!database.isInitialized()) {
       await database.initialize();
     }
-
-    await this.cleanup();
   }
 
 
@@ -211,6 +231,11 @@ export class HistoryManager {
     description?: string,
     extraMetadata?: Record<string, unknown>
   ): Promise<void> {
+    if (isNonTextSnapshotPath(filePath)) {
+      logger.main.debug('[HistoryManager] Skipping snapshot of non-text file:', filePath);
+      return;
+    }
+
     // Calculate markdown hash first
     const baseMarkdownHash = crypto
       .createHash('sha256')
@@ -256,6 +281,9 @@ export class HistoryManager {
     baseMarkdownHash: string,
     extraMetadata?: Record<string, unknown>
   ): Promise<void> {
+    // Snapshots are loaded by (file_path, timestamp), so two in the same
+    // millisecond would be indistinguishable; a new one always goes after the latest.
+    let timestamp = Date.now();
     // Check for duplicate: if the most recent snapshot has the same content hash, skip
     try {
       // Ensure database is initialized
@@ -264,8 +292,8 @@ export class HistoryManager {
       }
 
       // Get the most recent snapshot for this file
-      const recentResult = await database.query<{ metadata: any }>(`
-        SELECT metadata
+      const recentResult = await database.query<{ metadata: any; timestamp: number | string }>(`
+        SELECT metadata, timestamp
         FROM document_history
         WHERE file_path = $1
         ORDER BY timestamp DESC
@@ -279,6 +307,8 @@ export class HistoryManager {
           return; // Skip creating duplicate
         }
       }
+      const latest = Number(recentResult.rows[0]?.timestamp);
+      if (Number.isFinite(latest) && latest >= timestamp) timestamp = latest + 1;
     } catch (error) {
       // If deduplication check fails, continue with snapshot creation
       logger.main.warn('[HistoryManager] Deduplication check failed, creating snapshot anyway:', error);
@@ -316,7 +346,7 @@ export class HistoryManager {
         filePath,
         compressed, // Store compressed content directly in database
         compressed.length,
-        Date.now(),
+        timestamp,
         1,
         { type, description, baseMarkdownHash, ...extraMetadata }
       ]);

@@ -58,6 +58,15 @@ export function parseTrackerYAML(yamlString: string): TrackerDataModel {
   if (!data.type) throw new Error('Missing required field: type');
   if (!data.displayName) throw new Error('Missing required field: displayName');
   if (!data.displayNamePlural) throw new Error('Missing required field: displayNamePlural');
+  // A wiki type (one that declares `storage:`) follows local-wiki FORMAT.md,
+  // which does not require the app-only keys. Rejecting it here hid the type's
+  // tables and typed pages from the Local wiki with only a log line (NIM-7437).
+  if (data.storage === 'pages' || data.storage === 'table') {
+    data.icon ??= 'description';
+    data.color ??= '#64748b';
+    data.modes ??= { inline: true, fullDocument: false };
+    data.idPrefix ??= String(data.type).slice(0, 3);
+  }
   if (!data.icon) throw new Error('Missing required field: icon');
   if (!data.color) throw new Error('Missing required field: color');
   if (!data.modes) throw new Error('Missing required field: modes');
@@ -194,6 +203,7 @@ function applyOptionalModelProperties<T extends { type: string }>(target: T, dat
   // `creatable: false`); without them the parsed model silently diverges.
   if (data.creatable !== undefined) model.creatable = data.creatable;
   if (typeof data.hiddenUntilType === 'string') model.hiddenUntilType = data.hiddenUntilType;
+  if (data.listed === false) model.listed = false;
   if (data.primaryCapable !== undefined) model.primaryCapable = data.primaryCapable;
   if (data.supportsTags !== undefined) model.supportsTags = data.supportsTags;
 
@@ -245,6 +255,10 @@ function applyOptionalModelProperties<T extends { type: string }>(target: T, dat
   // Only written when true: an unarchived tracker is the overwhelming majority
   // and `archived: false` on every file would be noise.
   if (data.archived === true) model.archived = true;
+  // Local numbers are on by default, so only an opt-out is kept and written.
+  if (data.localNumbers === false) model.localNumbers = false;
+  // A wiki type's storage; absent means the type is not in the wiki.
+  if (data.storage === 'pages' || data.storage === 'table') model.storage = data.storage;
 
   return target;
 }

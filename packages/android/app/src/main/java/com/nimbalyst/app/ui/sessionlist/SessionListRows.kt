@@ -19,7 +19,6 @@ import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.Hub
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.SmsFailed
@@ -40,6 +39,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.nimbalyst.app.R
 import com.nimbalyst.app.data.SessionEntity
+import com.nimbalyst.app.data.transcriptSyncDisabled
 import com.nimbalyst.app.ui.components.ContextUsageBadge
 import com.nimbalyst.app.ui.components.PhaseBadge
 import com.nimbalyst.app.ui.components.ProviderBadge
@@ -124,6 +124,13 @@ internal fun SessionRow(
                 ProviderBadge(provider = session.provider, model = session.model)
                 session.phase?.takeIf { it.isNotBlank() }?.let { PhaseBadge(phase = it) }
                 session.contextUsagePercent?.let { ContextUsageBadge(percent = it) }
+                if (session.transcriptSyncDisabled) {
+                    Text(
+                        text = stringResource(R.string.session_list_not_synced),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(modifier = Modifier.weight(1f))
                 Text(
                     text = RelativeTimestamp.format(session.updatedAt),
@@ -149,12 +156,10 @@ internal fun GroupHeader(
 ) {
     val (icon, tint) = when (group.kind) {
         GroupKind.WORKTREE -> Icons.AutoMirrored.Filled.CallSplit to WaitingColor
-        GroupKind.META_AGENT -> Icons.Default.Hub to NimbalystColors.primary
         else -> Icons.Default.Folder to NimbalystColors.primary
     }
     val fallbackTitle = when (group.kind) {
         GroupKind.WORKTREE -> stringResource(R.string.session_list_worktree)
-        GroupKind.META_AGENT -> stringResource(R.string.session_list_meta_agent)
         else -> stringResource(R.string.session_list_workstream)
     }
     Row(
@@ -168,24 +173,31 @@ internal fun GroupHeader(
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(GroupIconSize))
-        Text(
-            text = group.parent.titleDecrypted ?: fallbackTitle,
-            style = MaterialTheme.typography.bodyLarge,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f, fill = false)
-        )
-        Text(
-            text = group.children.size.toString(),
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
-        )
-        Spacer(modifier = Modifier.weight(1f))
+        // Title and count share one weighted slot. A sibling weighted Spacer would take
+        // half the free width and truncate the title early.
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = group.parent.titleDecrypted ?: fallbackTitle,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            Text(
+                text = group.children.size.toString(),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+        }
         AggregatedStatusIndicator(group.status)
         if (group.children.isNotEmpty()) {
             Spacer(modifier = Modifier.width(2.dp))

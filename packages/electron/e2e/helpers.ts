@@ -178,6 +178,10 @@ export function buildTestEnv(
     // `options.env` so a spec can still pick its own directory.
     NIMBALYST_USER_DATA_DIR: TEST_USER_DATA_DIR,
     ...options?.env,
+    // After `options.env` and never deleted below: every launch wipes
+    // userData, so any event sent from a test registers as a new install.
+    // `PLAYWRIGHT` alone is not enough because session-restore specs drop it.
+    NIMBALYST_DISABLE_ANALYTICS: '1',
   };
 
   const permissionMode = options?.permissionMode ?? 'allow-all';
@@ -264,7 +268,8 @@ export async function launchElectronApp(options?: {
   /** Video recording config. Defaults to e2e_test_output/videos. Pass false to disable. */
   recordVideo?: { dir: string } | false;
 }): Promise<ElectronApplication> {
-  const electronMain = options?.mainPath ?? path.resolve(__dirname, '../out/main/index.js');
+  // NIMBALYST_E2E_MAIN_PATH runs a spec against a main bundle built elsewhere, leaving `out/` to the dev app.
+  const electronMain = options?.mainPath ?? process.env.NIMBALYST_E2E_MAIN_PATH ?? path.resolve(__dirname, '../out/main/index.js');
   const electronCwd = path.resolve(__dirname, '../../../');
 
   // Default video recording to e2e_test_output/videos (opt-out with recordVideo: false)

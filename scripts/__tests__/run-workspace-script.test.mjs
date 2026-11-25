@@ -5,6 +5,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   expandWorkspacePatterns,
+  orderForProducers,
   runPool,
   runScriptIn,
   selectWorkspaces,
@@ -75,6 +76,17 @@ test('keeps only workspaces defining the script', () => {
     selectWorkspaces(Object.keys(manifests), 'typecheck', dir => manifests[dir]),
     ['packages/electron'],
   );
+});
+
+test('consumers of an output producer wait for it, and producers start first', () => {
+  const manifests = {
+    'packages/electron': { name: '@nimbalyst/electron' },
+    'packages/wiki-web': { name: '@nimbalyst/wiki-web', devDependencies: { '@nimbalyst/collab-bundle': 'workspace:*' } },
+    'packages/collab-bundle': { name: '@nimbalyst/collab-bundle' },
+  };
+  const { ordered, waitsFor } = orderForProducers(Object.keys(manifests), dir => manifests[dir]);
+  assert.deepEqual(ordered, ['packages/collab-bundle', 'packages/electron', 'packages/wiki-web']);
+  assert.deepEqual([...waitsFor], [['packages/wiki-web', ['packages/collab-bundle']]]);
 });
 
 test('pool runs every item, respects the limit, and preserves input order', async () => {

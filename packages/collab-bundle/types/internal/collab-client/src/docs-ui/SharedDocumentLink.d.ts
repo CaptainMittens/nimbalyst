@@ -11,7 +11,9 @@ import type { ComponentProps, MouseEventHandler } from 'react';
  *
  * A row that has its own menu opens it on right-click, on the link itself:
  * that is where a right-click lands in a real browser, so a handler only on
- * the trailing actions button left the browser's link menu in its place.
+ * the trailing actions button left the browser's link menu in its place. The
+ * button shows only on hover or keyboard focus, like the shared docs list's row
+ * actions: on every row at once it read as clutter.
  */
 export declare function SharedDocumentLink({ href, onClick, onContextMenu, ...props }: Omit<ComponentProps<'a'>, 'href' | 'onClick' | 'onContextMenu'> & {
     href?: string | null;

@@ -11,7 +11,7 @@ vi.mock('@nimbalyst/runtime/storage/repositories/AISessionsRepository', () => ({
   },
 }));
 vi.mock('@nimbalyst/runtime/storage/repositories/AgentMessagesRepository', () => ({
-  AgentMessagesRepository: {},
+  AgentMessagesRepository: { create: vi.fn() },
 }));
 vi.mock('@nimbalyst/runtime/storage/repositories/SessionFilesRepository', () => ({
   SessionFilesRepository: {},
@@ -84,7 +84,9 @@ vi.mock('../ai/claudeCliLauncherSingleton', () => ({
 }));
 
 import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AISessionsRepository';
+import { AgentMessagesRepository } from '@nimbalyst/runtime/storage/repositories/AgentMessagesRepository';
 import { MetaAgentService } from '../MetaAgentService';
+import { SessionDepthLimitError } from '../sessionHierarchy';
 import { database } from '../../database/PGLiteDatabaseWorker';
 
 const STANDARD_PARENT = {
@@ -107,6 +109,7 @@ describe('MetaAgentService parent agent_role promotion (NIM-858)', () => {
     vi.mocked(AISessionsRepository.create).mockReset();
     vi.mocked(AISessionsRepository.get).mockReset();
     vi.mocked(AISessionsRepository.updateMetadata).mockReset();
+    vi.mocked(AgentMessagesRepository.create).mockReset();
     // These tests assert on the real queue path; vitest sets NODE_ENV=test
     // (unless the shell already set it), which would take the synthetic bypass.
     vi.spyOn(MetaAgentService.prototype as any, 'shouldBypassChildAgentExecutionForTests').mockReturnValue(false);
@@ -156,6 +159,19 @@ describe('MetaAgentService parent agent_role promotion (NIM-858)', () => {
     expect(AISessionsRepository.updateMetadata).not.toHaveBeenCalled();
   });
 
+  it('places a besideCaller spawn, or one past the depth bound, under the caller\'s parent while the caller manages it', async () => {
+    const service = MetaAgentService.getInstance();
+    (service as any).aiService = { queuePromptForSession: vi.fn(), triggerQueuedPromptProcessingForSession: vi.fn() };
+    vi.mocked(AISessionsRepository.get).mockResolvedValue({ ...STANDARD_PARENT, parentSessionId: 'grandparent' } as any);
+    await (service as any).spawnSession('standard-parent', '/workspace/path', { prompt: 'take over', besideCaller: true });
+    vi.mocked(AISessionsRepository.create).mockRejectedValueOnce(new SessionDepthLimitError('Session hierarchy depth exceeds 256'));
+    const fallback = JSON.parse(await (service as any).spawnSession('standard-parent', '/workspace/path', { prompt: 'take over' }));
+    const calls = vi.mocked(AISessionsRepository.create).mock.calls.map(([child]) => child as any);
+    expect(calls.map(child => child.parentSessionId)).toEqual(['grandparent', 'standard-parent', 'grandparent']);
+    for (const child of calls) expect(child.createdBySessionId).toBe('standard-parent');
+    expect(fallback.parentSessionId).toBe('grandparent');
+  });
+
   it('reports nested orchestrator completion to its current manager', async () => {
     const service = MetaAgentService.getInstance();
     const ai = { queuePromptForSession: vi.fn(), triggerQueuedPromptProcessingForSession: vi.fn() };
@@ -199,17 +215,4 @@ describe('MetaAgentService parent agent_role promotion (NIM-858)', () => {
     await expect((service as any).createChildSessionInternal('standard-parent', '/workspace/path', {})).resolves.toHaveProperty('sessionId');
   });
 
-  it('queues manager-change notes as reports without interrupting running managers', async () => {
-    const service = MetaAgentService.getInstance();
-    const ai = { queuePromptForSession: vi.fn(async (..._args: any[]) => ({ id: 'report' })), triggerQueuedPromptProcessingForSession: vi.fn(), interruptCurrentTurn: vi.fn() };
-    (service as any).aiService = ai;
-    vi.mocked(AISessionsRepository.get).mockImplementation(async id => ({ ...STANDARD_PARENT, id, title: id } as any));
-    vi.mocked(database.query).mockResolvedValue({ rows: [{ status: 'running' }] } as any);
-    await (service as any).reportManagerChange({ sessionId: 'worker', workspaceId: '/workspace/path', title: 'Worker',
-      previousParentId: 'old', previousManagerId: 'old', parentId: 'new', managerId: 'new' });
-    expect(ai.queuePromptForSession.mock.calls.map(call => call[0])).toEqual(['new', 'old']);
-    for (const call of ai.queuePromptForSession.mock.calls) expect(call[3]).toMatchObject({ promptProvenance: { messageKind: 'report', originSessionId: 'worker' } });
-    expect(ai.triggerQueuedPromptProcessingForSession).not.toHaveBeenCalled();
-    expect(ai.interruptCurrentTurn).not.toHaveBeenCalled();
-  });
 });

@@ -10,6 +10,11 @@ import { TEST_TIMEOUTS } from '../helpers';
  * Selectors for AI-related UI elements
  */
 export const PLAYWRIGHT_TEST_SELECTORS = {
+  projectAppearancePanel: '[data-testid="project-appearance-panel"]',
+  projectAppearanceInitials: '[data-testid="project-appearance-initials"]',
+  projectAppearanceColor: '[data-testid="project-appearance-color"]',
+  projectAppearanceFile: '[data-testid="project-appearance-file"]',
+  projectAppearanceSave: '[data-testid="project-appearance-save"]',
   // Mode switching
   editorModeButton: '[data-mode="files"]', // Note: "editor" mode is actually "files" mode in the UI
   agentModeButton: '[data-mode="agent"]',
@@ -273,6 +278,15 @@ export const PLAYWRIGHT_TEST_SELECTORS = {
   customSelect: '.custom-select',
   customSelectTrigger: '.custom-select-trigger',
   customSelectValue: '.custom-select-value',
+
+  // Run Manager (built-in developer-mode extension) and command terminals
+  runsGutterButton: '[data-panel-id="com.nimbalyst.run.runs"]',
+  runsGutterBadge: '[data-panel-id="com.nimbalyst.run.runs"] .extension-panel-gutter-badge',
+  runsPanel: '[data-testid="runs-panel"]',
+  runsAddTargetButton: '.run-manager-add-target',
+  runsTargetForm: '.run-manager-form',
+  commandTerminalTab: '[data-terminal-kind="command"]',
+  terminalOwnerTab: '.terminal-bottom-panel-owner-tab',
 };
 
 /**

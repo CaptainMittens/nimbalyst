@@ -1,14 +1,15 @@
 /**
  * A view placed in a page (a placed-view link of a type, see `placedViewUrl.ts`),
  * drawn live from the items. The definition comes from the link title
- * (`placedViewDefinition`): a table whose cells edit the items, or a 2x2 of
- * two number fields with pinned extra points.
+ * (`placedViewDefinition`): a table whose cells edit the items, a 2x2 of
+ * two number fields with pinned extra points, or a chart of the items
+ * grouped by one field.
  *
  * The host mounts it inside a `TrackersUIProvider`. Loaded lazily
  * (`LazyPlacedViewEmbed`) so a page with no view does not pay for the grid.
  */
 
-import { useEffect, useMemo, useState, useSyncExternalStore, type JSX, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX, type ReactNode } from 'react';
 import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { createPlacedViewUrl, type PlacedViewTarget } from '@nimbalyst/runtime/core/placedViewUrl';
 import { QuadrantChart } from '@nimbalyst/runtime/ui/quadrant/QuadrantChart';
@@ -20,6 +21,7 @@ import { useTrackerViewRows } from '../useTrackerViewRows';
 import { TrackerViewEmbed } from './TrackerViewEmbed';
 import { placedViewDefinition, placedViewInReach, type PlacedQuadrant, type PlacedViewReach } from './placedViewDefinition';
 import { quadrantData } from './quadrantData';
+import { ChartViewEmbed } from './ChartViewEmbed';
 import { PlacedViewNote } from './PlacedViewNote';
 import { MarksListEmbed } from './MarksListEmbed';
 import { getDefaultColumnConfig, resolveColumnsForType } from '@nimbalyst/runtime/plugins/TrackerPlugin/components/trackerColumns';
@@ -144,8 +146,11 @@ function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpen
   const wrap = (view: JSX.Element) => <div className={variant === 'page' ? "placed-view-configurable flex min-h-0 flex-1 flex-col" : "placed-view-configurable"}>{view}</div>;
   if (parsed.error || !parsed.placed) return wrap(<PlacedViewNote><div className="placed-view-invalid-head flex items-center justify-between gap-2"><span role="alert">{label || typeId}: {parsed.error}</span>{actions}</div>{notice}</PlacedViewNote>);
   const placed = parsed.placed;
+  if (placed.mode === 'chart' && placed.chart) {
+    return wrap(<ChartViewEmbed view={placed.view} chart={placed.chart} fields={fields} height={parseHeight(attrs.height)} headerActions={actions} headerNotice={notice} />);
+  }
   if (placed.mode === '2x2' && placed.quadrant) {
-    return wrap(<QuadrantViewEmbed view={placed.view} quadrant={placed.quadrant} onOpenItem={onOpenItem} headerActions={actions} headerNotice={notice} />);
+    return wrap(<QuadrantViewEmbed view={placed.view} quadrant={placed.quadrant} height={parseHeight(attrs.height)} onOpenItem={onOpenItem} headerActions={actions} headerNotice={notice} />);
   }
   return wrap(
     <TrackerViewEmbed
@@ -163,14 +168,20 @@ function TypeViewEmbed({ typeId, label, attrs: savedAttrs, onAttrsChange, onOpen
   );
 }
 
-function QuadrantViewEmbed({ view, quadrant, onOpenItem, headerActions, headerNotice }: {
+function QuadrantViewEmbed({ view, quadrant, height, onOpenItem, headerActions, headerNotice }: {
   headerActions?: ReactNode;
   headerNotice?: ReactNode;
   view: SavedView;
   quadrant: PlacedQuadrant;
+  /** The chart's height; unset uses the chart's default. */
+  height?: number;
   onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
 }): JSX.Element {
   const { identity } = useTrackersUI();
+  // The chart frame is the sized body a page's resize grip drags; the chart
+  // re-lays itself out as the frame changes.
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => { frameRef.current?.setAttribute('data-placed-view-body', ''); }, []);
   const records = useTrackerDataSelector((state) => state.records);
   const { rows } = useTrackerViewRows(records, view.definition, { identity });
   const data = useMemo(() => quadrantData(rows, quadrant), [rows, quadrant]);
@@ -195,6 +206,8 @@ function QuadrantViewEmbed({ view, quadrant, onOpenItem, headerActions, headerNo
           xLabel={quadrant.xLabel ?? quadrant.xField}
           yLabel={quadrant.yLabel ?? quadrant.yField}
           quadrants={quadrant.quadrants}
+          height={height}
+          frameRef={frameRef}
           onOpenPoint={onOpenItem}
         />
       </div>

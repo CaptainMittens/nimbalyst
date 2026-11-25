@@ -16,6 +16,22 @@ import { mergeClaimedRun, selectCoalescibleRun } from './coalesceQueuedPrompts';
  */
 export class SessionProcessingGuard extends Set<string> {
   private owners = new Map<string, symbol>();
+  private claims = new Set<string>();
+
+  override has(sessionId: string): boolean {
+    return this.claims.has(sessionId) || super.has(sessionId);
+  }
+
+  /** Reserve before storage awaits, including when a live drain bypasses the turn guard. */
+  beginClaim(sessionId: string): boolean {
+    if (this.claims.has(sessionId)) return false;
+    this.claims.add(sessionId);
+    return true;
+  }
+
+  endClaim(sessionId: string): void {
+    this.claims.delete(sessionId);
+  }
 
   /** Take the guard for `sessionId`; the returned token is required to release it. */
   acquire(sessionId: string): symbol {
@@ -45,6 +61,7 @@ export class SessionProcessingGuard extends Set<string> {
 export interface ClaimedQueuedPrompt {
   id: string;
   prompt: string;
+  createdAt?: number;
   attachments?: unknown[] | null;
   documentContext?: DocumentContext | null;
 }
@@ -88,6 +105,9 @@ interface DispatchClaimedQueuedPromptOptions {
   startSession: (options: { sessionId: string; workspacePath: string }) => Promise<void>;
   targetWindow: Electron.BrowserWindow;
   workspacePath: string;
+  /** The provider started (or is about to start) a turn of its own, e.g. a background-task wake. */
+  isLeadTurnPending?: () => boolean;
+  logInfo?: (message: string) => void;
 }
 
 export async function dispatchClaimedQueuedPrompt(
@@ -109,6 +129,8 @@ export async function dispatchClaimedQueuedPrompt(
     startSession,
     targetWindow,
     workspacePath,
+    isLeadTurnPending,
+    logInfo,
   } = options;
 
   const settleIds = claimedIds && claimedIds.length > 0 ? claimedIds : [claimed.id];
@@ -161,7 +183,18 @@ export async function dispatchClaimedQueuedPrompt(
       // displaced it, the priority prompt that replaced it is still running and
       // releasing here would let the FIFO continuation start a second turn
       // underneath it (#1018).
-      processingSet.releaseIfOwner(sessionId, guardToken);
+      const released = processingSet.releaseIfOwner(sessionId, guardToken);
+      // A replacement dispatch owns continuation and settlement as well as
+      // the guard. A displaced turn must not report the child finished.
+      if (!released && processingSet.has(sessionId)) return;
+      // NIM-7428: the turn ended by waking the session with background-task
+      // results. That wake turn's own completion continues the queue, ends the
+      // session and reports to the parent; doing it here would end a running
+      // session, or send a prompt that aborts the wake and drops its results.
+      if (isLeadTurnPending?.()) {
+        logInfo?.(`[AIService] ${source} finally: session ${sessionId} woke for background results; its wake turn owns the queue`);
+        return;
+      }
       try {
         await continueQueuedPromptChain(
           sessionId,
@@ -210,8 +243,11 @@ interface TryClaimAndDispatchNextQueuedPromptOptions {
   resolveLiveWindow?: (workspacePath: string) => Electron.BrowserWindow | null;
   targetWindow: Electron.BrowserWindow | null;
   workspacePath: string;
+  /** Session title for an agent row's origin label; undefined falls back to a short id. */
+  resolveSessionTitle?: (id: string) => Promise<string | undefined>;
   /** True when a draining turn holds the guard but its live query can take this prompt. */
   canBypassChainGuard?: () => boolean;
+  isLeadTurnPending?: DispatchClaimedQueuedPromptOptions['isLeadTurnPending'];
 }
 
 export async function tryClaimAndDispatchNextQueuedPrompt(
@@ -234,6 +270,8 @@ export async function tryClaimAndDispatchNextQueuedPrompt(
     targetWindow,
     workspacePath,
     canBypassChainGuard,
+    resolveSessionTitle,
+    isLeadTurnPending,
   } = options;
 
   const liveWindow =
@@ -251,66 +289,82 @@ export async function tryClaimAndDispatchNextQueuedPrompt(
     return false;
   }
 
-  const pendingPrompts = await queueStore.listPending(sessionId);
-  if (pendingPrompts.length === 0) {
-    // logInfo(`[AIService] ${source}: no pending prompts for session ${sessionId}`);
-    return false;
-  }
-
-  // Agent-authored rows deliver as one turn; a human row keeps its own turn and
-  // bounds the run on both sides. See coalesceQueuedPrompts.ts.
-  const run = selectCoalescibleRun(pendingPrompts);
-  const nextPrompt = run[0];
-  logInfo(`[AIService] ${source}: processing prompt ${nextPrompt.id} for session ${sessionId}`);
-
-  const claimedHead = await queueStore.claim(nextPrompt.id);
-  if (!claimedHead) {
-    logInfo(`[AIService] ${source}: prompt ${nextPrompt.id} already claimed`);
-    return false;
-  }
-
-  // Claim the tail one row at a time. A row that fails to claim was taken by
-  // another drainer, so stop extending rather than skipping over it -- pulling
-  // the row behind it forward would deliver the run out of order.
-  const claimedRun = [claimedHead];
-  for (const queued of run.slice(1)) {
-    const claimedNext = await queueStore.claim(queued.id);
-    if (!claimedNext) break;
-    claimedRun.push(claimedNext);
-  }
-
-  const claimed = mergeClaimedRun(claimedRun);
-  const claimedIds = claimedRun.map((row) => row.id);
-
-  if (claimedRun.length > 1) {
-    logInfo(`[AIService] ${source}: coalesced ${claimedRun.length} agent-authored prompts into one turn for session ${sessionId}`);
-  }
-
-  if (!sendMessageHandler) {
-    for (const promptId of claimedIds) {
-      await queueStore.fail(promptId, 'sendMessageHandler not initialized');
+  if (!processingSet.beginClaim(sessionId)) return false;
+  try {
+    const pendingPrompts = await queueStore.listPending(sessionId);
+    if (pendingPrompts.length === 0) {
+      // logInfo(`[AIService] ${source}: no pending prompts for session ${sessionId}`);
+      return false;
     }
-    logError('[AIService] Failed to process queued prompt because sendMessageHandler is not initialized', new Error('sendMessageHandler not initialized'));
-    return false;
+
+    // Consecutive rows that can share a turn deliver as one, user and agent
+    // alike; slash commands and rows with differing context keep their own.
+    // See coalesceQueuedPrompts.ts.
+    const run = selectCoalescibleRun(pendingPrompts);
+    const nextPrompt = run[0];
+    logInfo(`[AIService] ${source}: processing prompt ${nextPrompt.id} for session ${sessionId}`);
+
+    const claimedHead = await queueStore.claim(nextPrompt.id);
+    if (!claimedHead) {
+      logInfo(`[AIService] ${source}: prompt ${nextPrompt.id} already claimed`);
+      return false;
+    }
+
+    // Claim the tail one row at a time. A row that fails to claim was taken by
+    // another drainer, so stop extending rather than skipping over it -- pulling
+    // the row behind it forward would deliver the run out of order.
+    const claimedRun = [claimedHead];
+    for (const queued of run.slice(1)) {
+      const claimedNext = await queueStore.claim(queued.id);
+      if (!claimedNext) break;
+      claimedRun.push(claimedNext);
+    }
+
+    const originIds = [...new Set(claimedRun.flatMap((row) => {
+      const provenance = row.documentContext?.promptProvenance;
+      return provenance?.actor === 'agent' && provenance.originSessionId ? [provenance.originSessionId] : [];
+    }))];
+    const titles = new Map(await Promise.all(originIds.map(async (id) => {
+      try { return [id, await resolveSessionTitle?.(id)] as const; }
+      catch (error) { logError(`[AIService] ${source}: session title lookup failed for ${id}`, error); return [id, undefined] as const; }
+    })));
+    const claimed = mergeClaimedRun(claimedRun, (id) => titles.get(id));
+    const claimedIds = claimedRun.map((row) => row.id);
+
+    if (claimedRun.length > 1) {
+      logInfo(`[AIService] ${source}: coalesced ${claimedRun.length} queued prompts into one turn for session ${sessionId}`);
+    }
+
+    if (!sendMessageHandler) {
+      for (const promptId of claimedIds) {
+        await queueStore.fail(promptId, 'sendMessageHandler not initialized');
+      }
+      logError('[AIService] Failed to process queued prompt because sendMessageHandler is not initialized', new Error('sendMessageHandler not initialized'));
+      return false;
+    }
+
+    await dispatchClaimedQueuedPrompt({
+      claimed,
+      claimedIds,
+      continueQueuedPromptChain,
+      logError,
+      onAfterSettled,
+      onChainSettled,
+      onPromptClaimed,
+      processingSet,
+      queueStore,
+      sendMessageHandler,
+      sessionId,
+      source,
+      startSession,
+      targetWindow: liveWindow,
+      workspacePath,
+      isLeadTurnPending,
+      logInfo,
+    });
+
+    return true;
+  } finally {
+    processingSet.endClaim(sessionId);
   }
-
-  await dispatchClaimedQueuedPrompt({
-    claimed,
-    claimedIds,
-    continueQueuedPromptChain,
-    logError,
-    onAfterSettled,
-    onChainSettled,
-    onPromptClaimed,
-    processingSet,
-    queueStore,
-    sendMessageHandler,
-    sessionId,
-    source,
-    startSession,
-    targetWindow: liveWindow,
-    workspacePath,
-  });
-
-  return true;
 }

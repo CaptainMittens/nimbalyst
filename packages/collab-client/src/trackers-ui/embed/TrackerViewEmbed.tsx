@@ -7,7 +7,7 @@
  * surfaces, and a surface that shows no view must not pay for them.
  */
 
-import { useCallback, useMemo, type JSX, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react';
 import type { CollabOpenOptions } from '@nimbalyst/collab-client/core';
 import { computeReadiness } from '@nimbalyst/runtime/plugins/TrackerPlugin/models/trackerReadiness';
 import { globalRegistry, groupTrackerRecordsByAxis } from '@nimbalyst/runtime/plugins/TrackerPlugin/models';
@@ -30,6 +30,14 @@ import { isViewRecordEditable, writeViewEdits } from './viewItemEdits';
 import './ViewEmbedHeader.css';
 
 const DEFAULT_BODY_HEIGHT_PX = 420;
+
+/**
+ * A table's body fitted to its rows (compact grid: 32px rows under a header),
+ * between `min` and `max`. Past `max` the grid scrolls inside.
+ */
+export function fitTableBodyHeight(rowCount: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, 42 + rowCount * 32));
+}
 const MODE_LABEL: Record<string, string> = {
   list: 'list', table: 'table', kanban: 'board',
   timeline: 'timeline', radar: 'list', 'tag-board': 'list', inbox: 'list',
@@ -51,12 +59,17 @@ export interface TrackerViewEmbedProps {
   view: SavedView;
   onOpenAsTable?: (view: SavedView) => void;
   onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
+  /** In table mode the title text opens the item too (a type page lists pages by title). */
+  titleOpensItem?: boolean;
   /**
    * `card` is the bordered block a document embeds at a fixed height; `page`
    * drops the card chrome and fills its container, for a tab that is the view.
    */
   variant?: 'card' | 'page';
-  /** Body height in pixels for the `card` variant. */
+  /**
+   * Body height in pixels for the `card` variant. Unset, an ungrouped table
+   * fits its rows up to the default height and other modes use the default.
+   */
   height?: number;
   /** Read-only columns after the fields, in table mode (a type page's Where). */
   derivedColumns?: readonly TrackerGridDerivedColumn[];
@@ -74,11 +87,20 @@ export interface TrackerViewEmbedProps {
   onWidthsChange?: (widths: Record<string, number>) => void;
 }
 
+/**
+ * A host marks a subtree read-only by setting this attribute to "true" on any
+ * ancestor element. It reaches embeds the host does not construct itself (a
+ * type page's table, views placed in a page body, which the editor paints in
+ * its own React root), where no prop can be threaded through.
+ */
+export const TRACKER_EMBEDS_READ_ONLY_ATTRIBUTE = 'data-tracker-embeds-read-only';
+
 /** Draws a view the caller supplies, without looking it up among the saved views. */
 export function TrackerViewEmbed({
   view,
   onOpenAsTable,
   onOpenItem,
+  titleOpensItem,
   variant = 'card',
   height,
   derivedColumns,
@@ -91,13 +113,38 @@ export function TrackerViewEmbed({
   onWidthsChange,
 }: TrackerViewEmbedProps): JSX.Element {
   const { identity, capabilities, dataSource } = useTrackersUI();
+  const anchor = useRef<HTMLDivElement>(null);
+  const [hostReadOnly, setHostReadOnly] = useState(false);
+  const readHostReadOnly = useCallback(
+    () => Boolean(anchor.current?.closest(`[${TRACKER_EMBEDS_READ_ONLY_ATTRIBUTE}="true"]`)),
+    [],
+  );
+  // Before paint, so a read-only host never shows an editable frame.
+  useLayoutEffect(() => {
+    setHostReadOnly(readHostReadOnly());
+  }, [readHostReadOnly]);
+  /**
+   * Re-read at write time: the mount-time check cannot see an ancestor marked
+   * read-only later, and a callback captured before that (a portal button, an
+   * open editor) must refuse too. Flips the frame read-only as it refuses.
+   */
+  const refuseIfHostReadOnly = useCallback((): void => {
+    if (!readHostReadOnly()) return;
+    setHostReadOnly(true);
+    throw new Error('This view is read-only here.');
+  }, [readHostReadOnly]);
+  const writable = !readOnly && !hostReadOnly && dataSource !== null;
   const records = useTrackerDataSelector((state) => state.records);
   const loaded = useTrackerDataSelector((state) => state.loaded);
   const writeEdits = useCallback(
-    (entries: readonly TrackerGridUpdateEntry[]) => (dataSource ? writeViewEdits(dataSource, entries) : Promise.resolve()),
-    [dataSource],
+    async (entries: readonly TrackerGridUpdateEntry[]) => {
+      refuseIfHostReadOnly();
+      if (dataSource) await writeViewEdits(dataSource, entries);
+    },
+    [dataSource, refuseIfHostReadOnly],
   );
   return (
+    <div ref={anchor} className="tracker-view-embed-host" style={{ display: 'contents' }}>
     <LoadedViewEmbed
       view={view}
       records={records}
@@ -106,7 +153,8 @@ export function TrackerViewEmbed({
       renderableViewModes={capabilities.renderableViewModes}
       onOpenAsTable={onOpenAsTable}
       onOpenItem={onOpenItem}
-      height={height ?? DEFAULT_BODY_HEIGHT_PX}
+      titleOpensItem={titleOpensItem}
+      height={height}
       variant={variant}
       derivedColumns={derivedColumns}
       typeIds={typeIds}
@@ -115,9 +163,13 @@ export function TrackerViewEmbed({
       hiddenColumns={hiddenColumns}
       onSortChange={onSortChange}
       onWidthsChange={onWidthsChange}
-      onItemsUpdate={readOnly || !dataSource ? undefined : writeEdits}
-      onCreate={readOnly || !dataSource || view.definition.selectedType === 'all' ? undefined : (title, fields, requestId) => createViewItem(dataSource, view.definition, title, fields, requestId)}
+      onItemsUpdate={writable ? writeEdits : undefined}
+      onCreate={!writable || !dataSource || view.definition.selectedType === 'all' ? undefined : async (title, fields, requestId) => {
+        refuseIfHostReadOnly();
+        await createViewItem(dataSource, view.definition, title, fields, requestId);
+      }}
     />
+    </div>
   );
 }
 
@@ -129,6 +181,7 @@ function LoadedViewEmbed({
   renderableViewModes,
   onOpenAsTable,
   onOpenItem,
+  titleOpensItem,
   height,
   variant,
   derivedColumns,
@@ -148,7 +201,8 @@ function LoadedViewEmbed({
   renderableViewModes: ReadonlySet<SavedViewDefinition['viewMode']>;
   onOpenAsTable?: (view: SavedView) => void;
   onOpenItem?: (itemId: string, options?: CollabOpenOptions) => void;
-  height: number;
+  titleOpensItem?: boolean;
+  height?: number;
   variant: 'card' | 'page';
   derivedColumns?: readonly TrackerGridDerivedColumn[];
   typeIds?: readonly string[];
@@ -204,6 +258,7 @@ function LoadedViewEmbed({
           columnFilters={definition.columnFilters}
           resolveRelationshipLabel={resolveRelationshipLabel}
           onOpenItem={onOpenItem}
+          titleOpensItem={titleOpensItem}
           loaded={loaded}
           derivedColumns={derivedColumns}
           isRowEditable={onItemsUpdate ? isRowEditable : undefined}
@@ -213,7 +268,7 @@ function LoadedViewEmbed({
       body = definition.groupBy === 'none' || !rows.length ? grid(rows) : <div className="flex min-h-0 flex-1 flex-col overflow-auto">
         {groupTrackerRecordsByAxis(rows, definition.groupBy, resolveRelationshipLabel).map(group => <details key={group.key} open className="border-b border-nim">
           <summary className="cursor-pointer bg-nim-secondary px-3 py-2 text-xs">{group.label} · {group.items.length}</summary>
-          <div style={{ height: Math.max(100, Math.min(360, 42 + group.items.length * 32)) }}>{grid(group.items)}</div>
+          <div style={{ height: fitTableBodyHeight(group.items.length, 100, 360) }}>{grid(group.items)}</div>
         </details>)}
       </div>;
       break;
@@ -257,6 +312,9 @@ function LoadedViewEmbed({
   }
 
   const isPage = variant === 'page';
+  // Before the items load the row count says nothing, so keep the default rather than collapse.
+  const fitsRows = mode === 'table' && definition.groupBy === 'none' && loaded;
+  const bodyHeight = height ?? (fitsRows ? fitTableBodyHeight(rows.length, 120, DEFAULT_BODY_HEIGHT_PX) : DEFAULT_BODY_HEIGHT_PX);
   return (
     <div
       className={isPage
@@ -287,7 +345,8 @@ function LoadedViewEmbed({
         className={isPage
           ? 'tracker-saved-view-embed-body flex min-h-0 flex-1 flex-col bg-nim'
           : 'tracker-saved-view-embed-body flex min-h-0 flex-col bg-nim'}
-        style={isPage ? undefined : { height }}
+        style={isPage ? undefined : { height: bodyHeight }}
+        data-placed-view-body={isPage ? undefined : ''}
       >
         {body}
       </div>

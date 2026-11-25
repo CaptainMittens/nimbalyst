@@ -20,6 +20,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 <!-- Removed features go here -->
 
+## [1.3.1] - 2026-11-23
+
+
+### Changed
+- Session model labels recognize Fable 5.2, GPT-6.2 Sol and Astra
+- Feature flags are no longer fetched at launch, since the app does not use them
+- The transcript test screen is compiled only in Debug builds
+
+### Fixed
+- Transcript image viewer not zooming or panning when the image loaded before the viewer measured it (#1990)
+- Transcript jumping back to an image after scrolling past it
+- Transcript pulling the reader back to the bottom while a reply streams
+- Transcript jumping after a native touch pan ends, and stale jumps firing after returning to the end of the transcript (#919)
+- Codex generated images showing as base64 text instead of an image
+- Opus 5.5 progress updates between tool calls missing from the transcript
+- Question and form cards: an answer closing a different question, denied forms still showing as waiting, and interrupted or backgrounded questions no longer answerable
+- Decision blocks in documents that allow a written answer not showing an Other choice
+- Nested lists under numbered items losing their nesting when a document is saved
+- A malformed session field hiding the session from the list
+- Creating a session failing against desktops on the SQLite database
+- New sessions sent to an offline computer record instead of the active desktop
+
+## [1.3.0] - 2026-10-19
+
+
+### Added
+- Wiki tab for projects with a Local wiki: page tree by title and order, in-app links between pages, read-only typed fields and table rows, and editable page bodies that keep frontmatter byte for byte (requires an updated desktop syncing the project)
+- Team tab (alpha) for team projects: hosts the web console's Wiki and Trackers in the app, signed in from the phone's account; console links from Mail, Messages, the transcript and `nimbalyst://console` open in the app
+- Synced Markdown shows embedded `.html` diagrams live; project sync now carries `.html` files
+- Copy diagnostics (versions and recent sync errors, no session content) from Settings, the "Couldn't load sessions" screen and the sync error banner
+- Sessions from desktop projects not synced to mobile show "Transcript not synced" with where to turn it on, instead of "Thinking..."
+
+### Changed
+- Wide document tables scroll sideways with the first column pinned, and show rows as cards on phone-width screens
+- Computer picker lists only computers seen in the last week and hides when there is one
+- Phone transcript rows sync inline instead of in chunks; only bulky tool output is shortened for mobile sync
+- Per-page sync logging quieted
+
+### Fixed
+- Long assistant replies and question forms disappearing from the transcript
+- Images shown with `display_to_user` appearing broken in the transcript
+- Session list failing with "Couldn't load sessions" on iPhones with an older system SQLite; a database read failure now shows an error instead of an empty list
+- Opening a session failing with "bad response from the server" after the sign-in token expired during reconnect
+- "Sign in again" banner taking minutes to appear when sign-in refresh keeps failing
+- A "different sync key" notice that re-pairing could not clear
+- A prompt sent from the desktop staying in the phone's input box
+- Sessions that finished while the desktop was disconnected staying marked as running
+- Removing a project's last slash command or action prompt on the desktop not removing it on the phone
+- Swipe from the left edge of the session list not returning to the project list
+- Hidden landscape sidebar on iPhone reappearing after rotation or relaunch
+
 ## [1.2.1] - 2026-10-07
 
 

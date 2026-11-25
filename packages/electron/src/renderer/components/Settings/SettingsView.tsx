@@ -1,3 +1,4 @@
+import { ProjectAppearancePanel } from './panels/ProjectAppearancePanel';
 import { SAVED_CREDENTIAL } from '../../../shared/providerCredentials';
 import { ProviderCredentialsPanel } from '../GlobalSettings/panels/ProviderCredentialsPanel';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
@@ -40,6 +41,7 @@ import { AgentFeaturesPanel } from './AgentFeaturesPanel';
 import { BetaFeaturesPanel } from '../GlobalSettings/panels/BetaFeaturesPanel';
 import { NotificationsPanel } from '../GlobalSettings/panels/NotificationsPanel';
 import { VoiceModePanel } from './VoiceModePanel';
+import { DictationPanel } from './DictationPanel';
 import { MCPServersPanel } from '../GlobalSettings/panels/MCPServersPanel';
 import { ToolsMcpPanel } from './panels/ToolsMcpPanel';
 import { CloudflareSandboxesPanel } from './panels/CloudflareSandboxesPanel';
@@ -67,6 +69,7 @@ import {
 } from '../../store/atoms/appSettings';
 import { shouldShowDirectChatProviderSettings } from '../../utils/chatProviderVisibility';
 import { teamsConfiguredAtom } from '../../store/atoms/settingsDomains';
+import { dbActiveBackendAtom } from '../../store/atoms/dbMigration';
 import { omitModelsField } from '@nimbalyst/runtime/ai/server/utils/modelConfigUtils';
 import {
   AccountDevicesSettingsPanel,
@@ -76,6 +79,8 @@ import {
 } from './panels/AccountSettingsPanel';
 import { ProjectSharingPanel, type ProjectSettingsTarget } from './panels/ProjectSharingPanel';
 import { ProjectAIProvidersPanel } from './panels/ProjectAIProvidersPanel';
+import { ProjectWorktreesPanel } from './panels/ProjectWorktreesPanel';
+import { fetchProviderModels } from './providerModelFetch';
 
 /**
  * Providers whose model catalog comes from their own CLI rather than from a
@@ -276,6 +281,7 @@ export function SettingsView({
   const posthog = usePostHog();
   const developerMode = useAtomValue(developerModeAtom);
   const teamsConfigured = useAtomValue(teamsConfiguredAtom);
+  const pgliteActive = useAtomValue(dbActiveBackendAtom) === 'pglite';
 
   const normalizedInitialScope: SettingsScope = initialScope === 'user'
     ? 'application'
@@ -396,24 +402,20 @@ export function SettingsView({
   // Push navigation entry when settings category/scope changes (unified cross-mode navigation)
   const pushNavigationEntry = useSetAtom(pushNavigationEntryAtom);
   const isRestoringNavigation = useAtomValue(isRestoringNavigationAtom);
-  const lastNavigationRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Don't push while restoring (going back/forward)
     if (isRestoringNavigation) return;
 
-    const navKey = `${selectedCategory}:${scope}`;
-    if (navKey !== lastNavigationRef.current) {
-      lastNavigationRef.current = navKey;
-      pushNavigationEntry({
-        mode: 'settings',
-        settings: {
-          category: selectedCategory,
-          scope: scope as any,
-        },
-      });
-    }
-  }, [selectedCategory, scope, pushNavigationEntry, isRestoringNavigation]);
+    pushNavigationEntry({
+      mode: 'settings',
+      settings: {
+        category: selectedCategory,
+        scope,
+        target: scope === 'project' ? projectTarget : undefined,
+      },
+    });
+  }, [selectedCategory, scope, projectTarget, pushNavigationEntry, isRestoringNavigation]);
 
   // When scope changes, ensure selected category is valid for that scope
   useEffect(() => {
@@ -421,6 +423,7 @@ export function SettingsView({
       developerMode,
       showDirectChatProviders,
       teamsConfigured,
+      pgliteActive,
     }, extensionSettingsRoutes).map((route) => route.id);
     // Extension-contributed agent providers (e.g. antigravity-gemini-agent) are
     // valid selectable categories too; don't bounce the user off them.
@@ -441,6 +444,7 @@ export function SettingsView({
     extensionSettingsRoutes,
     showDirectChatProviders,
     teamsConfigured,
+    pgliteActive,
   ]);
 
   useEffect(() => {
@@ -579,20 +583,13 @@ export function SettingsView({
     debouncedSave();
   };
 
-  const fetchModels = async (provider: string) => {
-    setLoading(prev => ({ ...prev, [provider]: true }));
-
-    try {
-      const response = await window.electronAPI.aiGetAllModels();
-      if (response.success && response.grouped) {
-        setAvailableModels(response.grouped);
-      }
-    } catch (error) {
-      console.error(`Failed to fetch models for ${provider}:`, error);
-    } finally {
-      setLoading(prev => ({ ...prev, [provider]: false }));
-    }
-  };
+  const fetchModels = (provider: string, options: { background?: boolean } = {}) =>
+    fetchProviderModels<Model>(provider, {
+      background: options.background,
+      setLoading,
+      setAvailableModels,
+      getAllModels: () => window.electronAPI.aiGetAllModels(),
+    });
 
   // Perform the actual save
   // NOTE: Most settings are now auto-saved via Jotai atom setters.
@@ -620,7 +617,7 @@ export function SettingsView({
       Promise.all(
         Object.entries(providers)
           .filter(([_, config]) => config.enabled)
-          .map(([provider, _]) => fetchModels(provider))
+          .map(([provider, _]) => fetchModels(provider, { background: true }))
       ).catch(error => {
         console.error('Failed to refresh models in background:', error);
       });
@@ -672,7 +669,16 @@ export function SettingsView({
     ])
   );
 
+  const panelWorkspacePath = scope === 'project'
+    ? (projectTarget?.kind === 'workspace' ? projectTarget.workspacePath : undefined)
+    : workspacePath;
+  const panelWorkspaceName = panelWorkspacePath === workspacePath
+    ? workspaceName : panelWorkspacePath?.split(/[\\/]/).filter(Boolean).pop();
+
   const renderPanel = () => {
+    // An explicit project destination must also govern subsequent sidebar pages.
+    const workspacePath = panelWorkspacePath;
+    const workspaceName = panelWorkspaceName;
     // Project panels
     if ((selectedCategory === 'agent-permissions' || selectedCategory === 'project-agent-permissions') && workspacePath) {
       return (
@@ -958,6 +964,8 @@ export function SettingsView({
       case 'notifications':
         // NotificationsPanel is now self-contained - uses Jotai atoms directly
         return <NotificationsPanel />;
+      case 'dictation':
+        return <DictationPanel />;
       case 'voice-mode':
         // VoiceModePanel is now self-contained - uses Jotai atoms directly
         return <VoiceModePanel workspacePath={workspacePath ?? undefined} />;
@@ -1030,6 +1038,10 @@ export function SettingsView({
             workspacePath={workspacePath ?? undefined}
           />
         );
+      case 'project-appearance':
+        return projectTarget?.kind === 'workspace'
+          ? <ProjectAppearancePanel key={projectTarget.workspacePath} workspacePath={projectTarget.workspacePath} />
+          : <p className="text-sm text-[var(--nim-text-muted)]">Open a local project to customize its appearance.</p>;
       case 'project-sharing':
       case 'team':
         return <ProjectSharingPanel target={projectTarget} />;
@@ -1044,6 +1056,10 @@ export function SettingsView({
         return workspacePath
           ? <ProjectAIProvidersPanel workspacePath={workspacePath} workspaceName={workspaceName ?? 'this project'} />
           : <p className="text-sm text-[var(--nim-text-muted)]">Open a local project to configure provider overrides.</p>;
+      case 'project-worktrees':
+        return workspacePath
+          ? <ProjectWorktreesPanel key={workspacePath} workspacePath={workspacePath} workspaceName={workspaceName ?? 'this project'} />
+          : <p className="text-sm text-[var(--nim-text-muted)]">Open a local project to configure worktrees.</p>;
       case 'project-extensions':
         return <InstalledExtensionsPanel scope="project" workspacePath={workspacePath ?? undefined} />;
       case 'project-github':
@@ -1167,7 +1183,7 @@ export function SettingsView({
               ? 'These settings apply to all projects'
               : scope === 'account'
                 ? 'Accounts, personal sync, devices, and shared links'
-                : `Settings for ${workspaceName || 'this project'}`}
+                : `Settings for ${panelWorkspaceName || 'this project'}`}
           </span>
         </div>
 

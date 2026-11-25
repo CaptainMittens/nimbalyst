@@ -61,6 +61,10 @@ vi.mock('../../window/WindowManager', () => ({
   findWindowByWorkspace: vi.fn(() => null),
 }));
 
+vi.mock('../../window/reuseOpenWorkspaceWindow', () => ({
+  reuseOpenWorkspaceWindow: vi.fn(() => null),
+}));
+
 vi.mock('../../utils/logger', () => ({
   logger: {
     store: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
@@ -79,6 +83,9 @@ vi.mock('../../extensions/backendModuleLifecycle', () => ({
   getDefaultBackendModuleLifecycleDeps: vi.fn(() => ({})),
 }));
 
+import { ALPHA_FEATURES } from '../../../shared/alphaFeatures';
+import { DEVELOPER_FEATURES } from '../../../shared/developerFeatures';
+import { getAppSetting, setAppSetting } from '../../utils/store';
 import {
   ALLOWED_APP_KEYS,
   ALLOWED_WORKSPACE_KEYS,
@@ -86,6 +93,8 @@ import {
   SettingsControlService,
 } from '../SettingsControlService';
 import { getWorkspaceState, type WorkspaceState } from '../../utils/store';
+import { createWindow, findWindowByWorkspace } from '../../window/WindowManager';
+import { reuseOpenWorkspaceWindow } from '../../window/reuseOpenWorkspaceWindow';
 
 describe('SettingsControlService permission diagnostics', () => {
   it.each([
@@ -204,5 +213,127 @@ describe('SettingsControlService.setIssueKeyPrefix', () => {
       ok: false,
       message: 'Prefix NIM is already used by project "Nimbalyst Core". Try NIMA.',
     });
+  });
+});
+
+describe('SettingsControlService.toggleFeature', () => {
+  // Developer Mode on, so the gate is never what a failure below is about.
+  function developerModeOn() {
+    vi.mocked(getAppSetting).mockImplementation((key: string) =>
+      key === 'developerMode' ? (true as never) : (undefined as never),
+    );
+  }
+
+  it('refuses a tag this build does not register instead of writing a dead key', async () => {
+    // #1501: `alphaFeatures.session-fleet: true` was persisted and shown as
+    // enabled, while no such feature exists -- so the flag "had no effect".
+    developerModeOn();
+    vi.mocked(setAppSetting).mockClear();
+
+    const result = await SettingsControlService.getInstance().toggleFeature('session-unknown-tag', {
+      bucket: 'alpha',
+      tag: 'session-fleet',
+      enabled: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('session-fleet');
+    // The caller is told what it could have asked for.
+    for (const feature of ALPHA_FEATURES) {
+      expect(result.message).toContain(feature.tag);
+    }
+    expect(setAppSetting).not.toHaveBeenCalled();
+  });
+
+  it('still toggles every registered tag', async () => {
+    developerModeOn();
+
+    for (const [bucket, registry, key] of [
+      ['alpha', ALPHA_FEATURES, 'alphaFeatures'],
+      ['developer', DEVELOPER_FEATURES, 'developerFeatures'],
+    ] as const) {
+      for (const feature of registry) {
+        vi.mocked(setAppSetting).mockClear();
+        const result = await SettingsControlService.getInstance().toggleFeature(
+          `session-${bucket}-${feature.tag}`,
+          { bucket, tag: feature.tag, enabled: true },
+        );
+
+        expect(result, `${bucket}/${feature.tag} must remain toggleable`).toMatchObject({
+          ok: true,
+          after: true,
+        });
+        expect(setAppSetting).toHaveBeenCalledWith(key, { [feature.tag]: true });
+      }
+    }
+  });
+
+  it('rejects an unknown bucket rather than writing it into developerFeatures', async () => {
+    developerModeOn();
+    vi.mocked(setAppSetting).mockClear();
+
+    const result = await SettingsControlService.getInstance().toggleFeature('session-bad-bucket', {
+      // The MCP tool schema declares an enum but nothing enforces it at runtime,
+      // and the old key fallback made every unknown bucket a developer write.
+      bucket: 'gamma' as 'alpha',
+      tag: 'worktrees',
+      enabled: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain('gamma');
+    expect(setAppSetting).not.toHaveBeenCalled();
+  });
+
+  it.each(['constructor', '__proto__', 'toString'])(
+    'rejects inherited object property "%s" as a bucket',
+    async (bucket) => {
+      developerModeOn();
+      vi.mocked(setAppSetting).mockClear();
+
+      const result = await SettingsControlService.getInstance().toggleFeature(`session-proto-${bucket}`, {
+        bucket: bucket as 'alpha',
+        tag: 'worktrees',
+        enabled: true,
+      });
+
+      expect(result).toMatchObject({ ok: false });
+      expect(result.message).toContain('Unknown feature bucket');
+      expect(setAppSetting).not.toHaveBeenCalled();
+    },
+  );
+
+  it('reports the missing tag before asking the user for Developer Mode', async () => {
+    // Developer Mode off: an unregistered tag can never be toggled, so sending
+    // the user to Settings > Advanced first would be a dead end.
+    vi.mocked(getAppSetting).mockImplementation(() => undefined as never);
+    vi.mocked(setAppSetting).mockClear();
+
+    const result = await SettingsControlService.getInstance().toggleFeature('session-no-devmode', {
+      bucket: 'alpha',
+      tag: 'session-fleet',
+      enabled: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.requiresUserAction).toBeUndefined();
+    expect(result.message).toContain('session-fleet');
+    expect(setAppSetting).not.toHaveBeenCalled();
+  });
+});
+
+describe('SettingsControlService.openWorkspace', () => {
+  // The window holding the project in its rail may be showing another rail
+  // project; focusing it alone leaves the wrong project on screen.
+  it('switches the window that holds the project instead of only focusing it', async () => {
+    const focus = vi.fn();
+    vi.mocked(findWindowByWorkspace).mockReturnValue({ isDestroyed: () => false, focus } as never);
+    vi.mocked(reuseOpenWorkspaceWindow).mockReturnValue({ matchedPath: process.cwd() } as never);
+
+    const result = await SettingsControlService.getInstance().openWorkspace('session-open', { workspacePath: process.cwd() });
+
+    expect(result.ok).toBe(true);
+    expect(reuseOpenWorkspaceWindow).toHaveBeenCalledWith(process.cwd());
+    expect(createWindow).not.toHaveBeenCalled();
   });
 });

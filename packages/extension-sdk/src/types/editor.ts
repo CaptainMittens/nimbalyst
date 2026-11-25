@@ -326,6 +326,32 @@ export interface EditorViewport {
   setScrollFraction(fraction: number): void;
 }
 
+/**
+ * Where dictated (speech-to-text) words land in an editor. See
+ * {@link EditorHost.registerDictationTarget}.
+ *
+ * The host owns the microphone and the recognizer; the editor owns its content,
+ * so the editor decides how pending and committed text appear. `showPartial`
+ * replaces the current uncommitted text (render it as a decoration, never as
+ * document content); `commitFinal` inserts committed text at the cursor and
+ * clears the pending text; `clearPartial` drops pending text (Esc or stop).
+ */
+export interface DictationTarget {
+  /** Kind of editor, reported in usage analytics. */
+  readonly kind: 'rich-text' | 'code';
+  /** True while this editor holds keyboard focus. */
+  hasFocus(): boolean;
+  /**
+   * Show uncommitted text at the cursor. Optional: when omitted the host
+   * paints the partial itself next to `getCaretRect()`.
+   */
+  showPartial?(text: string): void;
+  /** Viewport rect of the caret, for a host-painted partial. */
+  getCaretRect?(): DOMRect | null;
+  clearPartial(): void;
+  commitFinal(text: string): void;
+}
+
 // ============================================================================
 // EditorHost API - The primary API for custom editors
 // ============================================================================
@@ -568,6 +594,15 @@ export interface EditorHost {
 
   /** Workspace identifier (if in a workspace) */
   readonly workspaceId?: string;
+
+  /**
+   * Absolute path of the local project this editor's tab is open in. Pass it
+   * to `callBackendTool` and `sendPrompt`, which require a project. For a
+   * shared document this is the project the tab is open in; `workspaceId` is
+   * then an opaque collaboration scope key, not a path. Undefined for hosts
+   * with no local project, such as a history preview.
+   */
+  readonly workspacePath?: string;
 
   // ============ CONTENT LOADING ============
 
@@ -891,6 +926,16 @@ export interface EditorHost {
    * ```
    */
   registerViewport?(viewport: EditorViewport | null): void;
+
+  // ============ DICTATION (OPTIONAL) ============
+
+  /**
+   * Accept dictated text. An editor that registers a target receives speech
+   * at its cursor when the user dictates while it has focus; one that never
+   * calls this is simply not a dictation surface. Call with `null` to
+   * unregister. Hosts without dictation omit this method.
+   */
+  registerDictationTarget?(target: DictationTarget | null): void;
 
   // ============ MENU ITEMS ============
 

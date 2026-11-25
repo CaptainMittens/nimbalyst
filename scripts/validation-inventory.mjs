@@ -9,6 +9,8 @@ export const isFullSuiteInvocation = (argv) => argv.join(' ') === fullSuiteInvoc
 export const scriptTests = [
   "scripts/__tests__/prepush-test-gate.test.mjs",
   "scripts/__tests__/build-wiki-plugin.test.mjs",
+  "scripts/__tests__/npm-publish-status.test.mjs",
+  "scripts/__tests__/wiki-mirror-status.test.mjs",
   "scripts/__tests__/install-git-hooks.test.mjs",
   "scripts/__tests__/check-analytics-allowlist.test.mjs",
   "scripts/__tests__/check-collab-client-boundaries.test.mjs",
@@ -18,6 +20,10 @@ export const scriptTests = [
   "scripts/__tests__/check-native-dialogs.test.mjs",
   "scripts/__tests__/check-session-archive-writes.test.mjs",
   "scripts/__tests__/check-push-authors.test.mjs",
+  "scripts/__tests__/check-push-destination.test.mjs",
+  "scripts/__tests__/check-commit-safety.test.mjs",
+  "scripts/__tests__/check-push-range.test.mjs",
+  "scripts/__tests__/land-pr.test.mjs",
   "scripts/__tests__/check-renderer-sync-sockets.test.mjs",
   "scripts/__tests__/check-sync-floating-promises.test.mjs",
   "scripts/__tests__/check-runtime-host-boundary.test.mjs",
@@ -29,13 +35,18 @@ export const scriptTests = [
   "scripts/__tests__/run-workspace-script.test.mjs",
   "scripts/__tests__/vitest-tree-fingerprint.test.mjs",
   "packages/electron/scripts/__tests__/dev-user2.test.mjs",
+  "packages/electron/scripts/__tests__/renderer-supervisor.test.mjs",
   "scripts/__tests__/vitest-run-log-reporter.test.mjs",
   "scripts/__tests__/check-ui-invariants.test.mjs",
   "scripts/__tests__/validation-inventory.test.mjs"
 ];
 
 const workspaceDeps = [[packageManager, 'run', 'build:workspace-deps']];
-const bundleBuild = [[packageManager, '--filter', '@nimbalyst/collab-bundle', 'run', 'build']];
+// The production bundle build plus its size budgets. Not part of the
+// collab-bundle typecheck, which would otherwise set the whole typecheck's wall
+// clock (~15s of ~22s, 2026-10-18). Vitest needs its dist: docsUiStoreBinding
+// imports the built docs-ui entry.
+const bundleBuild = [[packageManager, '--filter', '@nimbalyst/collab-bundle', 'run', 'check:bundle']];
 const preparedTypecheck = [
   [packageManager, '--dir', 'packages/extensions/nimbalyst-memory/engine', 'run', 'build'],
   [packageManager, 'run', 'typecheck'],
@@ -48,6 +59,7 @@ export const tasks = {
   typecheck: [
     ...workspaceDeps,
     [packageManager, '--filter', '@nimbalyst/runtime', 'run', 'build', '--logLevel', 'warn'],
+    ...bundleBuild,
     ...preparedTypecheck,
   ],
   'typecheck-ready': preparedTypecheck,

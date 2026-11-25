@@ -1,33 +1,25 @@
-# September 30th, 2026 Release
+## Nimbalyst v0.83.0
+
+Covers everything since v0.82.8.
 
 ### New Features
 
-- **Sonnet 5.5** for Claude Agent and the Claude API. The Sonnet row now runs Sonnet 5.5, and Sonnet 5 stays selectable.
-- **GPT-6.1 Sol** in the Codex and OpenAI model pickers, now the default Codex model.
-- **Crew Extension (alpha, off by default):** persistent agent teammates that work scheduled shifts within token budgets and flag you when something needs you. Use `/crew:hire` in any agent session to design a new Crew member.
-- **Opt-in unlimited open projects**, with a scrollable project rail and cleanup of resources for projects you are not using (#1579, contributed by @jszobody).
-- Extensions can start and drive their own agent sessions.
+- Claude Fable 5.2 is available in the model picker. Fable 5.1 and Fable 5 remain selectable as previous-generation options.
 
 ### Improvements
 
-- Claude Code sessions waiting on a background shell or sub-agent show a distinct indicator and name the task in the transcript.
-- Quick Track's Cmd+Enter creates the item and closes the popup without switching to Tracker mode, and the title field now spans the popup.
-- Improved load performance for very large Codex sessions.
+- Messages queued while an agent is working, whether typed by you or sent by other sessions, are delivered together in one turn, each labeled with its author. Slash commands and messages with a different document context still go as their own turn.
+- On macOS and Linux, agent sessions, MCP servers, CLIs and git now put your login shell's PATH ahead of the system defaults, so tools from version managers such as mise are found before the `/usr/bin` versions.
+- A file tree subfolder cut off at the 200-entry limit ends with a row saying how many items are hidden.
+- The session machine picker labels the local machine with its device name, followed by "(this device)", instead of "This Mac" on every platform.
 
 ### Fixed
 
-- Compound Bash commands no longer prompt for permission after a user PreToolUse hook has allowed them (#426, contributed by @yanekm).
-- Overlapping file-tree scans no longer exhaust memory while files change in large projects (#1604, contributed by @jszobody).
-- Agent sessions no longer read and cache large or binary files written into the workspace, which flooded the log and grew memory.
-- Inline diffs no longer freeze the window for agent edits across long, list-heavy markdown files (#1606).
-- A sent prompt no longer stays duplicated below the transcript when the turn is slow to start (#1620).
-- Transcript messages no longer flash and redraw while a session is streaming.
-- Sessions no longer stay marked as running, or lose their waiting-for-you state, around an open question. A question left unanswered by sending a new message now shows as skipped.
-- Claude Agent sessions in an externally created worktree no longer stay stuck on "running" after a background command finishes.
-- Following external Claude Code sessions keeps importing after the agent changes directory, and skips unchanged logs.
-- Codex auto-review and subagent threads no longer appear as separate "# AGENTS.md instructions" sessions.
-- File @-mention suggestions pick up newly created and renamed files without a reload.
-- Clicking the Dock or tray icon brings back the project window after the app sat in the background.
-- Context menus and popovers no longer open under the title bar, where their first item could not be clicked.
-- Workstream sessions in the session list keep their "updated" time current.
-- Tracker types defined in a background project's window now appear in its tracker pane without a reload.
+- The weekly history in the Claude and Codex usage popovers charts the main weekly limit by default instead of a per-model limit.
+- Nested lists under numbered items stay nested after saving in other Markdown tools, and a nested numbered list under item 10 starts at 1.
+- A question card that a hook denies now shows as blocked with the hook's reason, instead of as answered or still submittable.
+- Orchestrating agents can call `consume_session_inbox` on the `nimbalyst-host` MCP server.
+- Switching workspace clears the Agent Sessions search, and a search still running for the previous workspace no longer replaces the new workspace's list.
+- A prompt queued after you clear the document no longer merges into a turn with the older document content.
+- Creating a local wiki page whose content starts with its own frontmatter writes one frontmatter block instead of two.
+- In workspaces with more than 5,000 uncommitted files, the session list skips matching sessions to those files instead of sending every path to the database in one query.

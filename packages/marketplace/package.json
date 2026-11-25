@@ -1,6 +1,6 @@
 {
   "name": "@nimbalyst/marketplace",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "status": "node ./scripts/marketplace-status.mjs",
@@ -17,7 +17,7 @@
     "types": "XDG_CONFIG_HOME=\"$HOME/.config/nimbalyst\" wrangler types"
   },
   "devDependencies": {
-    "wrangler": "^4.14.4",
-    "typescript": "^5.7.3"
+    "wrangler": "4.156.0",
+    "typescript": "^6.0.3"
   }
 }

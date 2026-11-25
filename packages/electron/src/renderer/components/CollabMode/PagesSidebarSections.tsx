@@ -1,7 +1,8 @@
 /**
- * Pages mode's left sidebar: the Team section over the Personal section, each
- * a `CollabSidebar` bound to its own docs session. With no team scope the
- * Personal section stands alone under a one-line note.
+ * Pages mode's left sidebar: the Team section over the Local section (the
+ * project's wiki folder, formerly Personal), each a `CollabSidebar` bound to
+ * its own docs session. With no team scope the Local section stands alone
+ * under a one-line note.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -29,6 +30,8 @@ import { useTabsActions } from '../../contexts/TabsContext';
 import { errorNotificationService } from '../../services/ErrorNotificationService';
 import { usePagesSidebarCollapse } from './usePagesSidebarCollapse';
 import { archiveTrackerItem } from '../../services/archiveTrackerItem';
+import { exportPersonalPagesToFiles } from '../../services/exportPersonalPages';
+import { localWikiStatusAtomFamily } from '../../store/atoms/localWiki';
 
 interface PagesSidebarSectionsProps {
   workspacePath: string;
@@ -71,8 +74,10 @@ export function PagesSidebarSections({
   registerTeamCreateMenu,
   registerPersonalCreateMenu,
 }: PagesSidebarSectionsProps) {
+  // Database Personal pages from before the Local wiki: exported only when the user asks.
+  const { unexportedPageCount, brokenTypes } = useAtomValue(localWikiStatusAtomFamily(workspacePath));
   const teamTypeResolver = useCollabTypeResolver('team');
-  const personalTypeResolver = useCollabTypeResolver('personal');
+  const personalTypeResolver = useCollabTypeResolver('personal', brokenTypes);
   const setPageType = useSetPageType(workspacePath, teamScope);
   const [typingPage, setTypingPage] = useState<{ lane: PageTypeLane; page: SharedDocument } | null>(null);
   // A page's own header asks for Set type through this atom.
@@ -105,6 +110,12 @@ export function PagesSidebarSections({
   const sectionClass = (isCollapsed: boolean) => (isCollapsed ? 'shrink-0' : 'flex-1 min-h-0');
   const teamHomeId = useSectionHomeId(teamScope, teamScope ? getElectronCollabDocsSession(teamScope) : null);
   const personalHomeId = useSectionHomeId(null, getPersonalCollabDocsSession(workspacePath));
+  const localMenuItems = unexportedPageCount > 0 ? [{
+    id: 'export-database-pages',
+    label: `Export ${unexportedPageCount} database page${unexportedPageCount === 1 ? '' : 's'} to files`,
+    icon: 'drive_file_move',
+    onSelect: () => { void exportPersonalPagesToFiles(workspacePath, unexportedPageCount); },
+  }] : undefined;
   const entries = (lane: PagesSectionLane, scope: CollabScope, host: CollabHost, homeId: string | null, activeDocumentId: string | null) => (
     <PagesSectionEntries
       active={activeSectionEntry(lane, activeTabPath, activeDocumentId)}
@@ -162,7 +173,8 @@ export function PagesSidebarSections({
       <div className={`pages-sidebar-personal-section ${sectionClass(collapsed.personal)}`}>
         <ElectronCollabDocsUIRoot scope={personalScope}>
           <CollabSidebar
-            sectionTitle="Personal"
+            sectionTitle="Local"
+            extraSectionMenuItems={localMenuItems}
             activeDocumentId={activePersonalDocumentId}
             sectionEntries={entries('personal', personalScope, getPersonalCollabHost(workspacePath), personalHomeId, activePersonalDocumentId)}
             activeItemId={activeRow.itemId}

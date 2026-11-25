@@ -9,6 +9,7 @@ const alias = [
   { find: '@nimbalyst/tracker-core', replacement: path.resolve(__dirname, '../tracker-core/src') },
   { find: '@nimbalyst/tracker-schema', replacement: path.resolve(__dirname, '../tracker-schema/src') },
   { find: '@nimbalyst/tracker-engine', replacement: path.resolve(__dirname, '../tracker-engine/src') },
+  { find: /^@nimbalyst\/local-wiki$/, replacement: path.resolve(__dirname, '../local-wiki/src/index.ts') },
   { find: /^@nimbalyst\/extension-sdk\/git-operation-log$/, replacement: path.resolve(__dirname, '../extension-sdk/src/gitOperationLog.ts') },
   { find: '@', replacement: path.resolve(__dirname, './src') },
   // Monaco's ESM entry imports raw `.css`, which Node's externalized-dep

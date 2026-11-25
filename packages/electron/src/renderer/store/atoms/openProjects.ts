@@ -36,6 +36,7 @@ interface InitialWorkspaceWindowState {
   workspacePath?: string;
   activeWorkspacePath?: string | null;
   openProjectPaths?: string[];
+  restorePreviousProjects?: boolean;
 }
 
 interface ResolveInitialOpenProjectsInput {
@@ -68,6 +69,13 @@ export const activeWorkspacePathAtom = atom<string | null>(null);
 export const multiProjectModeAtom = atom<boolean>(false);
 
 /**
+ * Container at the bottom of the ProjectRail that the navigation gutter
+ * portals its app-wide items (usage, theme, feedback, account) into. Null
+ * while the rail is hidden, so those items stay in the gutter.
+ */
+export const projectRailGlobalSlotAtom = atom<HTMLElement | null>(null);
+
+/**
  * When true, the rail rehydrates with the projects that were open at last
  * app close. When false (default), the rail starts with only the project
  * the user picked from the launch screen; additional projects are added
@@ -76,7 +84,7 @@ export const multiProjectModeAtom = atom<boolean>(false);
 export const restorePreviousProjectsAtom = atom<boolean>(false);
 
 /**
- * Ordered list of open projects in the rail. First entry is leftmost.
+ * Ordered list of open projects in the rail, from top to bottom.
  *
  * New additions respect the configured limit. Restored projects are preserved.
  */
@@ -126,6 +134,29 @@ export const addOpenProjectAtom = atom(
     return true;
   }
 );
+
+/** Move by identity so a project closed during a drag cannot move another one. */
+export const moveOpenProjectAtom = atom(
+  null,
+  (get, set, { path, beforePath }: { path: string; beforePath: string | null }) => {
+    const current = get(openProjectsAtom);
+    const project = current.find(project => project.path === path);
+    if (!project || path === beforePath) return;
+    if (beforePath !== null && !current.some(project => project.path === beforePath)) return;
+    const next = current.filter(project => project.path !== path);
+    const index = beforePath === null ? next.length : next.findIndex(project => project.path === beforePath);
+    next.splice(index, 0, project);
+    if (next.some((project, index) => project !== current[index])) set(openProjectsAtom, next);
+  },
+);
+
+/** Arrange once; subsequent additions and manual moves retain their own order. */
+export const sortOpenProjectsAtom = atom(null, (get, set) => {
+  const current = get(openProjectsAtom);
+  const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+  const next = [...current].sort((a, b) => collator.compare(a.name, b.name));
+  if (next.some((project, index) => project !== current[index])) set(openProjectsAtom, next);
+});
 
 /**
  * Remove a project from the rail. If the closed project was active, the
@@ -236,7 +267,9 @@ export function resolveInitialOpenProjectsState({
     };
   }
 
-  if (restorePreviousProjects && normalizedPersistedPaths.length > 0) {
+  // An explicit "Open in new window" targets one project, even when app
+  // startup normally restores a rail. Live rail state above still wins on reload.
+  if (restorePreviousProjects && windowState?.restorePreviousProjects !== false && normalizedPersistedPaths.length > 0) {
     return {
       paths: normalizedPersistedPaths,
       activePath:
@@ -253,7 +286,6 @@ export function resolveInitialOpenProjectsState({
 }
 
 let initialized = false;
-let persistTimer: ReturnType<typeof setTimeout> | null = null;
 let unsubscribers: Array<() => void> = [];
 
 /**
@@ -320,6 +352,9 @@ export async function initOpenProjects(): Promise<void> {
         );
       }
 
+      // Keep the restored display order in this window's reload snapshot too.
+      await window.electronAPI.invoke('app:set-open-projects', initialPaths);
+
       if (initialActivePath && initialPaths.includes(initialActivePath)) {
         store.set(activeWorkspacePathAtom, initialActivePath);
       } else if (projects.length > 0) {
@@ -330,7 +365,7 @@ export async function initOpenProjects(): Promise<void> {
     console.error('[openProjects] Failed to load multi-project state:', err);
   }
 
-  // Subscribe for debounced writes back to disk.
+  // List edits commit only on drop or a menu action, so persist immediately.
   unsubscribers.push(
     store.sub(multiProjectModeAtom, () => {
       const mode = store.get(multiProjectModeAtom);
@@ -344,7 +379,7 @@ export async function initOpenProjects(): Promise<void> {
         console.error('[openProjects] Failed to persist restorePreviousProjects:', err);
       });
     }),
-    store.sub(openProjectsAtom, () => schedulePersistOpenProjects()),
+    store.sub(openProjectsAtom, () => persistOpenProjects()),
     store.sub(activeWorkspacePathAtom, () => {
       schedulePersistActivePath();
       notifyMainSetActive();
@@ -405,16 +440,11 @@ function notifyMainSetActive(): void {
   });
 }
 
-function schedulePersistOpenProjects(): void {
-  if (persistTimer) clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
-    persistTimer = null;
-    const projects = store.get(openProjectsAtom);
-    const paths = projects.map((p) => p.path);
-    window.electronAPI?.invoke?.('app:set-open-projects', paths).catch((err: unknown) => {
-      console.error('[openProjects] Failed to persist openProjects:', err);
-    });
-  }, 300);
+function persistOpenProjects(): void {
+  const paths = store.get(openProjectsAtom).map(project => project.path);
+  window.electronAPI?.invoke?.('app:set-open-projects', paths).catch((err: unknown) => {
+    console.error('[openProjects] Failed to persist openProjects:', err);
+  });
 }
 
 function schedulePersistActivePath(): void {
@@ -432,9 +462,5 @@ function schedulePersistActivePath(): void {
 export function teardownOpenProjects(): void {
   unsubscribers.forEach((unsub) => unsub());
   unsubscribers = [];
-  if (persistTimer) {
-    clearTimeout(persistTimer);
-    persistTimer = null;
-  }
   initialized = false;
 }

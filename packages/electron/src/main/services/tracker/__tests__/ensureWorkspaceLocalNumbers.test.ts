@@ -22,6 +22,7 @@ vi.mock('../../../utils/logger', () => ({
   logger: { main: { info: vi.fn(), error: vi.fn() } },
 }));
 
+import { globalRegistry, parseTrackerYAML } from '@nimbalyst/tracker-schema';
 import {
   ensureWorkspaceLocalNumbers,
   resetLocalNumberSweepStateForTests,
@@ -43,6 +44,7 @@ describe('ensureWorkspaceLocalNumbers', () => {
       { db: true },
       { store: true },
       '/src/solo',
+      expect.any(Function),
     );
   });
 
@@ -67,6 +69,27 @@ describe('ensureWorkspaceLocalNumbers', () => {
     mockAssignMissingLocalKeys.mockResolvedValue(7);
     expect(await ensureWorkspaceLocalNumbers('/src/solo')).toBe(7);
     expect(mockAssignMissingLocalKeys).toHaveBeenCalledTimes(2);
+  });
+
+  // Numbers are on unless a type opts out. When they were opt-in, no type
+  // opted in and every new item went unnumbered; this pins the default from
+  // real YAML through the registry to the sweep's predicate.
+  it('numbers every registered type except one whose YAML opts out', async () => {
+    const model = (type: string, localNumbers?: boolean) => parseTrackerYAML(
+      `type: ${type}\ndisplayName: X\ndisplayNamePlural: Xs\nicon: bug\ncolor: '#000'\nidPrefix: x\n`
+      + `modes:\n  inline: true\n${localNumbers === false ? 'localNumbers: false\n' : ''}fields:\n  - name: title\n    type: string\n`,
+    );
+    globalRegistry.register(model('lknplain'));
+    globalRegistry.register(model('lknoptedout', false));
+
+    await ensureWorkspaceLocalNumbers('/src/solo');
+    const isNumberedType = mockAssignMissingLocalKeys.mock.calls[0][3] as (type: string) => boolean;
+
+    expect(isNumberedType('lknplain')).toBe(true);
+    expect(isNumberedType('lknoptedout')).toBe(false);
+    expect(isNumberedType('lknunregistered')).toBe(false);
+    globalRegistry.unregister('lknplain');
+    globalRegistry.unregister('lknoptedout');
   });
 
   it('ignores an empty workspace path', async () => {

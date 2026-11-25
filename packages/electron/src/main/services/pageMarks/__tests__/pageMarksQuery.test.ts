@@ -13,6 +13,8 @@ import { PGlite } from '@electric-sql/pglite';
 
 import { translateAndBind } from '../../../database/sqlite/dialectTranslator';
 import { queryPageMarks, type PageMarksDb } from '../pageMarksQuery';
+import { localWikiPageMarks } from '../../localWiki/localWikiPageMarks';
+import type { LocalWiki } from '@nimbalyst/local-wiki';
 
 const WS = '/ws';
 const DECIDED = '- [Use Flagship for flags.]{decided by="Greg" email=greg@example.com on=2026-09-30 over="our own engine"}';
@@ -91,6 +93,25 @@ describe('queryPageMarks', () => {
 
   it('finds marks on PGLite', async () => {
     expect(await summarize(pglite as unknown as PageMarksDb)).toEqual(EXPECTED);
+  });
+
+  // Local pages are files now: their marks come from the wiki, and a page
+  // exported from the database (same id, row kept) is listed once, from its file.
+  it('adds the Local wiki files and lets an exported page\'s file replace its database row', async () => {
+    const page = (id: string, title: string, type: string | null, extra: object = {}) => ({ id, title, type, hasContent: true, trashedAt: null, ...extra });
+    const bodies: Record<string, string> = { 'doc-1': `Edited\n\n${DECIDED}\n`, w2: OPEN, w3: DECIDED, w4: 'no marks here' };
+    const wiki = {
+      snapshot: async () => ({ pages: [page('doc-1', 'Ideas', null), page('w2', 'Acme', 'competitor'), page('w3', 'Old', null, { trashedAt: 1 }), page('w4', 'Plain', null)] }),
+      readBody: async (id: string) => ({ markdown: bodies[id], version: 'v' }),
+    } as unknown as LocalWiki;
+    const marks = await queryPageMarks(pglite as unknown as PageMarksDb, WS, {}, () => localWikiPageMarks(wiki));
+    expect(marks.map((m) => [m.kind, m.page.kind, m.page.uri])).toEqual([
+      ['decided', 'typed-page', 'tracker://a'],
+      ['decided', 'type-page', 'type://module'],
+      ['decided', 'personal-page', 'personal://doc-1'],
+      ['open', 'typed-page', 'tracker://b'],
+      ['open', 'typed-page', 'tracker://w2'],
+    ]);
   });
 
   it('finds the same marks on SQLite after dialect translation', async () => {

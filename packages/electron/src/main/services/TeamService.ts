@@ -28,6 +28,7 @@ import { registerOrganizationDirectoryHandler } from '../ipc/OrganizationDirecto
 import { safeHandle } from '../utils/ipcRegistry';
 import { logger } from '../utils/logger';
 import { getGitRemoteIdentities, getRawGitRemote, normalizeGitRemote } from '../utils/gitUtils';
+import { repositoryNameFromRemote } from './repositoryNameFromRemote';
 import type { GitRemoteIdentities } from '../utils/gitUtils';
 import { resolveTeamForRemoteHash } from './teamProjectResolver';
 import { getCollabSyncHttpUrl } from '../utils/collabSyncUrl';
@@ -272,7 +273,7 @@ type InviteMemberRole = 'owner' | 'admin' | 'member' | 'viewer' | 'guest';
  */
 export interface InviteProjectGrant {
   teamProjectId: string;
-  projectRole: 'project-admin' | 'project-editor' | 'project-viewer';
+  projectRole: 'project-admin' | 'project-editor' | 'project-commenter' | 'project-viewer';
 }
 
 export interface InviteMemberOutcome {
@@ -869,7 +870,7 @@ function sanitizeRemoteUrl(value: string): string | null {
  */
 async function captureWorkspaceRemote(
   workspacePath: string | undefined,
-): Promise<{ gitRemoteHash?: string; remoteUrl?: string }> {
+): Promise<{ gitRemoteHash?: string; remoteUrl?: string; repositoryName?: string }> {
   if (!workspacePath) return {};
   const raw = await getRawGitRemote(workspacePath);
   // A newly minted identity is always the canonical form, so a teammate who
@@ -877,9 +878,11 @@ async function captureWorkspaceRemote(
   const normalized = normalizeGitRemote(raw);
   if (!raw || !normalized) return {};
   const remoteUrl = sanitizeRemoteUrl(raw);
+  const repositoryName = repositoryNameFromRemote(raw);
   return {
     gitRemoteHash: hashGitRemote(normalized),
     ...(remoteUrl ? { remoteUrl } : {}),
+    ...(repositoryName ? { repositoryName } : {}),
   };
 }
 
@@ -1396,6 +1399,11 @@ function getLocalOrgBinding(workspacePath: string): { orgId: string; teamProject
   }
 }
 
+/** Whether this workspace was ever bound to an org on this machine. Readable signed out. */
+export function hasLocalOrgBinding(workspacePath: string): boolean {
+  return getLocalOrgBinding(workspacePath) !== null;
+}
+
 function setLocalOrgBinding(workspacePath: string, orgId: string, teamProjectId?: string): void {
   updateWorkspaceState(workspacePath, (state) => {
     state.localOrgBinding = teamProjectId ? { orgId, teamProjectId } : { orgId };
@@ -1748,12 +1756,12 @@ async function addProjectToOrg(
   workspacePath?: string,
   name?: string,
 ): Promise<{ projectId: string; teamProjectId: string }> {
-  const { gitRemoteHash, remoteUrl } = await captureWorkspaceRemote(workspacePath);
+  const { gitRemoteHash, remoteUrl, repositoryName } = await captureWorkspaceRemote(workspacePath);
 
-  // With no remote the name is the only thing that identifies the project in
-  // the org's registry, so fall back to the folder name rather than minting a
-  // nameless row.
+  // Never mint a nameless row: the console would label it by its id. The
+  // repository name when there is a remote, else the folder name.
   const projectName = name
+    ?? repositoryName
     ?? (!gitRemoteHash && workspacePath ? basename(workspacePath) || null : null);
 
   const result = await fetchTeamApi(`/api/teams/${orgId}/projects`, 'POST', {

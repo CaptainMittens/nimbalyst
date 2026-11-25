@@ -74,7 +74,7 @@ import {
   applyRemoteWorkspaceSharedSavedView,
   registerTrackerSavedViewFlushHandler,
 } from './TrackerSavedViewService';
-import { windows, windowStates } from '../window/windowState';
+import { listWindowsWithProject } from '../window/windowState';
 import { getEffectiveTrackerSharingPolicy, resolveTrackerSharingPolicy } from './TrackerPolicyService';
 import { drainPendingTrackerItems, type TrackerDrainAbort } from './tracker/trackerItemBackfill';
 import { rowToTrackerItem } from '../mcp/tools/trackerToolHandlers';
@@ -84,6 +84,7 @@ import { sendTeamAnalyticsEvent } from './analytics/TeamAnalytics';
 import { CollaborationHealthAttemptTracker } from '../../shared/analytics/collaborationHealth';
 import { bucketItemCount, categorizeTeamAnalyticsError, toStableAnalyticsCategory } from '../../shared/analytics/teamAnalytics';
 import { setBodyLinkHomeScope } from './tracker/trackerBodyLinks';
+import { refuseLocalWikiItem } from './localWiki/localWikiItemIds';
 
 // ============================================================================
 // Engine registry (per workspace)
@@ -185,16 +186,14 @@ function broadcastToAllWindows(channel: string, payload: unknown): void {
 }
 
 /**
- * Send an IPC message only to windows whose primary workspace matches
- * `workspacePath`. Prevents tracker items from leaking across workspaces in
- * the renderer (e.g. a delta on workspace A should not paint into the
- * tracker view of workspace B's window).
+ * Send an IPC message only to windows that have `workspacePath` in their
+ * project rail, at any position. Prevents tracker items from leaking across
+ * workspaces in the renderer (e.g. a delta on workspace A should not paint
+ * into the tracker view of workspace B's window); the renderer's data source
+ * also drops items whose `workspace` is not the project it is showing.
  */
 function broadcastToWorkspaceWindows(workspacePath: string, channel: string, payload: unknown): void {
-  for (const [windowId, browserWindow] of windows) {
-    if (browserWindow.isDestroyed()) continue;
-    const state = windowStates.get(windowId);
-    if (state?.workspacePath !== workspacePath) continue;
+  for (const browserWindow of listWindowsWithProject(workspacePath)) {
     try { browserWindow.webContents.send(channel, payload); } catch { /* ignore */ }
   }
 }
@@ -701,6 +700,8 @@ export async function ensureTrackerSyncForWorkspace(workspacePath: string): Prom
  * caller is expected to consult `isTrackerSyncActive` first).
  */
 export async function syncTrackerItem(item: TrackerItem): Promise<void> {
+  // A Local wiki item is a file, never a room item.
+  refuseLocalWikiItem(item?.id, 'team sync');
   const workspacePath = item.workspace;
   const entry = workspacePath ? engines.get(workspacePath) : undefined;
   if (!entry) return;
@@ -710,6 +711,7 @@ export async function syncTrackerItem(item: TrackerItem): Promise<void> {
 }
 
 export async function unsyncTrackerItem(itemId: string, workspacePath?: string): Promise<void> {
+  refuseLocalWikiItem(itemId, 'team sync');
   if (!workspacePath) {
     // Best-effort: try every engine. v1 callers occasionally omit the
     // workspace path; we want them to keep working without surprises.

@@ -81,6 +81,8 @@ export type CollabEditorServerAccess =
   | 'not-applicable'
   | 'unknown'
   | 'writable'
+  /** A commenter: comment threads are accepted, the body is read-only. */
+  | 'comment-only'
   | 'read-only'
   | 'revoked';
 
@@ -90,10 +92,23 @@ export interface CollabEditorWriteRejection {
   clientUpdateId?: string;
 }
 
+
 export interface CollabEditorTermination {
-  reason: 'removed-from-org' | 'document-access-revoked' | 'deleted-document';
-  closeCode: 4002 | 4003 | 4004;
+  /**
+   * `comment-update-refused` (close 4009): the room refused a commenter's
+   * update that changed more than the comment threads. Terminal for this
+   * mount's Y.Doc; the host remounts with a fresh provider and tells the user
+   * the last comment was not saved.
+   */
+  reason:
+    | 'removed-from-org'
+    | 'document-access-revoked'
+    | 'deleted-document'
+    | 'comment-update-refused';
+  closeCode: 4002 | 4003 | 4004 | 4009;
   message: string;
+  /** The refused docUpdate, for `comment-update-refused` when the server named it. */
+  clientUpdateId?: string;
 }
 
 export type CollabEditorFlushResult =
@@ -109,7 +124,8 @@ export type CollabEditorFlushResult =
         | 'server-read-only'
         | 'removed-from-org'
         | 'document-access-revoked'
-        | 'deleted-document';
+        | 'deleted-document'
+        | 'comment-update-refused';
     }
   | { status: 'timed-out'; timeoutMs: number }
   | { status: 'failed'; message: string };
@@ -191,6 +207,12 @@ export interface CollabEditorCommentsOptions {
    * bundle treats as permitted.
    */
   canComment?: () => boolean;
+  /**
+   * Whether this user's role permits changing the document body. `false` with
+   * `canComment` true is a commenter. Combined with the room's verdict; the
+   * more restrictive answer wins. Omitted means permitted.
+   */
+  canEditBody?: () => boolean;
   onMention?: (recipientUserIds: string[], payload: CommentMentionPayload) => void;
   onReply?: (recipientUserIds: string[], payload: CommentReplyPayload) => void;
 }
@@ -209,13 +231,53 @@ export interface PlacedViewTypeSource {
   subscribe(listener: () => void): () => void;
 }
 
+/** What a host's upload hook stored: an image to show inline, or a file to link. */
+export interface UploadedEditorAsset {
+  kind: 'image' | 'file';
+  src: string;
+  name?: string;
+  altText?: string;
+}
+
+/** A page the `@` picker can link to, with the link as this host writes it. */
+export interface PageLinkOption {
+  id: string;
+  title: string;
+  /** The link destination, relative to the open page (`Personas/CMO.md`). */
+  href: string;
+  /** The link's title attribute; the local wiki writes `id=<id>`. */
+  linkTitle?: string;
+  folderPath?: string;
+  icon?: string;
+}
+
+/** An embedded file link (`[Label](diagram.excalidraw "width=800 height=600")`). */
+export interface FileEmbedRequest {
+  /** The link destination as written, relative to the document. */
+  src: string;
+  label: string;
+  /** Title attributes (`width`, `height`). */
+  attrs: Readonly<Record<string, string>>;
+}
+
+/** The host's pages for the `@` page-link picker. */
+export interface PageLinkSource {
+  list(): readonly PageLinkOption[];
+  createPage?(title: string): Promise<PageLinkOption>;
+  onError?(error: unknown): void;
+}
+
 export interface CollabEditorMountOptions {
   element: HTMLElement;
   source: CollabEditorSource;
   user: CollabEditorUser;
   readOnly?: boolean;
   comments?: CollabEditorCommentsOptions;
-  renderDecisionArtifact?: (entryId: string, artifact: string) => ReactNode;
+  /**
+   * `embed` is set when the artifact is an embed block in the document rather
+   * than a decision's artifact: the link title's attributes size the preview.
+   */
+  renderDecisionArtifact?: (entryId: string, artifact: string, embed?: Omit<FileEmbedRequest, 'src'>) => ReactNode;
   /**
    * Live data for tracker references in the document. Without it references
    * render as key-only chips; with it they show live title and status, and
@@ -236,6 +298,28 @@ export interface CollabEditorMountOptions {
    * view links. Omit it and the menu offers no placed views.
    */
   placedViewTypes?: PlacedViewTypeSource;
+  /**
+   * Stores a pasted or dropped file and says what to write for it: an image
+   * node or a link. Without it an in-memory document inlines images as data URLs.
+   */
+  onUploadAsset?: (file: File) => Promise<UploadedEditorAsset>;
+  /**
+   * Turns an image src written in the document into a URL this host can load,
+   * or null to leave it to the editor. Consulted after a team room's own
+   * `collab-asset://` resolver.
+   */
+  resolveImageSrc?: (src: string) => Promise<string | null>;
+  /**
+   * Pages linked by relative path. With it, `@` offers them and inserts a
+   * plain markdown link (`[Title](path.md "id=...")`).
+   */
+  pageLinks?: PageLinkSource;
+  /** Draws an embed of a file the document links to by path; null keeps the "unavailable" note. */
+  renderFileEmbed?: (embed: FileEmbedRequest) => ReactNode | null;
+  /** Cmd/Ctrl+F inside the document opens a find and replace bar above it. */
+  findInPage?: boolean;
+  /** Cmd/Ctrl+S inside the document; for hosts that write the document somewhere themselves. */
+  onSaveRequest?: () => void;
   onStateChange?(state: CollabEditorState): void;
   onPresenceChange?(presence: CollabEditorPresence): void;
   onWriteRejected?(rejection: CollabEditorWriteRejection): void;
@@ -264,6 +348,8 @@ export interface CollabEditorHandle {
   getPresence(): CollabEditorPresence;
   /** Announce departure/backgrounding or rejoin for host-managed lifecycles. */
   setPresenceActive(active: boolean): void;
+  /** Relabel this participant once the host resolves a name. Does not remount. */
+  setUser(user: CollabEditorUser): void;
   flush(options?: { timeoutMs?: number }): Promise<CollabEditorFlushResult>;
   setReadOnly(readOnly: boolean): void;
   /**
@@ -399,6 +485,8 @@ export type ConsoleLinkOpener = (href: string) => boolean;
  * Personal page): routed in its own tab. Returns the uninstall.
  */
 export declare function setConsoleLinkOpener(next: ConsoleLinkOpener): () => void;
+/** Opens a console link through the installed opener; false when none is installed or it declined. */
+export declare function openConsoleLink(href: string): boolean;
 /** Opens a team page by id; `newTab` is true for a Cmd/Ctrl or middle click. */
 export type PageReferenceOpener = (documentId: string, options: { newTab: boolean }) => void;
 /**
@@ -406,6 +494,19 @@ export type PageReferenceOpener = (documentId: string, options: { newTab: boolea
  * (`nimbalyst://doc/<id>`). Returns the uninstall.
  */
 export declare function setPageReferenceOpener(next: PageReferenceOpener): () => void;
+/** Opens a relative file link (`Personas/CMO.md`) as written; `currentDocumentPath` is null in the browser. */
+export type WorkspaceFileLinkOpener = (rawHref: string, currentDocumentPath: string | null) => void;
+/**
+ * How this host opens a relative file link met in a document. Without one the
+ * editor swallows the click. Pass null to remove it.
+ */
+export declare function setWorkspaceFileLinkOpener(opener: WorkspaceFileLinkOpener | null): void;
+/**
+ * Declares a file suffix (`.excalidraw`, `.mockup.html`) this host can render
+ * inline. A paragraph-isolated link to such a file then loads as an embed,
+ * which `renderFileEmbed` draws.
+ */
+export declare function registerEmbeddableExtension(ext: string): void;
 export { createNamedPageViewsController, type NamedPageViewsController } from './internal/runtime/src/editor/plugins/EmbedPlugin/namedPageViewsController';
 
 /** Page history: where the diff is in its change groups. */
@@ -754,6 +855,8 @@ export interface ExtensionEditorHandle {
   getEditorAPI(): unknown | null;
   getMenuItems(): readonly EditorMenuItem[];
   setPresenceActive(active: boolean): void;
+  /** Relabel this participant once the host resolves a name. Does not remount. */
+  setUser(user: CollabEditorUser): void;
   setTheme(theme: string): void;
   setVisible(visible: boolean): void;
   setReadOnly(readOnly: boolean): void;

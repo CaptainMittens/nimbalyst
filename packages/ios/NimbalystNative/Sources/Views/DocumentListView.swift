@@ -24,9 +24,18 @@ struct DocumentListView: View {
         _searchText = searchText
     }
 
+    /// Wiki tables, the marker, sidecars and trash belong to the Wiki tab, and
+    /// `.html` files only back embeds; the editor here would mangle them.
+    private var listedDocuments: [SyncedDocument] {
+        documents.filter {
+            !WikiDocuments.isWikiDataFile($0.relativePath, folder: project.localWikiFolder)
+                && !WikiDocuments.isEmbedOnlyFile($0.relativePath)
+        }
+    }
+
     private var filteredDocuments: [SyncedDocument] {
-        if searchText.isEmpty { return documents }
-        return documents.filter { doc in
+        if searchText.isEmpty { return listedDocuments }
+        return listedDocuments.filter { doc in
             doc.title.localizedCaseInsensitiveContains(searchText)
             || doc.relativePath.localizedCaseInsensitiveContains(searchText)
         }
@@ -42,7 +51,7 @@ struct DocumentListView: View {
                 syncError(observationError)
             } else if isLoading {
                 ProgressView("Loading files…")
-            } else if documents.isEmpty {
+            } else if listedDocuments.isEmpty {
                 switch syncState {
                 case .ready: emptyState
                 case .failed(let message): syncError(message)
@@ -54,7 +63,7 @@ struct DocumentListView: View {
                     case .failed(let message): syncError(message)
                     case .connecting: ProgressView("Connecting file sync…").padding(8)
                     case .syncing(let received): ProgressView("Syncing files… \(received) received").padding(8)
-                    case .ready: Text("\(documents.count) files").font(.caption).foregroundStyle(.secondary).padding(8)
+                    case .ready: Text("\(listedDocuments.count) files").font(.caption).foregroundStyle(.secondary).padding(8)
                     }
                     documentTree
                 }

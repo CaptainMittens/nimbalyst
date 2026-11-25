@@ -12,7 +12,7 @@ import { trackerItemsMapAtom } from '@nimbalyst/runtime/plugins/TrackerPlugin/tr
 import { MaterialSymbol } from '@nimbalyst/runtime/ui/icons/MaterialSymbol';
 import { useTabs, useTabsActions, type TabData } from '../../contexts/TabsContext';
 import type { TabHistoryEntry } from '../../contexts/tabHistory';
-import { getPersonalCollabDocsSession, linkableSharedDocumentsAtom, teamSyncStatusAtom } from '../../store/atoms/collabDocuments';
+import { getPersonalCollabDocsSession, getPersonalCollabHost, linkableSharedDocumentsAtom, teamSyncStatusAtom } from '../../store/atoms/collabDocuments';
 import {
   documentAvailability,
   isPagesEntryAvailable,
@@ -44,14 +44,15 @@ export interface PagesTabNavigation {
 type PersonalPageRow = { documentId: string; trashedAt?: number | null };
 
 /**
- * The Personal page list as the local database has it now, trashed rows
- * included; null when it cannot be read. Read per step rather than from the
- * session, whose list says nothing until its first snapshot lands, so a purged
- * last page reads as gone and not as "not loaded yet".
+ * The database Personal pages not exported to the Local wiki yet (the only
+ * pages that open as `personal://` tabs), trashed rows included; null when it
+ * cannot be read. Read per step rather than from the session, whose list says
+ * nothing until its first snapshot lands, so a purged last page reads as gone
+ * and not as "not loaded yet".
  */
 async function readPersonalPages(workspacePath: string): Promise<PersonalPageRow[] | null> {
   try {
-    const snapshot = await window.electronAPI.invoke('personal-pages:snapshot', workspacePath) as { items?: PersonalPageRow[] } | null;
+    const snapshot = await window.electronAPI.invoke('local-wiki:legacy-snapshot', workspacePath) as { items?: PersonalPageRow[] } | null;
     return snapshot?.items ?? [];
   } catch (error) {
     console.warn('[usePagesTabNavigation] Could not read Personal pages; Back and Forward will not skip any:', error);
@@ -83,13 +84,14 @@ export function usePagesTabNavigation(isActive: boolean, workspacePath: string):
   const addTabFor = useCallback((options: PagesOpenOptions | undefined): PagesAddTab => (
     (filePath, content = '', switchToTab = true, displayName, initialState) => {
       if (!options) return addTab(filePath, content, switchToTab, displayName, initialState);
-      const plan = planPagesOpen(filePath, options, getSnapshot());
+      const isLocalPage = (path: string) => getPersonalCollabHost(workspacePath).source().documentIdForFile(path) !== null;
+      const plan = planPagesOpen(filePath, options, getSnapshot(), isLocalPage);
       // A new tab focuses one that already shows the page.
       if (plan.action === 'new') return addTab(filePath, '', true, displayName, initialState);
       navigateTab(plan.tabId, filePath, displayName);
       return plan.tabId;
     }
-  ), [addTab, getSnapshot, navigateTab]);
+  ), [addTab, getSnapshot, navigateTab, workspacePath]);
 
   // Back and Forward pass over pages that were trashed or deleted since.
   const step = useCallback((direction: -1 | 1) => {

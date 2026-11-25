@@ -10,6 +10,8 @@ import type { TrackerRecord } from '@nimbalyst/runtime/core/TrackerRecord';
 import type { FieldDefinition, TrackerSharing } from '@nimbalyst/tracker-schema';
 import { getRecordTitle } from '@nimbalyst/runtime/plugins/TrackerPlugin/trackerRecordAccessors';
 import { reconcileExternalFieldChanges } from './trackerDetailFieldSync';
+import { isLocalWikiRecord } from '../../services/localWikiTrackerRecords';
+import { saveLocalWikiItemFields } from '../../services/localWikiTrackerWrites';
 
 export interface UseTrackerItemFieldsOptions {
   itemId: string;
@@ -85,6 +87,11 @@ export function useTrackerItemFields({
   const saveField = useCallback(async (updates: Record<string, any>) => {
     if (!editable || !item) return;
     try {
+      if (isLocalWikiRecord(item)) {
+        // A Local wiki item is a file; the wiki library writes it and reports a failure.
+        await saveLocalWikiItemFields(item, updates);
+        return;
+      }
       if ((item.source === 'frontmatter' || item.source === 'import' || item.source === 'inline') && item.system.documentPath) {
         // File-backed items with a real document path: update in source file
         await window.electronAPI.documentService.updateTrackerItemInFile({

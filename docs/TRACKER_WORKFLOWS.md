@@ -6,7 +6,7 @@ This doc covers tracker-item workflows for decisions and bugs.
 
 Record a decision where the next reader will look for it. Not every choice needs a record; most need one sentence in the right place.
 
-**In a project with Pages,** follow the project's "How we write this wiki" page. In short: mark the decision by default, as one sentence in the page it affects, with who decided, when, and what was not chosen. Also add a **decision** tracker item when any of these holds:
+**In a project with a Wiki,** follow the project's "How we write this wiki" page. In short: mark the decision by default, as one sentence in the page it affects, with who decided, when, and what was not chosen. Also add a **decision** tracker item when any of these holds:
 
 1. No single page owns it: it changes behavior across several areas, both repos, or every client.
 2. Work or code hangs off it: commits close it with `Fixes NIM-…`, or tasks and other decisions depend on it.
@@ -15,7 +15,7 @@ Record a decision where the next reader will look for it. Not every choice needs
 
 A record never replaces the mark. Keep the mark and put the record's key right after it.
 
-**Without Pages,** write the decision in the plan doc it belongs to. Use a decision tracker item when there is no plan doc or one of the four conditions above holds.
+**Without a Wiki,** write the decision in the plan doc it belongs to. Use a decision tracker item when there is no plan doc or one of the four conditions above holds.
 
 **How to create a record:**
 

@@ -63,6 +63,7 @@ const {
     webContents: {
       listeners: webContentsListeners,
       send: vi.fn(),
+      on: vi.fn((event: string, handler: CallableFunction) => { webContentsListeners.set(event, handler); }),
       once: vi.fn((event: string, handler: CallableFunction) => { webContentsListeners.set(event, handler); }),
       insertCSS: vi.fn(() => Promise.resolve('css-key')),
     },
@@ -110,6 +111,8 @@ vi.mock('../../utils/store', () => ({
   // No saved choice, so placement follows the primary until a drag says otherwise.
   getIslandDisplay: () => null,
   setIslandDisplay: setIslandDisplayMock,
+  getIslandPanelSize: () => ({ width: 420, listHeight: 340 }),
+  setIslandPanelSize: vi.fn(),
 }));
 vi.mock('../../utils/logger', () => ({ logger: { main: { warn: vi.fn(), error: vi.fn(), info: vi.fn() } } }));
 vi.mock('../../utils/dockIcon', () => ({ applyDockIcon: applyDockIconMock }));
@@ -205,6 +208,20 @@ describe('MenuBarIslandWindow', () => {
     );
   });
 
+  // A window created while the app quits keeps Electron's window count above
+  // zero, so the quit never finishes and a dev restart hangs with no windows.
+  it('builds no new window after shutdown, even when a repaint arrives', async () => {
+    vi.resetModules();
+    const fresh = await import('../MenuBarIslandWindow');
+    fresh.showMenuBarIsland(frame(1));
+    expect(browserWindowCtor).toHaveBeenCalledTimes(1);
+
+    fresh.shutdownMenuBarIsland();
+    expect(win.destroy).toHaveBeenCalled();
+    fresh.showMenuBarIsland(frame(2));
+    expect(browserWindowCtor).toHaveBeenCalledTimes(1);
+  });
+
   it('stays on screen when the fleet goes quiet', async () => {
     showMenuBarIsland(frame(1));
     finishLoad();
@@ -217,6 +234,21 @@ describe('MenuBarIslandWindow', () => {
     expect(win.hide).not.toHaveBeenCalled();
     expect(win.isVisible()).toBe(true);
     expect(browserWindowCtor).toHaveBeenCalledTimes(1);
+  });
+
+  // The BrowserWindow outlives its renderer. After a sleep/wake the frame can be
+  // gone while `isDestroyed()` is still false, so without this the island stays
+  // blank and every repaint sends into a disposed frame.
+  it('rebuilds the window on the next repaint after its renderer is gone', () => {
+    showMenuBarIsland(frame(1));
+    expect(browserWindowCtor).toHaveBeenCalledTimes(1);
+
+    win.webContents.listeners.get('render-process-gone')?.({}, { reason: 'killed' });
+    win.webContents.send.mockClear();
+    showMenuBarIsland(frame(2));
+
+    expect(win.destroy).toHaveBeenCalled();
+    expect(browserWindowCtor).toHaveBeenCalledTimes(2);
   });
 
   it("hides Vite's error overlay before showing the development island", async () => {

@@ -18,6 +18,7 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
+import * as path from 'path';
 import { logger } from '../utils/logger';
 
 /** Matches FileSnapshotCache's per-file cap. */
@@ -29,6 +30,15 @@ interface PendingRead {
   resolve: (value: string | null) => void;
   /** Objects past the cap are drained from the stream but reported as missing. */
   oversizeIsMissing: boolean;
+}
+
+/**
+ * Git object paths always use `/`. On Windows `path.relative` returns `\`, and
+ * git reports `<rev>:nested\file` as missing (GitHub #1889). Only the native
+ * separator is converted: a backslash is a legal filename character on POSIX.
+ */
+export function toGitObjectPath(relativePath: string, sep: string = path.sep): string {
+  return sep === '/' ? relativePath : relativePath.split(sep).join('/');
 }
 
 export interface GitCatFileBatchOptions {
@@ -78,7 +88,7 @@ export class GitCatFileBatch {
       this.touchIdleTimer();
 
       try {
-        child.stdin.write(`${sha}:${relativePath}\n`);
+        child.stdin.write(`${sha}:${toGitObjectPath(relativePath)}\n`);
       } catch (error) {
         logger.main.warn('[GitCatFileBatch] Could not write request:', error);
         this.failAll();
@@ -112,6 +122,7 @@ export class GitCatFileBatch {
 
     try {
       const child = spawn('git', ['cat-file', '--batch'], {
+        windowsHide: true,
         cwd: this.workspacePath,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -120,7 +131,11 @@ export class GitCatFileBatch {
       this.buffer = Buffer.alloc(0);
       this.awaitingBody = null;
 
-      child.stdout.on('data', (chunk: Buffer) => this.onData(chunk));
+      // A replaced child can still flush output it wrote before it died; feeding
+      // that to the parser would answer the new child's reads with old bytes.
+      child.stdout.on('data', (chunk: Buffer) => {
+        if (this.child === child) this.onData(chunk);
+      });
       // Bind these to *this* child: a killed process emits `exit` asynchronously,
       // and by then a replacement may already be serving reads. An unbound
       // handler would tear down its successor and null out that caller's result.

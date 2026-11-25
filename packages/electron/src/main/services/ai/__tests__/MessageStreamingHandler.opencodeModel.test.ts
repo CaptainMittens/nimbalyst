@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
     updateActivity: vi.fn(),
     endSession: vi.fn(),
     isSessionActive: vi.fn(() => false),
+    // No follow-up adopted the turn's query: the not-executing publish proceeds.
+    getSessionState: vi.fn(() => undefined),
   },
 }));
 
@@ -156,6 +158,8 @@ vi.mock("../supersedeOpenQuestions", () => ({
 }));
 vi.mock("../pendingPromptPersistence", () => ({
   setSessionPendingPrompt: vi.fn(),
+  hasSessionPendingPrompt: vi.fn(() => false),
+  onPendingPromptCleared: vi.fn(() => () => {}),
 }));
 vi.mock('../sessionInboxService', () => ({
   sessionInbox: { current: vi.fn(), begin: vi.fn(), end: vi.fn(async () => {}) },
@@ -178,6 +182,8 @@ vi.mock("../../../mcp/devAgentTools", () => ({
 vi.mock("../../MetaAgentService", () => ({
   MetaAgentService: { getInstance: vi.fn() },
 }));
+
+vi.mock("../wikiSkillAvailability", () => ({ isWikiSkillAvailable: () => false }));
 
 vi.mock("../../../utils/store", () => ({
   getDefaultEffortLevel: vi.fn(() => undefined),

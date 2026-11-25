@@ -130,6 +130,17 @@ describe("DecisionComponent", () => {
     expect(screen.getByText(/1 answered/)).toBeTruthy();
   });
 
+  it("writes a hand-written block's id into the fence with the first vote, so the vote survives a reload", () => {
+    const { doc } = renderBlock(SINGLE.replace("id: dcn-1\n", ""));
+    fireEvent.click(screen.getByText("Icon gutter"));
+    fireEvent.click(screen.getByTestId("decision-answer"));
+
+    const [key] = Object.keys(doc.getMap("decisions").toJSON());
+    const blockId = key.split("\x1f")[0];
+    expect(blockId).toMatch(/^dcn-[0-9a-f]{6}$/);
+    expect(testNode.content).toBe(`id: ${blockId}\n${SINGLE.replace("id: dcn-1\n", "")}`);
+  });
+
   it("keeps a private multiSelect tally hidden after one answer until the server unlocks every assigned ask", async () => {
     const multi = `id: dcn-2
 ask: Which surfaces ship in the beta?
@@ -292,6 +303,36 @@ type: confirm`);
     expect(testNode.content).toContain("resolved: gutter");
     expect(testNode.content).toContain("resolvedBy: Greg");
     expect(testNode.content).toContain("Greg: gutter");
+  });
+
+  it("offers a written Other answer when allowOther is set, and seals the text", () => {
+    const fence = `${SINGLE}\nallowOther: true`;
+    testNode.content = fence;
+    const config: DecisionsConfig = {
+      getYDoc: () => null,
+      currentUser: { id: "greg", name: "Greg" },
+    };
+    render(
+      <DecisionsProvider config={config}>
+        <DecisionComponent className="" content={fence} nodeKey="k1" />
+      </DecisionsProvider>
+    );
+
+    const answer = screen.getByTestId("decision-answer") as HTMLButtonElement;
+    fireEvent.click(screen.getByTestId("decision-other-row"));
+    // Choosing Other with nothing written is not an answer yet.
+    expect(answer.disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("decision-other-text"), {
+      target: { value: "Both, gutter on desktop" },
+    });
+    expect(answer.disabled).toBe(false);
+    fireEvent.click(answer);
+    expect(testNode.content).toContain("resolved: Both, gutter on desktop");
+  });
+
+  it("shows no Other row without allowOther", () => {
+    renderBlock(SINGLE);
+    expect(screen.queryByTestId("decision-other-row")).toBeNull();
   });
 
   it("lets the sealer override a tied single-select tally", () => {

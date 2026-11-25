@@ -15,6 +15,7 @@ import '@nimbalyst/runtime/editor/index.css';
 import { registerBrowserReferenceNodes } from './referenceNodes';
 import { registerBrowserTrackerReferenceInsertion } from './trackerReferenceInsertion';
 import { BrowserPlacedViewInsertionContext, registerBrowserPlacedViewInsertion, type BrowserPlacedViewInsertionValue } from './placedViewInsertion';
+import { BrowserPageLinkContext, registerBrowserPageLinkInsertion } from './pageLinkInsertion';
 import { acquireConsoleReferenceScope } from '@nimbalyst/runtime/plugins/TrackerLinkPlugin/trackerReferenceHref';
 import { TrackerReferenceSourceProvider } from '@nimbalyst/runtime/plugins/TrackerLinkPlugin/trackerReferenceSource';
 import { CollabLexicalProvider } from '@nimbalyst/runtime/sync/CollabLexicalProvider';
@@ -26,11 +27,10 @@ import {
 } from './BrowserEditorSurface';
 import './browserChrome.css';
 import { applyBrowserEditorChrome } from './browserChrome';
-import { deriveCollabEditorCommentsState } from './commenting';
 import { resolveCollabEditorUser } from './presence';
 import { createCollabDocumentSession } from './session';
 import { acquireCollabAssetImageResolver } from './collabAssetImages';
-import { BrowserDocumentEmbedContext, registerBrowserDocumentEmbeds } from './documentEmbeds';
+import { BrowserDocumentEmbedContext, BrowserFileEmbedContext, registerBrowserDocumentEmbeds } from './documentEmbeds';
 import {
   TrackerReferenceInlineAppearanceContext,
   TrackerReferenceResolverProvider,
@@ -54,6 +54,7 @@ registerBrowserReferenceNodes();
 registerBrowserDocumentEmbeds();
 registerBrowserTrackerReferenceInsertion();
 registerBrowserPlacedViewInsertion();
+registerBrowserPageLinkInsertion();
 
 class BundleEditorErrorBoundary extends React.Component<{
   children: React.ReactNode;
@@ -95,6 +96,7 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
   let readyReported = false;
 
   const hostCanComment = (): boolean => options.comments?.canComment?.() ?? true;
+  const hostCanEditBody = (): boolean => options.comments?.canEditBody?.() ?? true;
 
   /**
    * Serves the document's `collab-asset://` images. Only a team room has an
@@ -109,6 +111,10 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
         getTeamJwt: options.source.auth.getTeamJwt,
       })
     : null;
+  const hostImages = options.resolveImageSrc;
+  const resolveImageSrc = assetImages && hostImages
+    ? async (src: string) => (await assetImages.resolve(src)) ?? hostImages(src)
+    : assetImages?.resolve ?? hostImages;
   // A reference inserted here is written as this project's console link and
   // resolved in this project (Decision 23); in-memory documents have no project.
   const releaseReferenceScope = options.source.kind === 'team-room'
@@ -129,6 +135,7 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
     readOnly: options.readOnly,
     lifecycleElement: options.element,
     hostCanComment,
+    hostCanEditBody,
     onStateChange: options.onStateChange,
     onPresenceChange: (presence) => options.onPresenceChange?.(presence),
     onWriteRejected: options.onWriteRejected,
@@ -154,6 +161,7 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
 
   let renderedReadOnly = session.getState().readOnly;
   let renderedCanComment = session.canComment();
+  let renderedCanEditBody = session.canEditBody();
   /**
    * Re-render when what the editor is *allowed* to do has drifted from what is
    * on screen.
@@ -171,7 +179,8 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
     // Composer configuration is initial state; update the already mounted editor too.
     lexicalEditor?.setEditable(!session.getState().readOnly);
     if (session.getState().readOnly === renderedReadOnly
-      && session.canComment() === renderedCanComment) return;
+      && session.canComment() === renderedCanComment
+      && session.canEditBody() === renderedCanEditBody) return;
     renderEditor();
   }
 
@@ -205,6 +214,7 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
     hasPendingWrites: () => session.networkProvider?.hasPendingWrites() ?? false,
     getPresence: () => presenceSurface.getPresence(),
     setPresenceActive: (active) => { presenceSurface.setActive(active); },
+    setUser: (user) => { presenceSurface.setDisplayName(resolveCollabEditorUser(user).displayName); },
     flush: (flushOptions) => session.flush(flushOptions),
     setReadOnly(nextReadOnly) {
       if (destroyed) return;
@@ -212,6 +222,7 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
     },
     refreshCommentAccess() {
       if (destroyed) return;
+      session.refreshHostAccess();
       syncEditorSurface();
     },
     markClean: () => session.markClean(),
@@ -259,13 +270,16 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
     const state = session.getState();
     renderedReadOnly = state.readOnly;
     renderedCanComment = session.canComment();
+    renderedCanEditBody = session.canEditBody();
     const config: EditorConfig = {
       isRichText: true,
       editable: !state.readOnly,
       isCodeHighlighted: true,
       hasLinkAttributes: true,
       markdownOnly: true,
-      resolveImageSrc: assetImages?.resolve,
+      resolveImageSrc,
+      onUploadAsset: options.onUploadAsset,
+      onSaveRequest: options.onSaveRequest,
       collaboration: {
         providerFactory,
         shouldBootstrap: false,
@@ -278,25 +292,28 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
         // desktop uses the rotating per-binding editorDoc, which this bridge keeps converged.
         getYDoc: () => sharedDocument,
         isHydrated: () => session.hasConnectedOnce(),
-        getCapabilities: () => deriveCollabEditorCommentsState({
-          connection: session.getState().connection,
-          serverAccess: session.getState().serverAccess,
-          hasConnectedOnce: session.hasConnectedOnce(),
-          hostCanComment: hostCanComment(),
-        }).capabilities,
+        // Includes `editBody`: false for a commenter, from the room's verdict
+        // or the host's answer, which makes the runtime editor comment-only.
+        getCapabilities: () => session.commentCapabilities(),
       } : undefined,
-      decisions: {
+      // With no room (the local wiki browser view, the public wiki) there is no
+      // one to collect answers from or vote with, so a decision runs as on a
+      // local file: answering seals straight into the markdown.
+      decisions: session.networkProvider ? {
         renderArtifact: options.renderDecisionArtifact,
         getYDoc: () => sharedDocument,
         currentUser: options.comments?.currentUser ?? { id: resolvedUser.memberId, name: resolvedUser.displayName },
         getMembers: () => decisionMembersFromComments(options.comments?.getMembers() ?? []),
-        isHydrated: () => !session.networkProvider || session.hasConnectedOnce(),
-        canVote: () => !session.getState().readOnly && (session.networkProvider ? session.canComment() : hostCanComment()),
-        ...(session.networkProvider ? {
-          requestDecision: (command) => session.networkProvider!.requestDecision(command),
-          getDecisionState: session.networkProvider.getDecisionState,
-          onDecisionState: session.networkProvider.onDecisionState,
-        } : {}),
+        isHydrated: () => session.hasConnectedOnce(),
+        canVote: () => !session.getState().readOnly && session.canComment(),
+        requestDecision: (command) => session.networkProvider!.requestDecision(command),
+        getDecisionState: session.networkProvider.getDecisionState,
+        onDecisionState: session.networkProvider.onDecisionState,
+      } : {
+        renderArtifact: options.renderDecisionArtifact,
+        getYDoc: () => null,
+        currentUser: options.comments?.currentUser ?? { id: resolvedUser.memberId, name: resolvedUser.displayName },
+        canVote: () => !session.getState().readOnly && hostCanComment(),
       },
       onDirtyChange: (dirty) => {
         if (dirty) session.markDirty();
@@ -319,18 +336,23 @@ export function mountCollabEditor(options: CollabEditorMountOptions): CollabEdit
     root.render(
       <BundleEditorErrorBoundary onError={(error) => options.onError?.(error)}>
         <BrowserDocumentEmbedContext.Provider value={options.renderDecisionArtifact}>
+        <BrowserFileEmbedContext.Provider value={options.renderFileEmbed}>
           <TrackerReferenceResolverProvider resolver={options.trackerReferences}>
             <TrackerReferenceInlineAppearanceContext.Provider value={options.trackerReferenceAppearance ?? 'chip'}>
               <TrackerReferenceSourceProvider value={options.trackerReferenceSource ?? null}>
                 <BrowserPlacedViewInsertionContext.Provider value={placedViewInsertion}>
-                  <BrowserEditorSurface
-                    config={config}
-                    subscribeToPresence={subscribeToPresence}
-                  />
+                  <BrowserPageLinkContext.Provider value={options.pageLinks ?? null}>
+                    <BrowserEditorSurface
+                      config={config}
+                      subscribeToPresence={subscribeToPresence}
+                      findInPage={options.findInPage}
+                    />
+                  </BrowserPageLinkContext.Provider>
                 </BrowserPlacedViewInsertionContext.Provider>
               </TrackerReferenceSourceProvider>
             </TrackerReferenceInlineAppearanceContext.Provider>
           </TrackerReferenceResolverProvider>
+        </BrowserFileEmbedContext.Provider>
         </BrowserDocumentEmbedContext.Provider>
       </BundleEditorErrorBoundary>,
     );

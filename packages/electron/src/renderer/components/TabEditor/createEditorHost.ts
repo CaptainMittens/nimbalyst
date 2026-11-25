@@ -17,6 +17,7 @@ import type {
 } from '@nimbalyst/runtime';
 import { createEditorAPIOwnerToken, registerEditorAPI, unregisterEditorAPI } from '@nimbalyst/runtime';
 import { normalizeExternalHttpsUrl } from './externalUrl';
+import { createHostDictationSlot } from '../../dictation/dictationTargets';
 import { nimAssetUrl } from '../../utils/assetUrl';
 
 export interface EditorHostOptions {
@@ -141,8 +142,11 @@ export interface EditorHostOptions {
  * This factory creates a host object that implements the EditorHost interface
  * by wiring up to TabEditor's existing save/load/watch machinery.
  */
+let dictationHostSequence = 0;
+
 export function createEditorHost(options: EditorHostOptions): EditorHost {
   const editorAPIOwnerToken = createEditorAPIOwnerToken(`visible:${options.filePath}`);
+  const dictationSlot = createHostDictationSlot(`editor:${options.filePath}:${++dictationHostSequence}`);
   return {
     // ============ FILE INFO ============
     filePath: options.filePath,
@@ -152,6 +156,8 @@ export function createEditorHost(options: EditorHostOptions): EditorHost {
     get isActive() { return options.isActive; },
     get visible() { return options.getVisible ? options.getVisible() : true; },
     workspaceId: options.workspaceId,
+    // A local tab's workspaceId is its project folder.
+    workspacePath: options.workspaceId,
 
     onVisibilityChanged: options.subscribeToVisibilityChanges
       ? (callback: (visible: boolean) => void) => options.subscribeToVisibilityChanges!(callback)
@@ -277,6 +283,9 @@ export function createEditorHost(options: EditorHostOptions): EditorHost {
         unregisterEditorAPI(options.filePath, editorAPIOwnerToken);
       }
     },
+
+    // ============ DICTATION ============
+    registerDictationTarget: dictationSlot,
 
     // ============ MENU ITEMS ============
     registerMenuItems(items: EditorMenuItem[]): void {

@@ -20,7 +20,8 @@ import { createNativeTrackerItem, type NativeTrackerCreatePayload } from './trac
 import { assertTrackerItemFitsRoom, pushSharedTrackerItem } from './tracker/trackerItemShareGate';
 import { fileTrackerItemRowUpdateRefusal } from './tracker/fileTrackerItemSizeGate';
 import { applyCommentMutation, type CommentMutation } from './tracker/commentMutations';
-import { appendActivity } from './tracker/trackerActivity';
+import { appendActivity } from './tracker/trackerActivityTrailCap';
+import { writeTrackerBodyCacheVersion } from './tracker/trackerBodyCacheRetention';
 import { TrackerBodyVersionConflictError } from './tracker/trackerBodyVersionConflict';
 import { COLUMN_ONLY_IDENTITY_KEYS, extractItemCustomFields } from './tracker/trackerRowCustomFields';
 import { fromDbBoolean } from './tracker/trackerDbValue';
@@ -46,9 +47,11 @@ import {
 } from './tracker/relationshipFieldStorage';
 import { projectionWouldChange } from './tracker/projectionUpdateGuard';
 import { assignLocalKeysToRows } from './tracker/localKeyAllocator';
+import { typeHasLocalNumbers } from './tracker/localNumberTypes';
 import { workspaceLocalKeyStore } from './tracker/workspaceLocalKeyStore';
 import { extractFrontmatter, extractCommonFields } from '../utils/frontmatterReader';
 import { frontmatterHashChanged } from './documentMetadataChange';
+import { resolveWorkspaceFileForOpen } from './workspaceFileForOpen';
 import {
   PLAN_INVALID_STATUS_SIGNAL_KIND,
   VIRTUAL_DOCS,
@@ -67,6 +70,8 @@ import {
 import { globalRegistry } from '@nimbalyst/tracker-schema';
 import { database } from '../database/PGLiteDatabaseWorker';
 import { isExcludedFromTrackerProjection, shouldExcludeDir, shouldExcludePath } from '../utils/fileFilters';
+import { isInLocalWikiFolder, localWikiFolderWithin } from './localWiki/localWikiLocation';
+import { isLocalWikiItemId, refuseLocalWikiItem } from './localWiki/localWikiItemIds';
 import { isRendererUnsupportedImage, resolveImageExtension, sniffImageExtension } from '../utils/imageFormat';
 import { compressImage } from './ImageCompressor';
 import { recordTypedPageBodySnapshot } from './tracker/typedPageBodyHistory';
@@ -1030,7 +1035,13 @@ export class ElectronDocumentService implements DocumentService {
         null;
     }
 
-    if (!doc) {
+    // The scan index is capped, so a real file can be missing from it.
+    const unindexedPath =
+      !doc && fallback?.path
+        ? await resolveWorkspaceFileForOpen(this.workspacePath, fallback.path)
+        : null;
+
+    if (!doc && !unindexedPath) {
       throw new Error(
         `Document not found (id=${documentId || 'n/a'}, path=${fallback?.path ?? 'n/a'}, name=${fallback?.name ?? 'n/a'})`
       );
@@ -1046,7 +1057,7 @@ export class ElectronDocumentService implements DocumentService {
         : BrowserWindow.getFocusedWindow()?.webContents;
     if (target) {
       target.send('open-document', {
-        path: path.join(this.workspacePath, doc.path)
+        path: unindexedPath ?? path.join(this.workspacePath, doc!.path)
       });
     }
   }
@@ -1278,6 +1289,7 @@ export class ElectronDocumentService implements DocumentService {
     this.startScanIfNeeded();
 
     const items: TrackerItem[] = [];
+    const wikiFolder = localWikiFolderWithin(this.workspacePath);
 
     for (const metadata of this.metadataCache.values()) {
       const pathLower = metadata.path.toLowerCase();
@@ -1285,6 +1297,10 @@ export class ElectronDocumentService implements DocumentService {
         continue;
       }
       if (isExcludedFromTrackerProjection(metadata.path)) continue;
+      // Local wiki pages are typed pages through @nimbalyst/local-wiki, keyed by
+      // their own ids; projecting a legacy `trackerStatus` block there too would
+      // list the page twice.
+      if (isInLocalWikiFolder(metadata.path, wikiFolder)) continue;
 
       const resolved = resolveFullDocumentFrontmatter(metadata.frontmatter);
       if (!resolved) continue;
@@ -1407,6 +1423,8 @@ export class ElectronDocumentService implements DocumentService {
     itemId: string,
     options?: { createProjectionForFullDocument?: boolean }
   ): Promise<any | null> {
+    // A Local wiki item has no row, and no write path may give it one.
+    if (isLocalWikiItemId(itemId)) return null;
     const direct = await database.query<any>(
       `SELECT * FROM tracker_items WHERE id = $1`,
       [itemId]
@@ -1489,6 +1507,7 @@ export class ElectronDocumentService implements DocumentService {
     expectedType?: string,
   ): Promise<TrackerItem | null> {
     if (isExcludedFromTrackerProjection(relativePath)) return null;
+    if (isInLocalWikiFolder(relativePath, localWikiFolderWithin(this.workspacePath))) return null;
     const fullPath = path.join(this.workspacePath, relativePath);
 
     let fileContent: string;
@@ -1607,6 +1626,7 @@ export class ElectronDocumentService implements DocumentService {
     frontmatter: Record<string, any>,
   ): Promise<void> {
     if (isExcludedFromTrackerProjection(relativePath)) return;
+    if (isInLocalWikiFolder(relativePath, localWikiFolderWithin(this.workspacePath))) return;
     try {
       const resolved = resolveFullDocumentFrontmatter(frontmatter);
       if (!resolved) return; // not a tracker document -> nothing to do (no DB hit)
@@ -1814,14 +1834,14 @@ export class ElectronDocumentService implements DocumentService {
    * one of them drifts. Rows already numbered cost nothing: in the steady
    * state `unnumbered` is empty and this returns without a query. New items
    * and the one-time backfill of items that predate local numbering are the
-   * same path.
+   * same path. Types that opt out (`localNumbers: false`) are not numbered.
    *
    * Failure is not fatal -- an item with no number still works everywhere,
    * so a broken sweep must not take the tracker list down with it.
    */
   private async assignLocalKeysFrom(rows: any[]): Promise<void> {
     const unnumbered = rows
-      .filter((row) => row.local_key == null && row.deleted_at == null)
+      .filter((row) => row.local_key == null && row.deleted_at == null && typeHasLocalNumbers(row.type))
       .sort((a, b) => String(a.created).localeCompare(String(b.created)) || String(a.id).localeCompare(String(b.id)))
       .map((row) => row.id as string);
     if (unnumbered.length === 0) return;
@@ -2336,7 +2356,8 @@ export class ElectronDocumentService implements DocumentService {
     const modifierIdentity = getCurrentIdentity(row.workspace);
     appendActivity(data, modifierIdentity, 'updated', { field: 'content' });
     // Phase 4b: every body save bumps `body_version` and writes a row
-    // into `tracker_body_cache` keyed by `(item_id, body_version)`. The
+    // into `tracker_body_cache` keyed by `(item_id, body_version)`, then
+    // drops the item's superseded versions (see trackerBodyCacheRetention). The
     // bumped version travels through the metadata sync envelope so
     // remote clients learn the body changed without re-fetching the Y.Doc.
     //
@@ -2368,15 +2389,7 @@ export class ElectronDocumentService implements DocumentService {
     const newBodyVersion = Number(updateResult.rows[0]?.body_version ?? 0);
 
     if (contentJson !== null && newBodyVersion > 0) {
-      // ON CONFLICT DO NOTHING covers the rare case where two saves race
-      // on the same version assignment (shouldn't happen via PGLite's
-      // single-writer worker, but cheap insurance).
-      await database.query(
-        `INSERT INTO tracker_body_cache (item_id, body_version, content, cached_at)
-         VALUES ($1, $2, $3, NOW())
-         ON CONFLICT (item_id, body_version) DO NOTHING`,
-        [row.id, newBodyVersion, contentJson]
-      );
+      await writeTrackerBodyCacheVersion(database, row.id, newBodyVersion, contentJson);
     }
     // Body links are relationship edges; keep them with the write.
     await reindexItemRelationshipsAfterWrite(row.workspace, row.id, data, globalRegistry.get(row.type)?.fields ?? [],
@@ -2437,33 +2450,6 @@ export class ElectronDocumentService implements DocumentService {
         // that needs it because there is no live renderer peer to
         // write the Y.Doc.
       }
-    }
-  }
-
-  /**
-   * Read a body snapshot at a specific version from the cache. Used by
-   * future cold-read paths (search, history, preview) so they don't pay
-   * the cost of resolving the Y.Doc just to look at body text.
-   *
-   * Returns `null` when no cached row exists at that version (e.g. the
-   * cache was provisioned after the version was written, or the row was
-   * evicted by a future pruning policy).
-   */
-  async getTrackerBodyCacheAtVersion(itemId: string, bodyVersion: number): Promise<any | null> {
-    const row = await this.resolveTrackerRowForPublicId(itemId);
-    if (!row) return null;
-    const result = await database.query<{ content: string | null }>(
-      `SELECT content FROM tracker_body_cache
-        WHERE item_id = $1 AND body_version = $2`,
-      [row.id, bodyVersion]
-    );
-    const raw = result.rows[0]?.content;
-    if (raw === undefined || raw === null) return null;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      // Not JSON -- return as-is. The cache stores whatever the host wrote.
-      return raw;
     }
   }
 
@@ -2598,6 +2584,7 @@ export class ElectronDocumentService implements DocumentService {
    * Permanently delete a tracker item from the database.
    */
   async deleteTrackerItem(itemId: string): Promise<void> {
+    refuseLocalWikiItem(itemId, 'deleting a database item');
     const row = await this.resolveTrackerRowForPublicId(itemId);
     const rowId = row?.id || itemId;
 
@@ -2659,7 +2646,8 @@ export class ElectronDocumentService implements DocumentService {
   async updateTrackerItemInFile(itemId: string, updates: Record<string, any>): Promise<TrackerItem> {
     let row = await this.resolveTrackerRowForPublicId(itemId, { createProjectionForFullDocument: false });
     const parsedFullDocumentId = parseFullDocumentTrackerId(itemId);
-    if (!row && parsedFullDocumentId) {
+    if (!row && parsedFullDocumentId
+      && !isInLocalWikiFolder(parsedFullDocumentId.relativePath, localWikiFolderWithin(this.workspacePath))) {
       row = {
         id: itemId,
         type: parsedFullDocumentId.trackerType,
@@ -2781,12 +2769,7 @@ export class ElectronDocumentService implements DocumentService {
         );
         const newBodyVersion = Number(versionResult.rows[0]?.body_version ?? 0);
         if (contentJson !== null && newBodyVersion > 0) {
-          await database.query(
-            `INSERT INTO tracker_body_cache (item_id, body_version, content, cached_at)
-             VALUES ($1, $2, $3, NOW())
-             ON CONFLICT (item_id, body_version) DO NOTHING`,
-            [resolvedRow.id, newBodyVersion, contentJson]
-          );
+          await writeTrackerBodyCacheVersion(database, resolvedRow.id, newBodyVersion, contentJson);
         }
         await reindexItemRelationshipsAfterWrite(resolvedRow.workspace, resolvedRow.id, mergedData, fieldDefs,
           null, database as any, normalizedDescription ?? null);
@@ -2835,6 +2818,10 @@ export class ElectronDocumentService implements DocumentService {
   async importTrackerItemFromFile(relativePath: string, options?: {
     skipDuplicates?: boolean;
   }): Promise<{ item: TrackerItem | null; skipped: boolean; error?: string }> {
+    // A Local wiki page is already a typed page through the wiki library.
+    if (isInLocalWikiFolder(relativePath, localWikiFolderWithin(this.workspacePath))) {
+      return { item: null, skipped: true, error: 'Local wiki pages are not imported into the database' };
+    }
     const fullPath = path.join(this.workspacePath, relativePath);
 
     // Check for duplicate by source_ref
@@ -3557,18 +3544,28 @@ export class ElectronDocumentService implements DocumentService {
   }
 }
 
-type DocumentServiceResolver = (event: IpcMainEvent | IpcMainInvokeEvent) => ElectronDocumentService | null;
+// `workspacePath` is optional: most channels still answer for the window's active
+// project. A channel that names its project passes it so the answer does not
+// depend on which project the rail has marked active at that instant (#1822).
+type DocumentServiceResolver = (
+  event: IpcMainEvent | IpcMainInvokeEvent,
+  workspacePath?: string,
+) => ElectronDocumentService | null;
 
 let handlersRegistered = false;
 let resolveDocumentService: DocumentServiceResolver | null = null;
 
-function requireDocumentService(event: IpcMainEvent | IpcMainInvokeEvent): ElectronDocumentService {
+function requireDocumentService(event: IpcMainEvent | IpcMainInvokeEvent, workspacePath?: string): ElectronDocumentService {
   if (!resolveDocumentService) {
     throw new Error('[DocumentService] Resolver not registered');
   }
-  const service = resolveDocumentService(event);
+  const service = resolveDocumentService(event, workspacePath);
   if (!service) {
-    throw new Error('[DocumentService] No document service available for sender');
+    throw new Error(
+      workspacePath
+        ? `[DocumentService] No document service for ${workspacePath}: this window does not have it open`
+        : '[DocumentService] No document service available for sender',
+    );
   }
   return service;
 }
@@ -3759,9 +3756,18 @@ export function setupDocumentServiceHandlers(resolver: DocumentServiceResolver) 
   });
 
   // Tracker items handlers
-  safeHandle('document-service:tracker-items-list', async (event) => {
+  // The request names its project (#1822). Without it, a request that arrived
+  // just after a rail switch was answered from the previous project. A missing
+  // path, or a path this window does not have open, throws so the caller sees the
+  // failure instead of getting another project's items. A database failure is
+  // different: listTrackerItems() logs it and returns [], so the board shows empty.
+  safeHandle('document-service:tracker-items-list', async (event, workspacePath: string) => {
+    if (typeof workspacePath !== 'string' || workspacePath.length === 0) {
+      throw new Error('[DocumentService] tracker-items-list requires a workspacePath');
+    }
+    const service = requireDocumentService(event, workspacePath);
     try {
-      return await requireDocumentService(event).listTrackerItems();
+      return await service.listTrackerItems();
     } catch (error) {
       console.error('[DocumentService] tracker-items-list failed:', error);
       return [];

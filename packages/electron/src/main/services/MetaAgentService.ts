@@ -1,7 +1,7 @@
 import type { OrchestrationMessageKind } from '@nimbalyst/runtime/ai/server/types';
 import path from 'path';
 import { BrowserWindow } from 'electron';
-import { onHierarchyMove, type HierarchyMove } from './sessionHierarchy';
+import { createUnderParentOrBeside } from './sessionHierarchy';
 import { randomUUID } from 'crypto';
 import { safeHandle } from '../utils/ipcRegistry';
 import { SessionManager } from '@nimbalyst/runtime/ai/server';
@@ -34,6 +34,7 @@ import { setMetaAgentToolFns } from '../mcp/metaAgentServer';
 import { computeNotificationSignature } from './metaAgentNotificationSignature';
 import { deletePendingChildUpdates } from './ai/pendingChildUpdates';
 import { inheritedOwnership, isParentNotificationSuppressed } from './extensionSessions/sessionOwnership';
+import { childReportingMetadata, resolveChildReporting, type ChildReporting } from './childReporting';
 import { startExtensionSessionService } from './extensionSessions/extensionSessionsService';
 import { broadcastSessionCreated } from './session/broadcastSessionCreated';
 import { extractMessageText, extractUserPrompts } from './metaAgentMessageText';
@@ -92,6 +93,8 @@ interface CreateChildSessionArgs {
    * value is NOT inherited from the caller.
    */
   effortLevel?: string;
+  /** none (default) | final | messages; see childReporting.ts. */
+  reporting?: string;
 }
 
 /**
@@ -143,13 +146,10 @@ interface SpawnSessionArgs {
    * provided explicitly.
    */
   inheritModel?: boolean;
-  /**
-   * If false (the default for /launch-new-session), the parent will not receive
-   * `[Child Session Update]` notifications when the spawned session completes,
-   * errors, or waits for input. Use this for fire-and-forget hand-offs where the
-   * parent is just kicking off work to escape a long context.
-   */
+  /** Legacy form of `reporting: 'final'`; used only when `reporting` is omitted. */
   notifyOnComplete?: boolean;
+  /** none (default) | final | messages; see childReporting.ts. */
+  reporting?: string;
   /**
    * When true, the new session is created at the top level — no parent, no
    * workstream container, no shared files-edited or tabs with the caller.
@@ -157,6 +157,12 @@ interface SpawnSessionArgs {
    * caller's workstream.
    */
   isolated?: boolean;
+  /**
+   * When true, the new session goes beside the caller (under the caller's
+   * parent) instead of under it, still managed by the caller. For handoff
+   * chains where each session passes work to a successor.
+   */
+  besideCaller?: boolean;
   /**
    * Reasoning effort for the new session (e.g. spawn an
    * `openai-codex:gpt-6-astra` session at 'medium'). Clamped to the resolved
@@ -195,7 +201,6 @@ export class MetaAgentService {
   private static instance: MetaAgentService | null = null;
   private starting: Promise<void> | null = null;
   private started = false;
-  private hierarchyMoveUnsubscribe: (() => void) | null = null;
   private serverPort: number | null = null;
   private aiService: AIService | null = null;
   private sessionManager: SessionManager | null = null;
@@ -258,8 +263,6 @@ export class MetaAgentService {
 
     this.starting = (async () => {
       this.aiService = aiService;
-      this.hierarchyMoveUnsubscribe?.();
-      this.hierarchyMoveUnsubscribe = onHierarchyMove((move) => this.reportManagerChange(move));
       this.showNotificationWithResult = showNotificationWithResult;
       this.requestMobilePush = requestMobilePush ?? null;
       this.sessionManager = new SessionManager();
@@ -328,8 +331,6 @@ export class MetaAgentService {
 
     this.unsubscribeStateListener?.();
     this.unsubscribeStateListener = null;
-    this.hierarchyMoveUnsubscribe?.();
-    this.hierarchyMoveUnsubscribe = null;
     this.notificationSignatures.clear();
     this.showNotificationWithResult = null;
     // No standalone HTTP server to tear down (Phase 7); the injected toolFns are
@@ -361,6 +362,7 @@ export class MetaAgentService {
       prompt: string;
       title?: string;
       model?: string;
+      effortLevel?: string;
       autoSubmit: boolean;
       useWorktree?: boolean;
     }
@@ -404,11 +406,12 @@ export class MetaAgentService {
       useWorktree: !!args.useWorktree,
       worktreeId: inheritedWorktreeId,
       model: effectiveModel,
+      effortLevel: args.effortLevel,
       parentSessionIdOverride: workstreamId,
       // Always fire-and-forget for human-triggered launches — the user can
       // watch the new session themselves; no need to surface child-completion
       // notifications back to the originating session.
-      notifyParent: false,
+      childReporting: 'none',
     });
 
     return {
@@ -449,8 +452,9 @@ export class MetaAgentService {
     workspaceId: string,
     args: CreateChildSessionArgs
   ): Promise<string> {
-    const result = await this.createChildSessionInternal(metaSessionId, workspaceId, args);
-    return JSON.stringify(result, null, 2);
+    const childReporting = resolveChildReporting(args.reporting);
+    const result = await this.createChildSessionInternal(metaSessionId, workspaceId, { ...args, childReporting });
+    return JSON.stringify({ ...result, reporting: childReporting }, null, 2);
   }
 
   private async createChildSessionInternal(
@@ -458,10 +462,12 @@ export class MetaAgentService {
     workspaceId: string,
     args: CreateChildSessionArgs & {
       parentSessionIdOverride?: string | null;
-      /** false = fire-and-forget; written on the row before the first prompt is queued. */
-      notifyParent?: boolean;
+      /** Written on the row before the first prompt is queued; see childReporting.ts. */
+      childReporting: ChildReporting;
       /** Show `title` until the session names itself, instead of locking it in. */
       provisionalTitle?: boolean;
+      /** Place the new session beside the caller rather than under it; the caller still manages it. */
+      besideCaller?: boolean;
     }
   ): Promise<{
     sessionId: string;
@@ -546,7 +552,7 @@ export class MetaAgentService {
     // self-describing identifier wrongly trips the claude-code mismatch guard.
     const explicitModelProvider =
       args.provider
-      ?? (args.model?.includes(':') ? ModelIdentifier.tryParse(args.model)?.provider ?? null : null)
+      ?? (args.model?.includes(':') ? ModelIdentifier.tryParse(args.model)?.provider : undefined)
       ?? parentProvider;
     const explicitModel = normalizeStoredChildModelIdentifier(explicitModelProvider, args.model ?? null);
     const model = explicitModel || defaultModel;
@@ -634,8 +640,11 @@ export class MetaAgentService {
         worktreeId = parentSession.worktreeId;
         worktreePath = parentSession.worktreePath ?? null;
       }
-      const treeParentId = args.parentSessionIdOverride === null ? null
-        : parentSession && (parentSession.worktreeId ?? null) === (worktreeId ?? null) ? metaSessionId : null;
+      // Beside the caller = under the caller's own parent (top level for a root caller).
+      const besideCallerParentId = parentSession?.parentSessionId ?? null;
+      const preferredParentId = args.parentSessionIdOverride === null ? null
+        : !parentSession || (parentSession.worktreeId ?? null) !== (worktreeId ?? null) ? null
+        : args.besideCaller ? besideCallerParentId : metaSessionId;
 
       // NIM-858: do NOT auto-promote the spawning parent to agent_role='meta-agent'.
       // Spawned sessions keep their configured role; parentage carries the tree.
@@ -665,11 +674,11 @@ export class MetaAgentService {
         ...inheritedOwnership(callerMetadata),
         ...(childToolScope ? { toolScope: childToolScope } : {}),
         ...(childEffortLevel ? { effortLevel: childEffortLevel } : {}),
-        ...(args.notifyParent === false ? { notifyParent: false } : {}),
+        ...childReportingMetadata(args.childReporting, metaSessionId),
         ...(args.parentSessionIdOverride === null && !args.useWorktree ? { isolated: true } : {}),
       };
 
-      await AISessionsRepository.create({
+      const treeParentId = await createUnderParentOrBeside(parentSessionId => AISessionsRepository.create({
         id: sessionId,
         provider,
         model: normalizedModel,
@@ -678,14 +687,14 @@ export class MetaAgentService {
         worktreeId: worktreeId ?? undefined,
         agentRole: 'standard',
         createdBySessionId: metaSessionId,
-        parentSessionId: treeParentId,
+        parentSessionId,
         // When the meta-agent (or any caller of spawn_session) supplies an
         // explicit title, treat the session as already named. claude-code reads
         // this flag (via documentContext.hasBeenNamed) to set hasOutOfBandNaming
         // and suppress in-band self-naming, so the child keeps the parent's title.
         hasBeenNamed: callerProvidedTitle,
         metadata: childMetadata,
-      });
+      }), preferredParentId, besideCallerParentId);
 
       const initialPrompt = args.prompt?.trim();
       const shouldBypassExecution = this.shouldBypassChildAgentExecutionForTests();
@@ -749,7 +758,15 @@ export class MetaAgentService {
     const workspaceKey = resolveStoredWorkspaceId(parent.workspacePath, workspaceId);
 
     const isolated = args.isolated === true;
-    const notifyOnComplete = args.notifyOnComplete === true;
+    const reporting = resolveChildReporting(args.reporting, args.notifyOnComplete === true);
+    // An isolated session is top-level; one that reports back is really a
+    // worker, and would be filed outside the caller's tree (#1876).
+    if (isolated && reporting !== 'none') {
+      throw new Error(
+        `isolated cannot be combined with reporting "${reporting}": isolated is for unrelated, fire-and-forget work. ` +
+        'To get this worker\'s result back, omit isolated so it nests under you.'
+      );
+    }
 
     const workstreamId = isolated || args.useWorktree ? null : parent.id;
     const promotedParent = false;
@@ -777,9 +794,10 @@ export class MetaAgentService {
       model: effectiveModel,
       effortLevel: args.effortLevel,
       parentSessionIdOverride: workstreamId,
+      besideCaller: args.besideCaller === true,
       // Default is fire-and-forget: kicking off work in a fresh session is the
       // common /launch-new-session use case (escape a long parent context).
-      notifyParent: notifyOnComplete ? undefined : false,
+      childReporting: reporting,
     });
 
     return JSON.stringify({
@@ -787,16 +805,8 @@ export class MetaAgentService {
       isolated,
       workstreamId,
       promotedParent,
-      notifyOnComplete,
+      reporting,
     }, null, 2);
-  }
-
-  private async reportManagerChange(move: HierarchyMove): Promise<void> {
-    if (!this.aiService || move.previousManagerId === move.managerId) return;
-    if (move.managerId) await this.sendPromptToSession(move.sessionId, move.managerId, move.workspaceId,
-      `You now manage ${move.title} (moved by the user).`, false, 'report');
-    if (move.previousManagerId && await AISessionsRepository.get(move.previousManagerId)) await this.sendPromptToSession(move.sessionId, move.previousManagerId, move.workspaceId,
-      `${move.title} was moved to ${move.managerId ? (await AISessionsRepository.get(move.managerId))?.title || 'a new manager' : 'top level'}.`, false, 'report');
   }
 
   private async listWorktreesJson(metaSessionId: string, workspaceId: string): Promise<string> {
@@ -975,7 +985,11 @@ export class MetaAgentService {
     );
     const status = (statusRow?.status || 'idle') as SessionStatusValue;
     const workspaceForDrive = session.worktreePath || session.workspacePath || workspaceId;
-    const idleEnoughToDrive = status === 'idle' || status === 'interrupted' || status === 'error';
+    // A report never wakes an idle recipient: it waits for that session's next
+    // turn, where drain-time coalescing folds it in with whatever else arrived.
+    const idle = status === 'idle' || status === 'interrupted' || status === 'error';
+    const heldForNextTurn = idle && !interrupt && (messageKind === 'report' || messageKind === 'status');
+    const idleEnoughToDrive = idle && !heldForNextTurn;
     const interruptSkippedReason = interrupt
       ? this.reasonToSkipInterrupt(status, session.provider)
       : null;
@@ -984,12 +998,15 @@ export class MetaAgentService {
     let processingTriggered = idleEnoughToDrive;
     let interrupted = false;
     let interruptMethod: string | null = null;
+    let interruptDeferred: string | null = null;
     let driveOutcome: string | null = null;
 
     if (shouldInterrupt) {
       const result = await this.aiService.interruptCurrentTurn(sessionId);
       interrupted = result.success;
       interruptMethod = result.method ?? null;
+      // #1682: mid-commit, the interrupt waits for the commit call and then runs.
+      interruptDeferred = result.deferred ?? null;
       // The drive runs even when the interrupt found no live provider: a session
       // that only nominally reports running has nothing else coming to trigger it.
       //
@@ -1015,8 +1032,10 @@ export class MetaAgentService {
       statusBeforeQueue: status,
       processingTriggered,
       interrupted,
+      ...(heldForNextTurn ? { heldForNextTurn } : {}),
       ...(interruptMethod ? { interruptMethod } : {}),
       ...(interruptSkippedReason ? { interruptSkippedReason } : {}),
+      ...(interruptDeferred ? { interruptDeferred } : {}),
       ...(driveOutcome ? { driveOutcome } : {}),
     }, null, 2);
   }
@@ -1427,8 +1446,14 @@ export class MetaAgentService {
         ((session.metadata as Record<string, unknown> | undefined)?.toolScope as string | undefined) ?? null;
     }
 
-    const messages = await AgentMessagesRepository.list(sessionId, { limit: 500 });
-    const userPrompts = extractUserPrompts(messages);
+    // NIM-7428: list() is oldest-first, so reading one page of it froze the
+    // response fields mid-session once a child passed 500 rows. Results come from
+    // the newest page; the first page is read only for the prompts it adds.
+    const PAGE = 500;
+    const messages = await AgentMessagesRepository.listTail(sessionId, PAGE);
+    const firstTailId = messages[0]?.id ?? Number.POSITIVE_INFINITY;
+    const head = messages.length < PAGE ? [] : await AgentMessagesRepository.list(sessionId, { limit: PAGE });
+    const userPrompts = extractUserPrompts([...head.filter((m) => (m.id ?? 0) < firstTailId), ...messages]);
     const recentMessages = this.extractRecentMessages(messages, 3);
     const pendingPrompt = await this.getPendingInteractivePrompt(sessionId);
 

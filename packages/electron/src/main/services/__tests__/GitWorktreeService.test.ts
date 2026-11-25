@@ -1,13 +1,23 @@
 // @vitest-environment node
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
-import simpleGit from 'simple-git';
+import { createGit } from '../gitClient';
+import { execFileSync } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { GitWorktreeService, WorkspaceHasNoCommitsError } from '../GitWorktreeService';
 import { gitOperationLock } from '../GitOperationLock';
 import * as operationLog from '../GitOperationLogService';
-import { assertGitSandbox, gitSandboxEnv } from '../testSupport/gitTestSandbox';
+import { assertGitSandbox, FIXTURE_IDENTITY_ARGS, gitSandboxEnv } from '../testSupport/gitTestSandbox';
+
+// createWorktree/deleteWorktree record each command in the persisted git
+// activity log, which is bookkeeping these tests do not exercise.
+vi.mock('../GitOperationLogService', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../GitOperationLogService')>()),
+  getGitOperationLogService: () => ({}),
+  recordGitActivity: (_service: unknown, _workspacePath: string, _args: string[], operation: () => Promise<unknown>) =>
+    operation(),
+}));
 
 describe('gitSandboxEnv', () => {
   it('strips IDE-provided SSH_ASKPASS before simple-git runs a fixture command', async () => {
@@ -16,7 +26,7 @@ describe('gitSandboxEnv', () => {
     try {
       const sandboxEnv = gitSandboxEnv(undefined, { pinConfigPaths: false });
       expect(sandboxEnv.SSH_ASKPASS).toBeUndefined();
-      await expect(simpleGit(os.tmpdir()).env(sandboxEnv).raw(['--version'])).resolves.toMatch(/^git version /);
+      await expect(createGit(os.tmpdir(), {}, sandboxEnv).raw(['--version'])).resolves.toMatch(/^git version /);
     } finally {
       if (previousAskPass === undefined) delete process.env.SSH_ASKPASS;
       else process.env.SSH_ASKPASS = previousAskPass;
@@ -50,7 +60,7 @@ describe('GitWorktreeService.validateWorkspaceHasCommits', () => {
   it('throws WorkspaceHasNoCommitsError for a `git init`-ed repo with no commits', async () => {
     // Never let a pre-push hook's GIT_DIR redirect this mutating init into the
     // developer's shared repository.
-    const git = simpleGit(tmpDir).env(gitSandboxEnv(undefined, { pinConfigPaths: false }));
+    const git = createGit(tmpDir, {}, gitSandboxEnv(undefined, { pinConfigPaths: false }));
     await git.init();
 
     await expect(service.validateWorkspaceHasCommits(tmpDir))
@@ -61,7 +71,7 @@ describe('GitWorktreeService.validateWorkspaceHasCommits', () => {
   it('resolves cleanly when the repo has at least one commit', async () => {
     // .env() strips GIT_* — without it a hook-inherited GIT_DIR redirects this
     // commit onto the developer's live branch. See testSupport/gitTestSandbox.ts.
-    const git = simpleGit(tmpDir).env(gitSandboxEnv(undefined, { pinConfigPaths: false }));
+    const git = createGit(tmpDir, {}, gitSandboxEnv(undefined, { pinConfigPaths: false }));
     await git.init();
     await git.addConfig('user.email', 'test@example.com', false, 'local');
     await git.addConfig('user.name', 'Test', false, 'local');
@@ -107,7 +117,7 @@ describe('GitWorktreeService.getChangedFiles untracked-directory expansion', () 
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nimbalyst-gws-changed-'));
-    const git = simpleGit(tmpDir).env(gitSandboxEnv(undefined, { pinConfigPaths: false }));
+    const git = createGit(tmpDir, {}, gitSandboxEnv(undefined, { pinConfigPaths: false }));
     await git.init();
     await git.addConfig('user.email', 'test@example.com', false, 'local');
     await git.addConfig('user.name', 'Test', false, 'local');
@@ -134,7 +144,7 @@ describe('GitWorktreeService.getChangedFiles untracked-directory expansion', () 
     // whose contents belong to IT rather than to the outer worktree.
     const embedded = path.join(tmpDir, 'embedded-repo');
     fs.mkdirSync(embedded);
-    const embeddedGit = simpleGit(embedded).env(gitSandboxEnv(undefined, { pinConfigPaths: false }));
+    const embeddedGit = createGit(embedded, {}, gitSandboxEnv(undefined, { pinConfigPaths: false }));
     await embeddedGit.init();
     await embeddedGit.addConfig('user.email', 'test@example.com', false, 'local');
     await embeddedGit.addConfig('user.name', 'Test', false, 'local');
@@ -239,5 +249,294 @@ describe('GitWorktreeService.rebaseFromBase input boundary', () => {
     } finally {
       vi.restoreAllMocks();
     }
+  });
+});
+
+/**
+ * A git hook exports GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE, and git honors
+ * them over the working directory. Worktree creation and removal must still act
+ * on the repository they were given, not on the one the environment names.
+ */
+describe('GitWorktreeService under an inherited repository-selection env', () => {
+  const service = new GitWorktreeService();
+  const inheritedKeys = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'] as const;
+  let root: string;
+  let repo: string;
+  let decoy: string;
+  let previousEnv: Map<string, string | undefined>;
+
+  const fixtureGit = (dir: string) => createGit(dir, {}, gitSandboxEnv(undefined, { pinConfigPaths: false }));
+  const snapshot = async (dir: string) => ({
+    branches: await fixtureGit(dir).raw(['branch', '--list']),
+    worktrees: await fixtureGit(dir).raw(['worktree', 'list', '--porcelain']),
+  });
+
+  async function initRepo(dir: string): Promise<void> {
+    fs.mkdirSync(dir, { recursive: true });
+    const git = fixtureGit(dir);
+    await git.init();
+    await git.addConfig('user.email', 'test@example.com', false, 'local');
+    await git.addConfig('user.name', 'Test', false, 'local');
+    await git.addConfig('commit.gpgsign', 'false', false, 'local');
+    assertGitSandbox(dir);
+    fs.writeFileSync(path.join(dir, 'README.md'), 'hi');
+    await git.add('README.md');
+    await git.commit('initial');
+  }
+
+  beforeEach(async () => {
+    root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'nimbalyst-gws-env-')));
+    repo = path.join(root, 'repo');
+    decoy = path.join(root, 'decoy');
+    await initRepo(repo);
+    await initRepo(decoy);
+    previousEnv = new Map(inheritedKeys.map((key) => [key, process.env[key]]));
+  });
+
+  afterEach(() => {
+    for (const key of inheritedKeys) {
+      const value = previousEnv.get(key);
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  // A hook may export GIT_DIR alone, which redirects every command to its
+  // repository, or together with the work tree and index.
+  it.each([
+    ['GIT_DIR only', false],
+    ['GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE', true],
+  ])('creates and deletes the worktree in the requested repository only (%s)', async (_label, withWorkTree) => {
+    process.env.GIT_DIR = path.join(decoy, '.git');
+    if (withWorkTree) {
+      process.env.GIT_WORK_TREE = decoy;
+      process.env.GIT_INDEX_FILE = path.join(decoy, '.git', 'index');
+    }
+    const decoyBefore = await snapshot(decoy);
+
+    const worktree = await service.createWorktree(repo, { name: 'env-check' });
+    expect(path.dirname(worktree.path)).toBe(path.join(root, 'repo_worktrees'));
+    expect(await fixtureGit(repo).raw(['branch', '--list', worktree.branch])).toContain(worktree.branch);
+    expect(await snapshot(decoy)).toEqual(decoyBefore);
+
+    await service.deleteWorktree(worktree.path, repo);
+    expect(fs.existsSync(worktree.path)).toBe(false);
+    expect(await fixtureGit(repo).raw(['branch', '--list', worktree.branch])).toBe('');
+    expect(await snapshot(decoy)).toEqual(decoyBefore);
+  });
+});
+
+/**
+ * Archiving trusts isMerged: a clean, merged worktree is deleted along with its
+ * branch without asking. A substring match on `git branch -a --merged` output
+ * counted `worktree/feat` as merged whenever `worktree/feat-1` (the `-N` suffix
+ * createWorktree adds on a name collision) or `remotes/origin/worktree/feat`
+ * was, and a detached worktree whenever `remotes/origin/HEAD` was, though each
+ * still held commits the base lacks.
+ */
+describe('GitWorktreeService.getWorktreeStatus isMerged', () => {
+  let tmpDir: string;
+  let repo: string;
+  let featPath: string;
+  const service = new GitWorktreeService();
+
+  function git(cwd: string, args: string[]): string {
+    return execFileSync('git', args, { cwd, encoding: 'utf8', env: gitSandboxEnv(tmpDir) });
+  }
+
+  function commit(cwd: string, message: string): void {
+    assertGitSandbox(cwd, tmpDir);
+    git(cwd, [...FIXTURE_IDENTITY_ARGS, 'commit', '--allow-empty', '-q', '-m', message]);
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nimbalyst-gws-merged-'));
+    repo = path.join(tmpDir, 'repo');
+    fs.mkdirSync(repo);
+    git(repo, ['init', '-q', '-b', 'main']);
+    commit(repo, 'initial');
+
+    // `worktree/feat` is one commit ahead of main.
+    assertGitSandbox(repo, tmpDir);
+    featPath = path.join(tmpDir, 'feat');
+    git(repo, ['worktree', 'add', '-q', '-b', 'worktree/feat', featPath, 'main']);
+    commit(featPath, 'unmerged work');
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore Windows file-lock noise during teardown
+    }
+  });
+
+  it('does not report a branch merged because a longer-named sibling or its own remote-tracking ref is', async () => {
+    assertGitSandbox(repo, tmpDir);
+    git(repo, ['worktree', 'add', '-q', '-b', 'worktree/feat-1', path.join(tmpDir, 'feat-1'), 'main']);
+    // As if the branch was pushed and merged, then committed to again locally.
+    git(repo, ['update-ref', 'refs/remotes/origin/worktree/feat', 'main']);
+
+    const status = await service.getWorktreeStatus(featPath, 'main');
+
+    expect(status.commitsAhead).toBe(1);
+    expect(status.isMerged).toBe(false);
+  });
+
+  it('does not report a detached worktree merged because origin/HEAD is', async () => {
+    // simple-git names a detached HEAD `HEAD`, and every clone has origin/HEAD.
+    assertGitSandbox(repo, tmpDir);
+    git(repo, ['update-ref', 'refs/remotes/origin/main', 'main']);
+    git(repo, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
+    assertGitSandbox(featPath, tmpDir);
+    git(featPath, ['checkout', '-q', '--detach']);
+
+    const status = await service.getWorktreeStatus(featPath, 'main');
+
+    expect(status.commitsAhead).toBe(1);
+    expect(status.isMerged).toBe(false);
+  });
+
+  it('reports the branch merged once the base contains it, whatever the color and column config', async () => {
+    assertGitSandbox(repo, tmpDir);
+    git(repo, ['merge', '-q', '--ff-only', 'worktree/feat']);
+    // Both settings apply even when git writes to a pipe, and reshape the
+    // `git branch` lines the merge check reads.
+    git(repo, ['config', 'color.ui', 'always']);
+    git(repo, ['config', 'column.ui', 'always']);
+
+    const status = await service.getWorktreeStatus(featPath, 'main');
+
+    expect(status.commitsAhead).toBe(0);
+    expect(status.isMerged).toBe(true);
+  });
+});
+
+/**
+ * #1958: a new worktree with no explicit base starts from the remote default
+ * branch, not whatever branch the main checkout happens to be on, and its
+ * `worktree/<name>` branch never tracks that remote branch (under
+ * `push.default=upstream` a bare `git push` would otherwise push to main).
+ */
+describe('GitWorktreeService.createWorktree base branch', () => {
+  let tmpDir: string;
+  let repo: string;
+  const service = new GitWorktreeService();
+
+  function git(cwd: string, args: string[]): string {
+    return execFileSync('git', args, { cwd, encoding: 'utf8', env: gitSandboxEnv(tmpDir) });
+  }
+
+  function upstreamOf(cwd: string, branch: string): string | null {
+    try {
+      return git(cwd, ['rev-parse', '--abbrev-ref', `${branch}@{u}`]).trim();
+    } catch {
+      return null;
+    }
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'nimbalyst-gws-base-')));
+    const remote = path.join(tmpDir, 'remote.git');
+    const seed = path.join(tmpDir, 'seed');
+    repo = path.join(tmpDir, 'repo');
+    fs.mkdirSync(remote);
+    git(remote, ['init', '-q', '--bare', '-b', 'main']);
+    fs.mkdirSync(seed);
+    git(seed, ['init', '-q', '-b', 'main']);
+    assertGitSandbox(seed, tmpDir);
+    git(seed, [...FIXTURE_IDENTITY_ARGS, 'commit', '--allow-empty', '-q', '-m', 'initial']);
+    git(seed, ['push', '-q', remote, 'main']);
+    git(tmpDir, ['clone', '-q', remote, repo]);
+    // The main checkout sits on a feature branch, as in the issue report.
+    assertGitSandbox(repo, tmpDir);
+    git(repo, ['checkout', '-q', '-b', 'feature/x']);
+    git(repo, [...FIXTURE_IDENTITY_ARGS, 'commit', '--allow-empty', '-q', '-m', 'feature work']);
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // ignore Windows file-lock noise during teardown
+    }
+  });
+
+  it('bases an unspecified worktree on origin/HEAD without setting an upstream', async () => {
+    const worktree = await service.createWorktree(repo, { name: 'default-base' });
+
+    expect(worktree.baseBranch).toBe('origin/main');
+    expect(git(worktree.path, ['rev-parse', 'HEAD']).trim()).toBe(git(repo, ['rev-parse', 'origin/main']).trim());
+    expect(upstreamOf(repo, worktree.branch)).toBeNull();
+  });
+
+  it('uses and fetches the remote ref when a local branch has the same name', async () => {
+    // A local branch literally named origin/main makes `origin/main` ambiguous;
+    // git would pick the local one.
+    assertGitSandbox(repo, tmpDir);
+    git(repo, ['branch', 'origin/main', 'feature/x']);
+    // The remote moves on after the clone; only a fetch brings this commit in.
+    const seed = path.join(tmpDir, 'seed');
+    git(seed, [...FIXTURE_IDENTITY_ARGS, 'commit', '--allow-empty', '-q', '-m', 'newer on remote']);
+    git(seed, ['push', '-q', path.join(tmpDir, 'remote.git'), 'main']);
+    const remoteTip = git(seed, ['rev-parse', 'HEAD']).trim();
+
+    const worktree = await service.createWorktree(repo, { name: 'shadowed' });
+
+    expect(worktree.baseBranch).toBe('origin/main');
+    expect(git(worktree.path, ['rev-parse', 'HEAD']).trim()).toBe(remoteTip);
+  });
+
+  it('fetches outside the creation lock and kills a fetch that times out', async () => {
+    // A remote whose transport hangs: the ssh command sleeps.
+    const remoteName = `hang${process.pid}${Date.now()}`;
+    assertGitSandbox(repo, tmpDir);
+    git(repo, ['remote', 'rename', 'origin', remoteName]);
+    git(repo, ['remote', 'set-url', remoteName, 'ssh://hang.invalid/x']);
+    git(repo, ['config', 'core.sshCommand', 'sleep 5;:']);
+
+    const creating = service.createWorktree(repo, { name: 'offline', defaultBaseFetchTimeoutMs: 600 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const probeStart = Date.now();
+    await gitOperationLock.withLock(repo, 'probe', async () => undefined);
+    const probeWaitMs = Date.now() - probeStart;
+    const worktree = await creating;
+
+    expect(probeWaitMs).toBeLessThan(300);
+    expect(worktree.baseBranch).toBe(`${remoteName}/main`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const stillRunning = (() => {
+      try {
+        return execFileSync('pgrep', ['-f', `fetch --quiet -- ${remoteName} main`], { encoding: 'utf8' }).trim();
+      } catch {
+        return '';
+      }
+    })();
+    expect(stillRunning).toBe('');
+  }, 15_000);
+
+  it('reports no commits for an unborn HEAD with no remote', async () => {
+    const unborn = path.join(tmpDir, 'unborn');
+    fs.mkdirSync(unborn);
+    git(unborn, ['init', '-q', '-b', 'main']);
+
+    await expect(service.createWorktree(unborn, { name: 'empty' })).rejects.toBeInstanceOf(WorkspaceHasNoCommitsError);
+  });
+
+  it('rejects an explicit base that is an option or does not resolve, before running worktree add', async () => {
+    await expect(service.createWorktree(repo, { name: 'dash', baseBranch: '--orphan' }))
+      .rejects.toThrow(/must not start with a dash/);
+    await expect(service.createWorktree(repo, { name: 'missing', baseBranch: 'no-such-branch' }))
+      .rejects.toThrow(/Base branch "no-such-branch" not found/);
+    expect(fs.existsSync(path.join(tmpDir, 'repo_worktrees', 'dash'))).toBe(false);
+    expect(git(repo, ['branch', '--list', 'worktree/*']).trim()).toBe('');
+  });
+
+  it('does not track an explicit remote-ref base', async () => {
+    const worktree = await service.createWorktree(repo, { name: 'explicit-base', baseBranch: 'origin/main' });
+
+    expect(worktree.baseBranch).toBe('origin/main');
+    expect(upstreamOf(repo, worktree.branch)).toBeNull();
   });
 });

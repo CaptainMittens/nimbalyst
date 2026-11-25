@@ -13,3 +13,15 @@ export function canDispatchIntoDrain(sessionId: string): boolean {
     | null;
   return typeof provider?.canAcceptFollowUpDuringDrain === 'function' && provider.canAcceptFollowUpDuringDrain();
 }
+
+/**
+ * True when the session's Claude Code provider is running a turn the queue did
+ * not start, or has emitted the wake for one: background-task results, a
+ * teammate message, or a stream-closed continuation. See NIM-7428.
+ */
+export function isLeadTurnPending(sessionId: string): boolean {
+  const provider = ProviderFactory.getProvider('claude-code', sessionId) as
+    | { isLeadBusy?: () => boolean }
+    | null;
+  return typeof provider?.isLeadBusy === 'function' && provider.isLeadBusy();
+}

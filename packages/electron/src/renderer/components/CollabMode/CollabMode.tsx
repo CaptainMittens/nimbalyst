@@ -9,10 +9,10 @@
  */
 
 import React, { useCallback, useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { atom, useAtomValue, useSetAtom } from 'jotai';
 import { setTitleBarCreateMenuAtom } from '../../store/atoms/titleBarCreate';
 import { CollabScopeResolutionError, type CollabOpenOptions, type CollabScope } from '@nimbalyst/collab-client/core';
-import { createCollabDocsScopeLifecycle, pageDisplayName } from '@nimbalyst/collab-client/docs';
+import { createCollabDocsScopeLifecycle, pageDisplayName, sharedIndexLoadedForScopeAtom, sharedIndexUnavailableForScopeAtom } from '@nimbalyst/collab-client/docs';
 import { store } from '@nimbalyst/runtime/store';
 import type { CollabSidebarCreateMenu } from '@nimbalyst/collab-client/docs-ui';
 import { useDocUnread } from '../../hooks/useDocUnread';
@@ -23,7 +23,6 @@ import {
   useTabsActions,
   useTabs,
   useTabNavigationShortcuts,
-  type TabData,
 } from '../../contexts/TabsContext';
 import { TabManager } from '../TabManager/TabManager';
 import { TrackerTabIssueKeyContext } from '../TabManager/trackerTabIssueKey';
@@ -42,7 +41,9 @@ import { activePageRow, openPageTab } from './collabPageTabs';
 import { composePagesCreateMenu } from './pagesCreateMenu';
 import { PagesTabHistoryButtons, usePagesTabNavigation } from './usePagesTabNavigation';
 import { PagesSwipeNavigation } from './PagesSwipeNavigation';
+import { TeamPagesErrorBanner } from './TeamPagesErrorBanner';
 import { useCollabTabPersistence } from './useCollabTabPersistence';
+import { useLocalWikiFileTabs } from './useLocalWikiFileTabs';
 import { usePublishPagesTabStrip } from '../../services/pageTreeTools/pagesTabStrip';
 import { PagesSidebarSections, useSectionHomeId } from './PagesSidebarSections';
 import { pageHeaderRequestPendingAtom } from './pageTypeRequest';
@@ -60,8 +61,14 @@ import {
   rebindElectronCollabHostScope,
   sharedDocumentsAtom,
   sharedFoldersAtom,
+  teamPagesStartErrorAtomFamily,
   type SharedDocument,
 } from '../../store/atoms/collabDocuments';
+import {
+  pendingCollabDocumentFailure,
+  resolvePendingCollabDocument,
+  type TeamScopeUnavailable,
+} from './pendingCollabDocument';
 import { changedDocIdsAtom } from '../../store/atoms/collabDiscovery';
 import { isCollabUri, parseCollabUri } from '@nimbalyst/collab-protocol';
 import {
@@ -72,10 +79,13 @@ import {
 } from './collabTree';
 import { errorNotificationService } from '../../services/ErrorNotificationService';
 import { collabFileType, type SerializableDocumentContext } from '../../hooks/useDocumentContext';
-import { getTextSelection } from '../UnifiedAI/TextSelectionIndicator';
-import { getActiveEditorContextItems } from '../../stores/editorContextStore';
+import { getPagesDocumentContext, pagesDocumentIdentity } from './pagesDocumentContext';
 import { categorizeTeamAnalyticsError, toStableAnalyticsCategory } from '../../../shared/analytics/teamAnalytics';
 import { trackTeamAnalyticsEvent } from '../../utils/teamAnalytics';
+
+/** Read in place of a team scope's index flag while there is no team scope. */
+const NO_INDEX_ATOM = atom(false);
+const NO_INDEX_FAILURE_ATOM = atom<string | null>(null);
 
 interface CollabModeProps {
   workspacePath: string;
@@ -87,6 +97,10 @@ interface CollabModeProps {
 interface CollabModeInnerProps extends CollabModeProps {
   /** The project's team scope, or null with no account, no team, or while resolving. */
   teamScope: CollabScope | null;
+  /** Why `teamScope` is null once resolution stopped; null while it is still resolving. */
+  teamUnavailable: TeamScopeUnavailable | null;
+  /** Ask the host for the team scope again after it gave up. */
+  onRetryTeamScope: () => void;
   /** This workspace's Personal pages scope; always present. */
   personalScope: CollabScope;
 }
@@ -110,6 +124,7 @@ export const CollabMode = forwardRef<CollabModeRef, CollabModeProps>(function Co
   onPanelStateChange,
 }, ref) {
   const [scope, setScope] = useState<CollabScope | null>(null);
+  const [teamUnavailable, setTeamUnavailable] = useState<TeamScopeUnavailable | null>(null);
   const scopeRef = useRef<CollabScope | null>(null);
   const hostRef = useRef<ReturnType<typeof getElectronCollabHostForScopeKey> | null>(null);
   if (!hostRef.current) hostRef.current = getElectronCollabHostForScopeKey(workspacePath);
@@ -132,16 +147,26 @@ export const CollabMode = forwardRef<CollabModeRef, CollabModeProps>(function Co
         const nextScope = session?.scope ?? null;
         scopeRef.current = nextScope;
         setScope(nextScope);
+        // A scope, or resolution starting over (sign-in, org change, Retry):
+        // an earlier failure is no longer the answer.
+        setTeamUnavailable(null);
         if (nextScope) void initSharedDocuments(nextScope);
       },
       onError: (error) => {
+        // A session's start failure also lands here; `initSharedDocuments`
+        // records that one against the scope.
+        if (scopeRef.current) return;
+        const message = error instanceof Error ? error.message : String(error);
         // Signed out, or a project with no team, is the normal Personal-only
         // state: the resolver marks both as final answers, not failures.
         if (error instanceof CollabScopeResolutionError && !error.retryable) {
-          console.debug('[CollabMode] No team scope; showing Personal pages only:', error.message);
+          console.debug('[CollabMode] No team scope; showing Personal pages only:', message);
+          setTeamUnavailable({ message, retryable: false });
           return;
         }
+        // The lifecycle has stopped retrying: say so instead of waiting silently.
         console.error('[CollabMode] Failed to resolve collaboration scope:', error);
+        setTeamUnavailable({ message, retryable: true });
       },
     });
     lifecycle.start();
@@ -164,6 +189,11 @@ export const CollabMode = forwardRef<CollabModeRef, CollabModeProps>(function Co
         ref={ref}
         workspacePath={workspacePath}
         teamScope={scope}
+        teamUnavailable={teamUnavailable}
+        onRetryTeamScope={() => {
+          setTeamUnavailable(null);
+          hostRef.current!.invalidateScope();
+        }}
         personalScope={personalSession.scope}
         isActive={isActive}
         onFileOpen={onFileOpen}
@@ -234,6 +264,8 @@ async function loadCollabLayout(workspacePath: string): Promise<CollabLayout> {
 export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(function CollabModeInner({
   workspacePath,
   teamScope,
+  teamUnavailable,
+  onRetryTeamScope,
   personalScope,
   isActive,
   onFileOpen,
@@ -300,74 +332,38 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
   const sidebarDragRef = useRef({ startX: 0, startWidth: 0, latestWidth: sidebarWidth });
   sidebarDragRef.current.latestWidth = sidebarWidth;
 
-  // Track active tab and its getContent function so the right-pane chat can
-  // pull a fresh snapshot of the live (Yjs-synced) document on each message.
-  // Refs avoid re-rendering CollabMode on every tab switch / keystroke.
-  const activeTabForContextRef = useRef<TabData | null>(null);
-  const getContentByTabIdRef = useRef<Map<string, () => string>>(new Map());
+  // A page click reuses the tab ID. Keep the getter's document identity too,
+  // so the next page cannot send the previous page's body while loading.
+  const getContentByTabIdRef = useRef<Map<string, { filePath: string; read: () => string }>>(new Map());
 
   const handleGetContentReady = useCallback((tabId: string, getContentFn: () => string) => {
-    getContentByTabIdRef.current.set(tabId, getContentFn);
-  }, []);
+    const tab = tabsActions.getSnapshot().tabs.get(tabId);
+    if (tab) getContentByTabIdRef.current.set(tabId, { filePath: tab.filePath, read: getContentFn });
+  }, [tabsActions]);
 
   const getDocumentContext = useCallback(async (): Promise<SerializableDocumentContext> => {
-    const activeTab = activeTabForContextRef.current;
-    if (!activeTab || !isCollabUri(activeTab.filePath)) {
-      return {
-        filePath: '',
-        fileType: 'unknown',
-        content: '',
-      };
-    }
+    const snapshot = tabsActions.getSnapshot();
+    const activeTab = snapshot.activeTabId ? snapshot.tabs.get(snapshot.activeTabId) : undefined;
+    return getPagesDocumentContext(
+      activeTab,
+      activeTab ? getContentByTabIdRef.current.get(activeTab.id) : undefined,
+      async (filePath) => {
+        const result = await window.electronAPI.readFileContent(filePath);
+        if (!result?.success) throw new Error(`Could not read page context: ${filePath}`);
+        return result.content ?? '';
+      },
+    );
+  }, [tabsActions]);
 
-    // Read the latest content directly from the live Lexical editor for this
-    // tab. This reflects whatever Yjs has merged into the local Y.Doc, which
-    // is the source of truth for shared docs (the file does NOT exist on
-    // disk, so window.electronAPI.readFileContent is not appropriate here).
-    let content = '';
-    const getContentFn = getContentByTabIdRef.current.get(activeTab.id);
-    if (getContentFn) {
-      try {
-        content = getContentFn() ?? '';
-      } catch (err) {
-        console.error('[CollabMode] Failed to read collab doc content:', err);
-      }
-    }
-
-    // Include the current text selection so the agent gets the "+ selection"
-    // context, but only if it belongs to this collab document. Mirrors
-    // EditorMode.getDocumentContext for regular files.
-    const textSelectionData = getTextSelection();
-    const textSelection = textSelectionData && textSelectionData.filePath === activeTab.filePath
-      ? textSelectionData
-      : undefined;
-
-    return {
-      filePath: activeTab.filePath,
-      fileType: collabFileType(activeTab.filePath),
-      content,
-      textSelection,
-      textSelectionTimestamp: textSelection?.timestamp,
-      // Extension-provided selection context (e.g. a spreadsheet's selected
-      // cells) for the active collab document. Mirrors EditorMode; without it a
-      // collaborative spreadsheet's "+ selection" never reaches the agent.
-      editorContextItems: getActiveEditorContextItems(activeTab.filePath),
-    };
-  }, []);
-
-  // Keep activeTabForContextRef in sync with the currently active tab and
-  // prune getContent entries for tabs that no longer exist.
+  // Prune getContent entries for tabs that no longer exist.
   useEffect(() => {
-    const activeTab = activeTabId ? tabs.find(t => t.id === activeTabId) : null;
-    activeTabForContextRef.current = activeTab || null;
-
     const liveTabIds = new Set(tabs.map(t => t.id));
     for (const tabId of getContentByTabIdRef.current.keys()) {
       if (!liveTabIds.has(tabId)) {
         getContentByTabIdRef.current.delete(tabId);
       }
     }
-  }, [tabs, activeTabId]);
+  }, [tabs]);
 
   // Tell the MCP layer about the active collab document so applyDiff /
   // applyCollabDocEdit can resolve the collab:// URI to this window.
@@ -589,10 +585,10 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
     if (document) void handleDocumentSelect(document, undefined, source, options);
   }) : undefined, [teamScope, linkableDocuments, handleDocumentSelect, addTabFor]);
 
-  // Personal pages open as `personal://` tabs; their items and types open as
-  // pages, the same as the team's.
+  // Local pages open as their markdown files, database pages not exported yet
+  // as `personal://` tabs; items and types open as pages, the same as the team's.
   useEffect(() => getPersonalCollabHost(workspacePath).setOpenArtifactAdapter((target, _source, options) => {
-    if (target.kind === 'personal-page') {
+    if (target.kind === 'personal-page' || target.kind === 'local-file') {
       addTabFor(options)(target.path, '', true, target.title);
       return;
     }
@@ -614,6 +610,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
       if (title && tab.fileName !== title) tabsActions.updateTab(tab.id, { fileName: title });
     }
   }, [personalDocuments, tabs, tabsActions]);
+  useLocalWikiFileTabs(workspacePath, personalDocuments, tabs, tabsActions);
 
   // Relationship clicks on an item page, and row clicks on a type page.
   const handleOpenTrackerPage = useCallback((trackerItemId: string, options?: CollabOpenOptions) => {
@@ -631,7 +628,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
   }, [activeTabPath]);
   const activePersonalDocumentId = activeTabPath && isPersonalPageTabPath(activeTabPath)
     ? activeTabPath.slice(PERSONAL_PAGE_TAB_PREFIX.length)
-    : null;
+    : activeTabPath ? getPersonalCollabHost(workspacePath).source().documentIdForFile(activeTabPath) : null;
   const activeRow = useMemo(() => activePageRow(activeTabPath), [activeTabPath]);
 
   useEffect(() => {
@@ -678,50 +675,54 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
     sharedFolders,
   });
 
-  // Auto-open a pending document. Set by "Share to Team" (carries title +
-  // initialContent for first-share seeding) and by deep links (documentId
-  // only -- title arrives later via the shared-docs sync, which the
-  // sharedDocuments rename effect picks up).
+  // A pending document: "Share to Team" (type + initialContent for first-share
+  // seeding), a pick from an index-backed list (type), or a link (id only).
+  // It ends in the page or a visible error, never a guessed editor.
+  const indexLoadedAtom = useMemo(
+    () => (teamScope ? sharedIndexLoadedForScopeAtom(teamScope.scopeKey) : NO_INDEX_ATOM),
+    [teamScope],
+  );
+  const indexLoaded = useAtomValue(indexLoadedAtom);
+  const indexUnavailableAtom = useMemo(
+    () => (teamScope ? sharedIndexUnavailableForScopeAtom(teamScope.scopeKey) : NO_INDEX_FAILURE_ATOM),
+    [teamScope],
+  );
+  const indexUnavailable = useAtomValue(indexUnavailableAtom);
+  const teamStartError = useAtomValue(teamPagesStartErrorAtomFamily(workspacePath));
   useEffect(() => {
-    if (
-      !pendingDoc
-      || !isActive
-      || !teamScope
-      || pendingDoc.scopeKey !== teamScope.scopeKey
-      || pendingDoc.orgId !== teamScope.orgId
-    ) return;
+    if (!pendingDoc || pendingDoc.scopeKey !== workspacePath) return;
+    const failure = pendingCollabDocumentFailure(pendingDoc, { teamScope, teamUnavailable, startError: teamStartError });
+    if (failure) {
+      store.set(pendingCollabDocumentAtom, null);
+      errorNotificationService.showError('Could not open shared page', failure);
+      return;
+    }
+    if (!isActive || !teamScope) return;
 
-    const docs = getLinkableSharedDocumentsForScopeKey(teamScope.scopeKey);
-    const found = docs.find(d => d.documentId === pendingDoc.documentId);
-
-    // Prefer the synced doc (it has the canonical title), but fall back to
-    // a synthetic doc so cold-start deep links still open immediately.
-    const docToOpen: SharedDocument = found
-      ? {
-          ...found,
-          ...(pendingDoc.documentType ? { documentType: pendingDoc.documentType } : {}),
-          ...(pendingDoc.metadataVersion === 2 ? {
-            metadataVersion: 2 as const,
-            fileExtension: pendingDoc.fileExtension,
-            editorId: pendingDoc.editorId,
-          } : {}),
-        }
-      : {
-          documentId: pendingDoc.documentId,
-          teamProjectId: teamScope.indexConfig.teamProjectId ?? null,
-          title: '',
-          documentType: pendingDoc.documentType ?? 'markdown',
-          metadataVersion: pendingDoc.metadataVersion,
-          fileExtension: pendingDoc.fileExtension,
-          editorId: pendingDoc.editorId,
-          createdBy: '',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        };
-
+    const resolution = resolvePendingCollabDocument(pendingDoc, {
+      linkableDocuments: getLinkableSharedDocumentsForScopeKey(teamScope.scopeKey),
+      indexLoaded,
+      indexUnavailable,
+      teamProjectId: teamScope.indexConfig.teamProjectId ?? null,
+      now: Date.now(),
+    });
+    // Re-run when the index delivers it (`linkableDocuments`, `indexLoaded`).
+    if (resolution.action === 'wait') return;
     store.set(pendingCollabDocumentAtom, null);
-    handleDocumentSelect(docToOpen, pendingDoc.initialContent, pendingDoc.analyticsSource ?? 'deep_link', pendingDoc.openOptions);
-  }, [pendingDoc, isActive, handleDocumentSelect, teamScope]);
+    if (resolution.action === 'failed') {
+      errorNotificationService.showError('Could not open shared page', resolution.message, { details: pendingDoc.documentId });
+      return;
+    }
+    if (resolution.action === 'not-found') {
+      errorNotificationService.showError(
+        'Could not open shared page',
+        "This page was not found, or you don't have access to it.",
+        { details: pendingDoc.documentId },
+      );
+      return;
+    }
+    handleDocumentSelect(resolution.document, pendingDoc.initialContent, pendingDoc.analyticsSource ?? 'deep_link', pendingDoc.openOptions);
+  }, [pendingDoc, isActive, handleDocumentSelect, teamScope, workspacePath, teamUnavailable, teamStartError, indexLoaded, indexUnavailable, linkableDocuments]);
 
   // With nothing open once restore settles, Pages lands on a Home page: the
   // team's with a team (waiting for it to sync), else Personal's. Closing the
@@ -739,16 +740,12 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
     host.openArtifact({ kind: 'document', scope, documentId, teamProjectId: scope.indexConfig.teamProjectId ?? null }, 'sidebar');
   }, [restored, tabs.length, teamScope, teamHomeId, personalHomeId, workspacePath, personalScope]);
 
-  // File path of the active collab document, so the chat panel scopes its
-  // "+ selection" chips to the doc the user is actually looking at. Without a
-  // currentFilePath the chip row falls back to "most recent" and leaks a stale
-  // selection from a previously-active tab (e.g. a spreadsheet's cells still
-  // showing after switching to a markdown doc). Empty for Search and Types.
-  const activeCollabFilePath = useMemo(() => {
-    if (!activeTabId) return '';
-    const tab = tabs.find((t) => t.id === activeTabId);
-    return tab && isCollabUri(tab.filePath) ? tab.filePath : '';
-  }, [activeTabId, tabs]);
+  // Match the send path for shared, Personal and Local wiki pages. Navigation
+  // tabs have no document context, so they cannot expose another tab's selection.
+  const activePageContext = useMemo(
+    () => pagesDocumentIdentity(tabs.find((tab) => tab.id === activeTabId)),
+    [activeTabId, tabs],
+  );
 
   // The header-bar session chip acts on the chat sidebar this mode already
   // owns. Deliberately no `openInAgentMode` — a shared document isn't a file
@@ -775,7 +772,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
       }
     },
     reopenLastClosedTab: async () => {
-      await tabsActions.reopenLastClosedTab(async () => {});
+      await tabsActions.reopenLastClosedTab();
     },
     getActiveDocumentPath: () => {
       if (!activeTabId) return null;
@@ -851,6 +848,19 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
           the last tab closes, so the tab strip is always present; without one
           an empty Personal section shows a hint instead. */}
       <div ref={tabContentAreaRef} className="relative flex-1 flex flex-col overflow-hidden min-h-0">
+        {teamScope && teamStartError ? (
+          <TeamPagesErrorBanner
+            title="Team pages could not be loaded"
+            message={teamStartError}
+            onRetry={() => { void initSharedDocuments(teamScope); }}
+          />
+        ) : !teamScope && teamUnavailable?.retryable ? (
+          <TeamPagesErrorBanner
+            title="Team pages could not be reached"
+            message={teamUnavailable.message}
+            onRetry={onRetryTeamScope}
+          />
+        ) : null}
         {hasTabs && <PagesSwipeNavigation targetRef={tabContentAreaRef} onStep={stepPagesHistory} />}
         {!hasTabs && !teamScope && (
           <div
@@ -894,7 +904,7 @@ export const CollabModeInner = forwardRef<CollabModeRef, CollabModeInnerProps>(f
           isActive={isActive}
           isCollapsed={chatCollapsed}
           onToggleCollapse={toggleChatCollapsed}
-          documentContext={{ filePath: activeCollabFilePath }}
+          documentContext={activePageContext}
           getDocumentContext={getDocumentContext}
           onFileOpen={async (filePath) => onFileOpen(filePath)}
           width={chatWidth}

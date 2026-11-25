@@ -47,7 +47,18 @@ export const COLLAB_BUNDLE_EAGER_GZIP_BUDGET_BYTES = {
   // is read. Raised from 320,000 with ~2% headroom.
   // 2026-10-05: 332,074 after the link hover card (FloatingLinkEditorPlugin
   // rewrite) and Pages navigation; raised from 330,000 with ~2% headroom.
-  editor: 339_000,
+  // 2026-10-09: 342,147 after the chart, callout, columns and inline TOC
+  // blocks registered their node cores and transformers. Vega loads lazily
+  // in its own chunk. Raised from 339,000 with ~2% headroom.
+  // 2026-10-09: 351,752 after transclusion, mentions, link previews and code
+  // excerpts registered their node cores and transformers. Raised from
+  // 349,000 with ~2% headroom.
+  // 2026-10-09: 362,835 after the wiki blocks gained bottom-right resize
+  // grips and block-menu items (type, title, columns, depth, reset size).
+  // Raised from 359,000 with ~2% headroom.
+  // 2026-11-03: 372,811 after colored text and highlight colors in the
+  // selection toolbar. Raised from 370,000 with ~2% headroom.
+  editor: 380_000,
   // Measured at 70,625 gzip bytes on 2026-09-08, when the list took over
   // folder browsing from the tree for the browser console (folder rows, the
   // browse scope, the row "more" action). The row context menu itself is
@@ -67,7 +78,10 @@ export const COLLAB_BUNDLE_EAGER_GZIP_BUDGET_BYTES = {
   // 2026-10-04: 88,122 bytes after Pages became per project (the session keeps
   // other projects' pages in a separate link-only index and refuses writes to
   // them). Raised with ~4% headroom.
-  'docs-ui': 92_000,
+  // 2026-10-22: clean release build measured 92,149 bytes after typed-page
+  // sidebar reveal and page-index readiness/retry handling. No new eager
+  // source modules since 0.12.1; reset with ~3% headroom.
+  'docs-ui': 95_000,
   // Sep 5 privacy-aware document transport graph measured 35,049 bytes.
   // Keep a narrow allowance for the supported response/refresh contract.
   'feedback-ui': 35_500,
@@ -104,7 +118,10 @@ export const COLLAB_BUNDLE_EAGER_GZIP_BUDGET_BYTES = {
   // 2026-10-03: 188,280 bytes after typed pages and type pages moved into
   // collab-client for the web console, console links, and the page links
   // query; their views and editors load on demand. Reset with ~4% headroom.
-  'trackers-ui': 196_000,
+  // 2026-10-13: 196,016 bytes. No new eager module: schema define refusals
+  // now always settle with a readable reason (a new `serverError` notice
+  // string and the store's settle paths). Reset with ~2% headroom.
+  'trackers-ui': 200_000,
   // Deliberately tight. This entry is a WebSocket client over the protocol
   // package and nothing else; anything that makes it jump has dragged a UI
   // graph in behind it.

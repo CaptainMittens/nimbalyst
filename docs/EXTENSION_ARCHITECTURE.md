@@ -81,6 +81,20 @@ hidden-editor lifecycle while preserving useful editor-writing tools like
 Excalidraw diagram edits. New extension tools should always set
 `ExtensionAITool.access`; `readOnly` is a deprecated compatibility flag.
 
+## Which Project a Call Acts On
+
+A window can have several projects open in its rail, so the on-screen project is a guess for anything that is not a direct click. Background and agent-initiated work names its project (#544, #1299).
+
+- `services.ai.sendPrompt` requires `workspacePath`, and main rejects a project the calling window does not have open.
+- `callBackendTool` requires `workspacePath`. Main refuses an unnamed call, except from the hidden screenshot capture window, whose one mounted file fixes the project.
+- Inside an AI tool handler, `context.extensionContext.services` is tied to the calling session's project (`scopeContextToProject` in `ExtensionAIToolsBridge.ts`): relative file paths resolve against it, `findFiles` searches it, and `callBackendTool`/`sendPrompt` default to it. A tool call with no project refuses relative paths instead of guessing.
+- Editors get their tab's local project from `EditorHost.workspacePath`. For a shared document `workspaceId` is an opaque collaboration scope key, not a path; never pass it as a project.
+- Editors get file access for their own project through `EditorHost.fs`, which sends the tab's project; main accepts it only if the window has that project open.
+- Non-tool extension code resolves a relative path against the window's on-screen project, asked of main per call (`extensions:get-active-project-path`). That is wrong for an editor whose tab is in another rail project, because `services.filesystem` is shared by all of an extension's editors and cannot tell which one is calling. Editor and panel code passes absolute paths built from `host.workspacePath`. Never cache a project path in the renderer; the rail changes it.
+- Work that runs per project on a timer uses `filesystem.listProjectPaths()`, which lists each open project in exactly one window, and `findFiles(pattern, rootDir)`.
+
+Direct UI actions (a dialog, a settings picker) may still use the on-screen project.
+
 ## useEditorLifecycle Hook (Recommended)
 
 The `useEditorLifecycle` hook replaces all manual `EditorHost` subscription boilerplate with a single hook call. **All new custom editors should use this hook.**
@@ -702,7 +716,7 @@ A panel (`contributions.panels`) receives `host: PanelHost` (`packages/extension
 | --- | --- |
 | `host.callBackendTool(toolName, args?)` | Calls a tool this extension's own backend module registered, including `panelOnly` tools, and returns its parsed JSON result. The host adds the extension id and workspace; main refuses tools registered by another extension's module. |
 | `host.components?.SessionTranscript` | The full agent transcript for one session (`{ sessionId, collapseTranscript?, className? }`), with composer, queue, and interactive prompts. The composer sends to that `sessionId`, never to the window's active session. Present only when the manifest declares `permissions.ai: true`, because it lets the panel read any session in the workspace and prompt it. |
-| `host.setGutterBadge(value, { tone? })` | Badges the panel's existing gutter button: `null` clears, `0` is a dot, a positive number is a count; `tone: 'warning'` switches color. The host keeps the value after a fullscreen panel unmounts and clears it when the extension is disabled or unloaded. The backend module can keep it current while the panel is unmounted (next section); whichever writes last wins. |
+| `host.setGutterBadge(value, { tone? })` | Badges the panel's existing gutter button, for sidebar, fullscreen and bottom panels: `null` clears, `0` is a dot, a positive number is a count. `tone` picks the color: `default` (the attention color used for unread counts), or `warning`, `success`, `error` for a badge that reports a state rather than a count. The host keeps the value after a fullscreen panel unmounts and clears it when the extension is disabled or unloaded. The backend module can keep it current while the panel is unmounted (next section); whichever writes last wins. |
 
 Extension panels share one renderer trust domain, so the host-stamped caller extension id is attribution, not authentication: panel-only tools hide controls from agents, they are not a security boundary against other installed extensions.
 
@@ -713,6 +727,55 @@ Extension panels share one renderer trust domain, so the host-stamped caller ext
 `ctx.services.panels.setGutterBadge(panelId, value, { tone? })` sets the same badge from a backend module, so an event the module sees while the panel is closed (a new flag, a budget crossing) reaches the gutter. `panelId` is the bare id from the extension's own `contributions.panels`; the host prefixes the extension id from the module's runtime and rejects any id the manifest does not declare, so a module cannot badge another extension's panel. No permission is required, for the same reason the panel's own call needs none.
 
 Main broadcasts the badge with the module's workspace (`extension-panels:gutter-badge`, `main/extensions/backendPanelBadges.ts`). The renderer listener (`store/listeners/panelGutterBadgeListeners.ts`) shows it only while that workspace is active, re-applies each workspace's value when the project rail switches, and on mount replays the badges main holds, so a badge set before the window loaded is not lost. Badges a module set are cleared when that module stops or crashes.
+
+## Backend Modules: Command Terminals (`ctx.services.terminals`)
+
+A backend module can run a command in a terminal tab that Nimbalyst owns. The tab in the bottom terminal panel is the command's log, so the extension needs no process supervisor, log store, or log viewer of its own, and the user can read, scroll, and type into the process like any terminal. Requires the `terminals` permission. Types: `packages/extension-sdk/src/types/backendTerminals.ts`.
+
+```typescript
+const terminal = await ctx.services.terminals.createCommandTerminal({
+  key: 'web',                  // this extension's own stable name; one tab per key
+  title: 'Web dev server',
+  command: 'pnpm run dev',     // run as `$SHELL -lc '<command>'` (`cmd.exe /d /s /c` on Windows)
+  cwd: 'packages/web',         // relative to the project root, must stay inside it
+  env: { NODE_ENV: 'development' },
+  pinned: true,                // sorts ahead of ordinary terminals
+  panelId: 'runs',             // optional: the terminal panel shows a tab back to this panel
+});
+```
+
+| Handle member | Notes |
+| --- | --- |
+| `id`, `pid` | The tab id, and the pid of the shell that runs the command. The shell leads the command's process group. |
+| `onOutput(handler)` | Raw PTY chunks with a `cursor`. Output that arrived before the first subscriber is replayed to it. |
+| `onExit(handler)` | Fires once when the shell exits, with `{ exitCode, signal? }` (`signal` is the number of the signal that ended it, 15 for SIGTERM, so a stop can be told from a crash); a handler added after the exit is called immediately. |
+| `kill(signal?)` | Signals the whole process group (`SIGTERM` default; `SIGKILL`, `SIGINT`, `SIGHUP`). |
+| `stop({ graceMs? })` | `SIGTERM` to the group, `SIGKILL` after `graceMs` (default 5000), then confirms the group is gone. Returns `{ escalated, groupGone }`. |
+| `read({ tail? \| since?, maxChars? })` | The log as plain text: ANSI stripped, `\r` progress bars collapsed, full-screen output dropped (`renderTerminalText` in `main/services/terminalText.ts`). Returns a `cursor` to pass as `since`; `gap: true` means the cursor fell behind the 500 KB scrollback. Works after the command has exited. |
+| `reveal()` | Opens the terminal panel on the tab in the windows showing the project. |
+| `setStatus(tone \| null)` | Status dot on the tab: `success`, `warning`, `error`. |
+| `dispose()` | Stops the command and removes the tab and its saved output. |
+
+Rules the host enforces (`main/extensions/backendTerminals.ts`):
+
+- **Ownership.** Each terminal is recorded with the extension, module, and workspace of the runtime that created it. Every op checks that record, so a module cannot read, signal, or close another extension's terminal or one in another project.
+- **One tab per key.** Starting a key again replaces its tab, so each start has an empty log. Starting a key that is still running is rejected.
+- **Stopped with the owner.** When the module stops for any reason (extension disabled, project closed, Developer Mode turned off for a `requiresDeveloperMode` extension, crash) the host stops its commands. On app quit it stops all of them, with a 2 s grace period because quit has a deadline. The tabs stay and show the saved output.
+- **Closing the tab stops the command.** The user closing a command tab runs the same stop before the PTY is destroyed.
+- **Never a shell.** A command tab has `kind: 'command'` in the terminal store. `terminal:initialize` does not spawn a shell for it, and the tab has no Restart button: only the owning extension starts the command again.
+
+Stopping always targets the process group, not the direct child: `pnpm run dev` forks `pnpm -> vite -> esbuild`, and a signal to the shell alone leaves the rest holding the port. The escalation lives in `main/services/processGroupStop.ts`.
+
+## Developer-Mode Extensions (`requiresDeveloperMode`)
+
+A manifest can set `"requiresDeveloperMode": true`. While Developer Mode (Settings > Advanced) is off:
+
+- the extension's panels are left out of the panel registry, so their gutter buttons, toggle commands, and keybinding targets do not exist (`renderer/extensions/panels/panelVisibility.ts`);
+- its backend modules are not started, so the MCP tools they register are not offered to agents (`startModulesAcrossWorkspaces` in `main/extensions/backendModuleLifecycle.ts`).
+
+The extension still loads and still appears in Settings > Extensions, so it can be turned off independently. Turning Developer Mode on or off takes effect without a restart: the panel registry re-syncs on the setting, and `developer-mode:set` calls `syncDeveloperModeBackendModules`, which starts or stops the gated modules in every open project. The gate is the Developer Mode setting, not the onboarding role answer.
+
+Other contributions (custom editors, renderer AI tools, Claude plugin commands) are not gated by this field.
 
 ## Extension Development
 

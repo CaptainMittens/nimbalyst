@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import type { TranscriptViewMessage, ChatAttachment } from '../../../ai/server/types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { JSONViewer } from './JSONViewer';
@@ -15,6 +15,8 @@ import { MaterialSymbol } from '../../icons/MaterialSymbol';
 import { formatToolDisplayName } from '../utils/toolNameFormatter';
 import { isCommitRequestMessage, parseCommitRequest, CommitRequestCard } from './CommitRequestCard';
 import { localAssetUrl } from '../../../utils/localAssetUrl';
+import { useTranscriptImageGallery } from './transcriptImageGalleryContext';
+import { attachmentImageKey, attachmentImageSrc } from '../utils/transcriptImages';
 
 interface MessageSegmentProps {
   message: TranscriptViewMessage;
@@ -40,7 +42,7 @@ interface MessageSegmentProps {
   workspacePath?: string;
 }
 
-export const MessageSegment: React.FC<MessageSegmentProps> = ({
+export const MessageSegment = React.memo(function MessageSegment({
   message,
   isUser,
   isCollapsed = false,
@@ -57,13 +59,19 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
   onCompact,
   provider,
   workspacePath
-}) => {
+}: MessageSegmentProps) {
   const [isDiffExpanded, setDiffExpanded] = useState(false);
+  const gallery = useTranscriptImageGallery();
   const [enlargedImage, setEnlargedImage] = useState<ChatAttachment | null>(null);
   const [enlargedText, setEnlargedText] = useState<ChatAttachment | null>(null);
   const [textContent, setTextContent] = useState<string | null>(null);
   const [textLoadError, setTextLoadError] = useState<string | null>(null);
-
+  const closeImageModal = useCallback(() => setEnlargedImage(null), []);
+  const closeTextModal = useCallback(() => {
+    setEnlargedText(null);
+    setTextContent(null);
+    setTextLoadError(null);
+  }, []);
 
   // Load text content when a text attachment is selected
   useEffect(() => {
@@ -147,9 +155,18 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
   // Persisted on the assistant_message payload (see AssistantMessagePayload.thinking).
   const renderThinking = () => {
     if (isUser) return null;
-    if (!showThinking) return null;
-    const thinking = (message as TranscriptViewMessage).thinking;
+    const { thinking, progressUpdate } = message as TranscriptViewMessage;
     if (!thinking || !thinking.trim()) return null;
+    // An API progress update is the only trace of text the model wrote for
+    // the user between tool calls (#1801), so it is shown, never collapsed.
+    if (progressUpdate) {
+      return (
+        <div className="rich-transcript-progress-update text-sm italic text-[var(--nim-text-muted)] whitespace-pre-wrap select-text">
+          {thinking.trim()}
+        </div>
+      );
+    }
+    if (!showThinking) return null;
     return (
       <details className="rich-transcript-thinking rounded-md border border-[var(--nim-border)] bg-[var(--nim-bg-secondary)]">
         <summary className="flex items-center gap-1.5 px-2 py-1 text-xs text-[var(--nim-text-muted)] cursor-pointer select-none">
@@ -173,7 +190,7 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
 
     // Check if this is a rate limit event embedded in text content
     if (!isUser && isRateLimitContent(message.text ?? '')) {
-      return <RateLimitWidget content={message.text ?? ''} />;
+      return <RateLimitWidget content={message.text ?? ''} sessionId={sessionId} isLastMessage={isLastMessage} />;
     }
 
     // Upstream Claude API service errors (api_error 5xx, overloaded_error)
@@ -397,7 +414,7 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
 
     // Check if this is a rate limit event
     if (isRateLimitContent(errorMessage)) {
-      return <RateLimitWidget content={errorMessage} />;
+      return <RateLimitWidget content={errorMessage} sessionId={sessionId} isLastMessage={isLastMessage} />;
     }
 
     // Upstream API service error (api_error 5xx, overloaded_error) -
@@ -442,7 +459,7 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
 
     const handleAttachmentClick = (attachment: ChatAttachment) => {
       if (attachment.type === 'image') {
-        setEnlargedImage(attachment);
+        if (!gallery?.openImage(attachmentImageKey(message.id, attachment.id))) setEnlargedImage(attachment);
       } else {
         setEnlargedText(attachment);
       }
@@ -480,35 +497,16 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
 
   // Render image lightbox modal
   const renderImageModal = () => {
-    // For enlarged view, use the full file path (not thumbnail).
-    // Local file paths are routed through `localAssetUrl` so Electron can
-    // serve them via `nim-asset://` (the main window has `webSecurity: true`
-    // and cannot load `file://` directly).
-    const getEnlargedSrc = () => {
-      if (!enlargedImage) return '';
-      if (enlargedImage.filepath) {
-        if (enlargedImage.filepath.startsWith('data:')) {
-          return enlargedImage.filepath;
-        }
-        if (enlargedImage.filepath.startsWith('file://')) {
-          return localAssetUrl(enlargedImage.filepath.replace(/^file:\/\//, ''));
-        }
-        return localAssetUrl(enlargedImage.filepath);
-      }
-      // Fallback to thumbnail if no filepath
-      return enlargedImage.thumbnail || '';
-    };
-
     return (
       <FullscreenModal
         isOpen={!!enlargedImage}
-        onClose={() => setEnlargedImage(null)}
+        onClose={closeImageModal}
         ariaLabel="Image preview"
         contentClassName="max-w-[90vw] max-h-[90vh] flex flex-col items-center"
       >
         <button
           className="message-attachment-modal-close absolute -top-8 -right-8 w-7 h-7 p-0 border-none bg-[var(--nim-bg-secondary)] rounded-full cursor-pointer flex items-center justify-center text-[var(--nim-text)] transition-colors duration-150 hover:bg-[var(--nim-bg-hover)]"
-          onClick={() => setEnlargedImage(null)}
+          onClick={closeImageModal}
           aria-label="Close"
         >
           <MaterialSymbol icon="close" size={20} />
@@ -516,7 +514,7 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
         {enlargedImage && (
           <>
             <img
-              src={getEnlargedSrc()}
+              src={attachmentImageSrc(enlargedImage)}
               alt={enlargedImage.filename}
               className="message-attachment-modal-image max-w-full max-h-[calc(90vh-60px)] object-contain rounded-lg shadow-[0_4px_24px_rgba(0,0,0,0.3)]"
             />
@@ -531,16 +529,10 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
 
   // Render text preview modal
   const renderTextModal = () => {
-    const handleClose = () => {
-      setEnlargedText(null);
-      setTextContent(null);
-      setTextLoadError(null);
-    };
-
     return (
       <FullscreenModal
         isOpen={!!enlargedText}
-        onClose={handleClose}
+        onClose={closeTextModal}
         ariaLabel="Text file preview"
         contentClassName="w-[80vw] max-w-[900px] max-h-[80vh] flex flex-col bg-[var(--nim-bg)] rounded-lg shadow-[0_4px_24px_rgba(0,0,0,0.3)] overflow-hidden"
       >
@@ -556,7 +548,7 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
               </span>
               <button
                 className="message-attachment-modal-close static ml-auto w-6 h-6 p-0 border-none bg-[var(--nim-bg-secondary)] rounded-full cursor-pointer flex items-center justify-center text-[var(--nim-text)] transition-colors duration-150 hover:bg-[var(--nim-bg-hover)]"
-                onClick={handleClose}
+                onClick={closeTextModal}
                 aria-label="Close"
               >
                 <MaterialSymbol icon="close" size={18} />
@@ -636,4 +628,4 @@ export const MessageSegment: React.FC<MessageSegmentProps> = ({
       {renderTextModal()}
     </div>
   );
-};
+});

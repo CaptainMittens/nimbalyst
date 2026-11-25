@@ -41,6 +41,8 @@ export interface SessionHistoryLayout {
   viewMode: 'list' | 'kanban';
   /** One line per session row instead of title plus a metadata line. */
   compactRows: boolean;
+  /** Thin context-window fill bar under each session title. */
+  showContextUsage: boolean;
 }
 
 /**
@@ -56,6 +58,8 @@ export interface AgentModeLayout {
   teammatePanelCollapsed: boolean;
   agentPanelCollapsed: boolean;
   trackerPanelCollapsed: boolean;
+  /** Whether the meta-agent "Delegated Sessions" dashboard is collapsed. */
+  metaAgentDashboardCollapsed: boolean;
 }
 
 export const MIN_AGENT_RIGHT_PANEL_WIDTH = 150;
@@ -85,6 +89,7 @@ const DEFAULT_SESSION_HISTORY_LAYOUT: SessionHistoryLayout = {
   sortOrder: 'updated',
   viewMode: 'list',
   compactRows: false,
+  showContextUsage: false,
 };
 
 const DEFAULT_LAYOUT: AgentModeLayout = {
@@ -95,6 +100,7 @@ const DEFAULT_LAYOUT: AgentModeLayout = {
   teammatePanelCollapsed: false,
   agentPanelCollapsed: false,
   trackerPanelCollapsed: false,
+  metaAgentDashboardCollapsed: false,
 };
 
 /**
@@ -112,6 +118,7 @@ export function mergeWithDefaults(persisted: Partial<AgentModeLayout> | undefine
     // Coerce any value other than the two known ones back to 'updated'.
     sortOrder: persisted?.sessionHistoryLayout?.sortOrder === 'created' ? 'created' : 'updated',
     compactRows: persisted?.sessionHistoryLayout?.compactRows === true,
+    showContextUsage: persisted?.sessionHistoryLayout?.showContextUsage === true,
   };
   // Only pick known layout fields from persisted data.
   // agenticCodingWindowState stores both layout AND selectedWorkstream at the same level.
@@ -125,6 +132,8 @@ export function mergeWithDefaults(persisted: Partial<AgentModeLayout> | undefine
     teammatePanelCollapsed: persisted?.teammatePanelCollapsed ?? DEFAULT_LAYOUT.teammatePanelCollapsed,
     agentPanelCollapsed: persisted?.agentPanelCollapsed ?? DEFAULT_LAYOUT.agentPanelCollapsed,
     trackerPanelCollapsed: persisted?.trackerPanelCollapsed ?? DEFAULT_LAYOUT.trackerPanelCollapsed,
+    metaAgentDashboardCollapsed:
+      persisted?.metaAgentDashboardCollapsed ?? DEFAULT_LAYOUT.metaAgentDashboardCollapsed,
   };
 }
 
@@ -195,6 +204,11 @@ export const compactRowsAtom = atom(
   (get) => get(agentModeLayoutAtom).sessionHistoryLayout.compactRows
 );
 
+/** Whether session rows show a context-window fill bar */
+export const showContextUsageAtom = atom(
+  (get) => get(agentModeLayoutAtom).sessionHistoryLayout.showContextUsage
+);
+
 /** View mode for session history (list or kanban) */
 export const viewModeAtom = atom(
   (get) => get(agentModeLayoutAtom).sessionHistoryLayout.viewMode
@@ -223,6 +237,11 @@ export const agentPanelCollapsedAtom = atom(
 /** Whether the tracker panel is collapsed */
 export const trackerPanelCollapsedAtom = atom(
   (get) => get(agentModeLayoutAtom).trackerPanelCollapsed
+);
+
+/** Whether the meta-agent delegated-sessions dashboard is collapsed */
+export const metaAgentDashboardCollapsedAtom = atom(
+  (get) => get(agentModeLayoutAtom).metaAgentDashboardCollapsed
 );
 
 /** Per-session derived atom for current teammates from session metadata */
@@ -437,6 +456,16 @@ export const setCompactRowsAtom = atom(
 );
 
 /**
+ * Toggle the context-window fill bar on session rows.
+ */
+export const setShowContextUsageAtom = atom(
+  null,
+  (_get, set, showContextUsage: boolean) => {
+    set(setSessionHistoryLayoutAtom, { showContextUsage });
+  }
+);
+
+/**
  * Set view mode.
  */
 export const setViewModeAtom = atom(
@@ -455,6 +484,29 @@ export const toggleTodoPanelCollapsedAtom = atom(
     const workspacePath = get(activeWorkspacePathAtom);
     const current = get(agentModeLayoutAtom);
     const newLayout = { ...current, todoPanelCollapsed: !current.todoPanelCollapsed };
+
+    set(agentModeLayoutAtom, newLayout);
+
+    if (!workspacePath) {
+      console.warn('[agentMode] Cannot persist layout - no active workspace');
+      return;
+    }
+    schedulePersist(workspacePath, newLayout);
+  }
+);
+
+/**
+ * Toggle the meta-agent delegated-sessions dashboard collapsed state.
+ */
+export const toggleMetaAgentDashboardCollapsedAtom = atom(
+  null,
+  (get, set) => {
+    const workspacePath = get(activeWorkspacePathAtom);
+    const current = get(agentModeLayoutAtom);
+    const newLayout = {
+      ...current,
+      metaAgentDashboardCollapsed: !current.metaAgentDashboardCollapsed,
+    };
 
     set(agentModeLayoutAtom, newLayout);
 
@@ -587,6 +639,9 @@ export const ensureSessionHistoryVisibleAtom = atom(
 // Initialization
 // ============================================================
 
+// Count overlapping rail and AgentMode restores independently for each project.
+export const pendingAgentModeRestoresAtom = atomFamily((_workspacePath: string) => atom(0));
+
 /**
  * Initialize agent mode layout from workspace state.
  * Call this when workspace path is known (typically in useEffect).
@@ -601,10 +656,18 @@ export async function initAgentModeLayout(
   workspacePath: string,
   options: { setActive?: boolean } = {}
 ): Promise<void> {
+  const pending = pendingAgentModeRestoresAtom(workspacePath);
+  store.set(pending, count => count + 1);
   const { setActive = true } = options;
   if (setActive) {
     store.set(activeWorkspacePathAtom, workspacePath);
   }
+
+  // A rail switch runs this restore while a notification click may already
+  // be selecting a session in the same project. If the selection moved while
+  // `workspace:get-state` was in flight, the persisted value is older than it
+  // and must not overwrite it.
+  const selectionBeforeLoad = store.get(selectedWorkstreamAtom(workspacePath));
 
   try {
     const workspaceState = await window.electronAPI.invoke(
@@ -617,11 +680,16 @@ export async function initAgentModeLayout(
     const restoredLayout = mergeWithDefaults(persisted);
     store.set(agentModeLayoutAtomFamily(workspacePath), restoredLayout);
 
-    if (agenticState?.selectedWorkstream) {
+    if (
+      agenticState?.selectedWorkstream &&
+      store.get(selectedWorkstreamAtom(workspacePath)) === selectionBeforeLoad
+    ) {
       const selection = agenticState.selectedWorkstream as { type: WorkstreamType; id: string };
       store.set(selectedWorkstreamAtom(workspacePath), selection);
     }
   } catch (err) {
     console.error('[agentMode] Failed to load layout:', err);
+  } finally {
+    store.set(pending, count => count - 1);
   }
 }

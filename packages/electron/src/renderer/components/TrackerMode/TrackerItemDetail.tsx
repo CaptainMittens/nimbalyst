@@ -65,6 +65,7 @@ import {
   collabAwarenessAtom,
   collabProductStatusAtom,
 } from '../../store/atoms/collabEditor';
+import { isLocalWikiRecord } from '../../services/localWikiTrackerRecords';
 import './TrackerItemDetail.css';
 
 interface TrackerItemDetailProps {
@@ -142,7 +143,8 @@ function formatTimestamp(value: string | Date | number | undefined): string {
 
 /** Whether this record's metadata fields are editable */
 function isEditable(record: TrackerRecord): boolean {
-  return isNativeItem(record) || record.source === 'frontmatter' || record.source === 'import' || record.source === 'inline';
+  return isNativeItem(record) || record.source === 'frontmatter' || record.source === 'import' || record.source === 'inline'
+    || isLocalWikiRecord(record);
 }
 
 /** Source label for the metadata footer */
@@ -151,6 +153,7 @@ function getSourceLabel(record: TrackerRecord): string | null {
   if (record.source === 'inline') return `Inline marker${record.sourceRef ? ` in ${record.sourceRef}` : ''}`;
   if (record.source === 'frontmatter') return `Frontmatter${record.sourceRef ? ` in ${record.sourceRef}` : ''}`;
   if (record.source === 'import') return `Imported${record.sourceRef ? ` from ${record.sourceRef}` : ''}`;
+  if (isLocalWikiRecord(record)) return record.system.documentPath ? 'Local wiki page' : 'Local wiki table row';
   return null;
 }
 
@@ -476,6 +479,7 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
   const canToggleShare = Boolean(
     item &&
     editable &&
+    !isLocalWikiRecord(item) &&
     (isNativeItem(item) || item.source === 'frontmatter' || item.source === 'import') &&
     sharing === 'team' &&
     typeof teamOrgId === 'string'
@@ -1098,8 +1102,8 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
           </div>
         )}
 
-        {/* Type tags editor (for native/editable items) */}
-        {editable && (
+        {/* Type tags editor (for native/editable items; a Local wiki file has one type) */}
+        {editable && !isLocalWikiRecord(item) && (
           <TypeTagsEditor
             typeTags={item.typeTags}
             primaryType={item.primaryType}
@@ -1140,7 +1144,11 @@ export const TrackerItemDetail: React.FC<TrackerItemDetailProps> = ({
             key={item.id} description={item.fields.description} currentBody={contentMarkdown} editor={recoveryEditor}
             canInsert={editable && contentLoaded && (contentMode === 'local-pglite' || (contentMode === 'collaborative' && hasSyncedOnce && collabStatus === 'connected'))}
           />}
-          {contentMode === 'local-pglite' && localEditorConfig ? (
+          {isLocalWikiRecord(item) && !item.system.documentPath ? (
+            <p className="text-sm text-nim-faint m-0" data-testid="tracker-local-wiki-row-no-body">
+              A row of a Local wiki table has no page body.
+            </p>
+          ) : contentMode === 'local-pglite' && localEditorConfig ? (
             <div
               className={`tracker-content-editor bg-nim overflow-hidden ${focusActive ? 'flex-1 min-h-0' : 'min-h-[200px] border border-nim rounded'}`}
               data-testid="tracker-detail-content-editor"

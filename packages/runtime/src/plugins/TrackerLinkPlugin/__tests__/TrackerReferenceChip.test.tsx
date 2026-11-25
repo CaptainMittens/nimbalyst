@@ -17,6 +17,7 @@ import { setTrackerReferenceNodeRenderer } from '../TrackerReferenceNodeRenderer
 import { setTrackerReferenceHomeScope } from '../trackerReferenceHref';
 import { trackerReferenceRelationOptions } from '../TrackerReferenceRelationMenu';
 import { TrackerReferenceSourceProvider } from '../trackerReferenceSource';
+import { setTrackerReferenceLinksSource } from '../trackerReferencePreviewData';
 
 const trackerRecord: TrackerRecord = {
   id: 'bug_1',
@@ -261,6 +262,73 @@ describe('TrackerReferenceChip', () => {
     ).toBe('true');
   });
 
+  it('says what the item is and what it connects to in the preview', async () => {
+    globalRegistry.register({
+      type: 'preview-competitor', displayName: 'Competitor', displayNamePlural: 'Competitors', icon: 'target', color: '#336699',
+      modes: { inline: false, fullDocument: true }, idPrefix: 'c', idFormat: 'ulid',
+      fields: [
+        { name: 'title', type: 'string' },
+        { name: 'status', type: 'select', options: [{ value: 'active', label: 'Active' }] },
+        { name: 'summary', type: 'text' },
+        { name: 'segment', type: 'select', options: [{ value: 'dev-tools', label: 'Developer tools' }] },
+        { name: 'website', type: 'url' },
+        { name: 'notes', type: 'string' },
+        { name: 'rivals', type: 'relationship' },
+      ],
+    } as unknown as Parameters<typeof globalRegistry.register>[0]);
+    const store = createStore();
+    const record: TrackerRecord = {
+      ...trackerRecord,
+      issueKey: undefined,
+      primaryType: 'preview-competitor',
+      typeTags: ['preview-competitor'],
+      fields: {
+        title: 'Omnigent',
+        status: 'active',
+        summary: '## Overview\n\n- Runs **heterogeneous** agent [runtimes](https://example.com) under one policy.\n\nSecond paragraph.',
+        segment: 'dev-tools',
+        website: 'https://www.omnigent.example/pricing',
+        rivals: [{ itemId: 'x' }],
+      },
+    };
+    store.set(trackerItemsMapAtom, new Map([[record.id, record]]));
+    const linkGroupsFor = vi.fn(async () => [
+      { label: 'Mentioned in', items: [{ itemId: 'page_1', title: 'Positioning', typeId: 'entity' }] },
+      { label: 'Blocks', items: [] },
+    ]);
+    setTrackerReferenceLinksSource({ linkGroupsFor });
+    const navigate = vi.fn();
+    window.addEventListener('nimbalyst:navigate-tracker-item', navigate);
+
+    try {
+      render(
+        <Provider store={store}>
+          <TrackerReferenceChip referenceKey="bug_1" />
+        </Provider>,
+      );
+      fireEvent.click(screen.getByText('Omnigent'));
+
+      // The gist skips the heading and drops the markdown.
+      expect(document.querySelector('.tracker-reference-preview-excerpt')?.textContent)
+        .toBe('Runs heterogeneous agent runtimes under one policy.');
+      // Status is already on the card, the summary is the excerpt, links are
+      // Connections, and an empty field says nothing.
+      expect(Array.from(document.querySelectorAll('.tracker-reference-preview-fields > span'), el => el.textContent))
+        .toEqual(['Segment', 'Developer tools', 'Website', 'omnigent.example']);
+      const link = await screen.findByRole('button', { name: 'Positioning' });
+      expect(linkGroupsFor).toHaveBeenCalledWith('bug_1', 'preview-competitor');
+      expect(document.querySelector('.tracker-reference-preview-links')?.textContent).not.toContain('Blocks');
+
+      fireEvent.click(link);
+      expect((navigate.mock.calls[0][0] as CustomEvent).detail).toMatchObject({ itemId: 'page_1', fromPage: true });
+      expect(document.querySelector('.tracker-reference-preview')).toBeNull();
+    } finally {
+      globalRegistry.unregister('preview-competitor');
+      setTrackerReferenceLinksSource(null);
+      window.removeEventListener('nimbalyst:navigate-tracker-item', navigate);
+    }
+  });
+
   it('renders the five-part inline anatomy in the designed order', () => {
     const store = createStore();
     store.set(
@@ -305,9 +373,12 @@ describe('TrackerReferenceChip', () => {
     expect(typeIcon?.textContent).toBe('bug_report');
     expect(typeIcon?.style.color).toBe('rgb(220, 38, 38)');
     expect(key?.textContent).toBe('NIM-1');
-    expect(key?.style.color).toBe('var(--nim-text)');
+    // The name carries the weight; the key is secondary.
+    expect(key?.style.color).toBe('var(--nim-text-muted)');
+    expect(key?.style.fontWeight).toBe('400');
     expect(title?.textContent).toBe('Theme-safe tracker preview');
-    expect(title?.style.color).toBe('var(--nim-text-muted)');
+    expect(title?.style.color).toBe('var(--nim-text)');
+    expect(title?.style.fontWeight).toBe('600');
     expect(title?.style.overflow).toBe('hidden');
     expect(title?.style.textOverflow).toBe('ellipsis');
     expect(status?.textContent).toContain('In Progress');
@@ -343,6 +414,34 @@ describe('TrackerReferenceChip', () => {
         ?.getAttribute('data-resolved'),
     ).toBe('true');
   });
+
+  it.each(['default', 'compact'] as const)(
+    'never shows the raw item id inline for a type without a key prefix (%s)',
+    variant => {
+      const keyless: TrackerRecord = {
+        ...trackerRecord,
+        id: 'competitor_1787921177066_w5a0b2',
+        issueKey: undefined,
+        primaryType: 'competitor',
+        typeTags: ['competitor'],
+        fields: { title: 'Reddit', status: 'active' },
+      };
+      const store = createStore();
+      store.set(trackerItemsMapAtom, new Map([[keyless.id, keyless]]));
+
+      const { container } = render(
+        <Provider store={store}>
+          <TrackerReferenceChip referenceKey={keyless.id} variant={variant} />
+        </Provider>,
+      );
+
+      const chip = container.querySelector<HTMLElement>('.tracker-reference-chip');
+      expect(chip?.textContent).not.toContain(keyless.id);
+      expect(container.querySelector('.tracker-reference-chip-key')).toBeNull();
+      expect(container.querySelector('.tracker-reference-chip-title')?.textContent).toBe('Reddit');
+      expect(chip?.getAttribute('title')).toContain(keyless.id);
+    },
+  );
 
   it.each(['done', 'completed', 'implemented', 'decided'])(
     'makes the %s state unmistakably complete',

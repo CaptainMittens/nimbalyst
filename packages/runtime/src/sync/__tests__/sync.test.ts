@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createMessageSyncHandler, createSyncedSessionStore } from '../SyncedSessionStore';
 import { resetPushOutcomeWarnings } from '../pushOutcome';
+import { buildClientMetadataFromRaw } from '../sessionClientMetadata';
 import type { SessionStore } from '../../ai/adapters/sessionStore';
 import type { SyncProvider, SessionChange
  } from '../types';
@@ -116,6 +117,23 @@ describe('SyncedSessionStore', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+
+  it('publishes nothing, and queues nothing, for a session the filter excludes (NIM-7479)', async () => {
+    mockSyncProvider.isConnected = vi.fn().mockReturnValue(false);
+    mockSyncProvider.sendSessionMessages = vi.fn();
+    const handler = createMessageSyncHandler(mockSyncProvider, {
+      outbox: { coalesceMs: 1 },
+      shouldSync: async (sessionId) => sessionId === 'enabled',
+    });
+    const message = { sessionId: 'not-enabled', source: 'claude-code', direction: 'output' as const, content: 'private' };
+    await expect(handler.onMessageCreated(message, 1)).resolves.toMatchObject({ published: false, retryable: false });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(mockSyncProvider.connect).not.toHaveBeenCalled();
+    expect(mockSyncProvider.pushChange).not.toHaveBeenCalled();
+    expect(mockSyncProvider.sendSessionMessages).not.toHaveBeenCalled();
+    await handler.onMessageCreated({ ...message, sessionId: 'enabled' }, 2);
+    expect(mockSyncProvider.pushChange).toHaveBeenCalledWith('enabled', expect.objectContaining({ type: 'message_added' }));
   });
 
   it('delivers messages refused at the session connection cap, then publishes their timestamp', async () => {
@@ -402,5 +420,14 @@ describe('SyncedSessionStore', () => {
       // create() always carries a fresh updatedAt so iOS sorts the new session.
       expect(typeof m.updatedAt).toBe('number');
     }
+  });
+});
+
+describe('buildClientMetadataFromRaw', () => {
+  it('publishes hasBeenNamed as a boolean when the row holds SQLite 0/1', () => {
+    // iOS decodes client metadata strictly; a numeric flag made the phone skip the session.
+    expect(buildClientMetadataFromRaw({}, { hasBeenNamed: 0 as unknown as boolean })).toEqual({ hasBeenNamed: false });
+    expect(buildClientMetadataFromRaw({}, { hasBeenNamed: 1 as unknown as boolean })).toEqual({ hasBeenNamed: true });
+    expect(buildClientMetadataFromRaw({}, {})).toBeUndefined();
   });
 });

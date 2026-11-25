@@ -207,6 +207,7 @@ vi.mock('../../../services/tracker/localKeyAllocator', () => ({
 }));
 
 import {
+  broadcastSessionLinkedTrackers,
   createBidirectionalLink,
   handleTrackerCreate,
   handleTrackerAddComment,
@@ -1038,6 +1039,7 @@ describe('handleTrackerCreate issue-key timing', () => {
   // unpublished item reports its uuid to the agent: it has no team key, and
   // its number was only minted by a later list (NIM.2842).
   it('reports the local number as the ref for an unpublished item', async () => {
+    mockGlobalRegistry.get.mockImplementation((type?: string) => type === 'bug' ? {} : undefined);
     vi.mocked(isTrackerSyncActive).mockReturnValue(false);
     vi.mocked(shouldSyncTrackerItem).mockReturnValue(false);
     const numbered = makeRow({
@@ -1073,6 +1075,22 @@ describe('handleTrackerCreate issue-key timing', () => {
     // Sync is inactive here, so "publish it" is not advice this workspace can
     // act on and must not appear.
     expect(summary).not.toContain('until it is published');
+  });
+
+  // Local numbers are opt-in per type; a type that says nothing gets none.
+  it('does not number an item whose type has not opted in to local numbers', async () => {
+    vi.mocked(isTrackerSyncActive).mockReturnValue(false);
+    vi.mocked(shouldSyncTrackerItem).mockReturnValue(false);
+    const plain = makeRow({ id: 'bug_test', workspace: '/tmp/ws', issue_key: null, issue_number: null, local_key: null });
+    mockQuery
+      .mockResolvedValueOnce({ rows: [] })       // INSERT
+      .mockResolvedValueOnce({ rows: [plain] })  // resolve created
+      .mockResolvedValueOnce({ rows: [plain] }); // notifyTrackerItemAdded
+
+    const { structured } = parseResult(await handleTrackerCreate({ type: 'bug', title: 'Plain bug' }, '/tmp/ws'));
+
+    expect(assignLocalKeysToRows).not.toHaveBeenCalled();
+    expect(structured.item.localKey).toBeUndefined();
   });
 
   it('leaves a team draft without any key', async () => {
@@ -3016,6 +3034,27 @@ describe('session metadata parsing on SQLite (NIM-829)', () => {
     expect(readLinkedTrackerItemIds(undefined)).toEqual([]);
     expect(readLinkedTrackerItemIds('{}')).toEqual([]);
     expect(readLinkedTrackerItemIds({ linkedTrackerItemIds: 'not-an-array' })).toEqual([]);
+  });
+
+  it('broadcastSessionLinkedTrackers tells every window the session\'s current links (NIM-7657)', async () => {
+    // The panel's tracker:link-session IPC writes the link then calls this; the
+    // renderer's session registry only learns about the link from the event.
+    const electron = await import('electron');
+    const send = vi.fn();
+    const original = electron.BrowserWindow.getAllWindows;
+    (electron.BrowserWindow as any).getAllWindows = () => [{ isDestroyed: () => false, webContents: { send } }];
+    try {
+      mockQuery.mockResolvedValueOnce({
+        rows: [{ metadata: '{"linkedTrackerItemIds":["gp_overlay","bug_1"]}' }],
+      });
+      await broadcastSessionLinkedTrackers('session_1');
+    } finally {
+      (electron.BrowserWindow as any).getAllWindows = original;
+    }
+    expect(send).toHaveBeenCalledWith('session-linked-tracker-changed', {
+      sessionId: 'session_1',
+      linkedTrackerItemIds: ['gp_overlay', 'bug_1'],
+    });
   });
 
   it('createBidirectionalLink preserves existing links when metadata arrives as a string', async () => {

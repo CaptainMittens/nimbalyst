@@ -6,6 +6,8 @@ import { codexQuestionTurns } from './codexQuestionTurns';
 import { supersedeOpenQuestions } from './supersedeOpenQuestions';
 import { beginTurnSetup, TurnSetupCancelledError } from './turnSetupStages';
 import { canDispatchIntoDrain } from './drainFollowUp';
+import { publishTurnNotExecuting } from './turnExecutingSync';
+import { cancelUsageLimitResume, maybeScheduleUsageLimitResume } from './usageLimitAutoResume';
 /**
  * Streaming message handler for AIService.
  *
@@ -50,6 +52,7 @@ import { AISessionsRepository } from '@nimbalyst/runtime/storage/repositories/AI
 import { resolveClaudeCodeParentContextWindow } from '@nimbalyst/runtime/ai/modelConstants';
 import { accumulateClaudeCodeTurnUsage, accumulateProviderTurnUsage } from './tokenUsageAccumulation';
 import { provisionalTitleForFirstMessage } from './provisionalSessionTitle';
+import { sessionNotFoundMessage } from './sessionNotFoundMessage';
 import {
   buildMcpSessionStatusSnapshot,
   type McpSessionStatusInput,
@@ -59,6 +62,7 @@ import type { DriveReason } from './QueueDriveService';
 import { resolveExtensionAgentRef } from './providerResolution';
 import { resolveToolLoopTurnConfig } from './toolLoopTurnConfig';
 import { resolveProviderAuthRequirement } from './providerAuthRequirement';
+import { isWikiSkillAvailable } from './wikiSkillAvailability';
 
 /**
  * Read the OpenCode session role the user picked, from session metadata.
@@ -91,13 +95,16 @@ import { ToolUsageService } from '../ToolUsageService';
 import { historyManager } from '../../HistoryManager';
 import { addGitignoreBypass } from '../../file/WorkspaceEventBus';
 import { getSyncProvider, isDesktopTrulyAway } from '../SyncManager';
+import { publishContextUsage } from './publishContextUsage';
 import { requestMobilePush } from './mobilePushRequest';
 import { createAskUserQuestionListeners } from './askUserQuestionListeners';
-import { createTeammateIdleWakeListener } from './teammateIdleWake';
+import { createTeammateIdleWakeListener, type TeammateIdleWakeDeps } from './teammateIdleWake';
 // The per-session pending-prompt bit is derived from the set of prompts still
 // open, so one prompt settling cannot clear the indicator for another that is
 // still waiting on the user. Refs #1549.
 import { openPrompt, resolvePrompt, hasOpenPrompts } from './openPromptRegistry';
+import { isSessionBlockedOnUser, onSessionUnblocked } from './idleWakeSignals';
+import { createHeldIdleWakeRelease, deferIdleWakeMessage } from './idleWakeGating';
 import { getAgentWorkflowService } from '../AgentWorkflowService';
 import { repairOrphanedSessionMetaCall } from './repairOrphanedSessionMetaCall';
 import {
@@ -136,8 +143,9 @@ import type Store from 'electron-store';
 import type { AIService } from './AIService';
 import type { HooklessAgentFileWatcher } from './HooklessAgentFileWatcher';
 import type { WorkspaceFileAttributionMode } from '../WorkspaceFileAttributionPolicy';
+import { isShellWindowLifecycleConfigured } from './HooklessAgentFileWatcher';
 import {
-  attributionModeForFileChangeFidelity,
+  attributionModeForProvider,
   fileChangeFidelityForProviderType,
   isProviderEditTool,
   type FileChangeFidelity,
@@ -159,8 +167,9 @@ function resolveWorkspaceFileAttributionMode(
   const liveProvider = provider as (AIProvider & {
     getFileChangeFidelity?: () => FileChangeFidelity;
   }) | null | undefined;
+  const shellWindow = isShellWindowLifecycleConfigured();
   const live = liveProvider?.getFileChangeFidelity?.();
-  if (live) return attributionModeForFileChangeFidelity(live);
+  if (live) return attributionModeForProvider(providerName, live, shellWindow);
 
   // Codex is the only provider whose fidelity is a user-selected setting: the
   // legacy SDK transport has no `fileChange` item. Without a live instance to
@@ -173,7 +182,7 @@ function resolveWorkspaceFileAttributionMode(
     return 'fuzzy';
   }
 
-  return attributionModeForFileChangeFidelity(fileChangeFidelityForProviderType(providerName));
+  return attributionModeForProvider(providerName, fileChangeFidelityForProviderType(providerName), shellWindow);
 }
 
 export type SendMessageHandler = (
@@ -218,6 +227,12 @@ interface AIServiceInternal {
     source: string,
   ): Promise<boolean>;
   requestQueueDrive(sessionId: string, workspacePath: string, reason: DriveReason): void;
+  queuePromptForSession(
+    sessionId: string,
+    prompt: string,
+    attachments?: any[],
+    documentContext?: any,
+  ): Promise<{ id: string; prompt: string; createdAt: number }>;
   runAutoContextCommand(
     session: SessionData,
     workspacePath: string,
@@ -292,6 +307,16 @@ async function getWorkspacePathForSession(sessionId: string): Promise<string | n
 export class MessageStreamingHandler {
   private readonly svc: AIServiceInternal;
   private readonly unsubscribeBatchListener: () => void;
+  // Releases wakes held while a lead was waiting on the user (#1557). One
+  // subscription for the handler's lifetime, not one per handle() call, so the
+  // per-session release ordering is shared by every turn.
+  private readonly unsubscribePromptCleared: () => void;
+  // Sessions with a handle() turn between its in-flight point and its finally.
+  // Counted, not a set: an idle wake can overlap a turn that is still unwinding.
+  // A held wake released while a turn is in flight (the user's message
+  // superseded the question during this turn's setup, before the provider's
+  // query exists) must queue behind it, never start a second send.
+  private readonly turnsInFlight = new Map<string, number>();
   // Per-provider map of event -> currently-installed listener. Used by
   // installListener so handle() can re-wire its own subscriptions on every
   // ai:sendMessage call without nuking listeners owned by other modules.
@@ -303,6 +328,41 @@ export class MessageStreamingHandler {
 
   constructor(service: AIService) {
     this.svc = service as unknown as AIServiceInternal;
+
+    // Release what the idle-wake listener held once the prompt clears (#1557).
+    // With no turn in flight, wake the lead the same way an unheld wake would:
+    // its end was deferred for exactly that send, so its status still reads
+    // running and the queue driver would wait for an end that never comes. If
+    // the answer (or a message that superseded the question) already started a
+    // turn, queue the results behind it instead of racing it; that turn's
+    // completion drains the queue.
+    const releaseHeldWakes = createHeldIdleWakeRelease({
+      isBlockedOnUser: (id) => isSessionBlockedOnUser(id),
+      isSessionActive: (id) => getSessionStateManager().isSessionActive(id),
+      deliver: async (id, message) => {
+        const workspacePath = await getWorkspacePathForSession(id);
+        if (!workspacePath) return false;
+        if (this.turnsInFlight.has(id)) {
+          await this.svc.queuePromptForSession(id, message, undefined, {
+            promptProvenance: { actor: 'system', origin: 'session-orchestration' },
+          });
+          this.svc.requestQueueDrive(id, workspacePath, 'session-idle');
+          return true;
+        }
+        const wake = this.createIdleWakeListener(() => workspacePath, {
+          // The release already checked; the listener must not re-hold what it
+          // is handing over.
+          isBlockedOnUser: () => false,
+          holdForUser: () => {},
+        });
+        return (await wake({ sessionId: id, message })) === 'started';
+      },
+      logInfo: (message) => logger.main.info(message),
+      logWarn: (message, error) => logger.main.warn(message, error),
+    });
+    this.unsubscribePromptCleared = onSessionUnblocked((sessionId) => {
+      void releaseHeldWakes(sessionId);
+    });
 
     // The shared AgentMessageWriteQueue (in BaseAIProvider) coalesces streaming
     // chunk writes to relieve PGLite writer-lock contention. Per-row
@@ -338,9 +398,41 @@ export class MessageStreamingHandler {
     });
   }
 
+  /** The teammate idle-wake listener, bound to this service. See teammateIdleWake.ts. */
+  private createIdleWakeListener(
+    turnWorkspacePath: () => string,
+    gate: Pick<TeammateIdleWakeDeps, 'isBlockedOnUser' | 'holdForUser'>,
+  ) {
+    const sessionStateManagerForWake = getSessionStateManager();
+    return createTeammateIdleWakeListener({
+      isSessionActive: (id) => sessionStateManagerForWake.isSessionActive(id),
+      startSession: (options) => sessionStateManagerForWake.startSession(options),
+      endSession: (id) => sessionStateManagerForWake.endSession(id),
+      ...gate,
+      turnWorkspacePath,
+      resolveOwnerWorkspacePath: getWorkspacePathForSession,
+      findWindow: (wakePath) => findWindowByWorkspace(wakePath),
+      sendMessage: async (targetWindow, message, wakeSessionId, wakePath) => {
+        if (!this.svc.sendMessageHandler) {
+          throw new Error('sendMessageHandler is not registered');
+        }
+        const mockEvent = {
+          sender: targetWindow.webContents,
+          senderFrame: targetWindow.webContents.mainFrame,
+        } as Electron.IpcMainInvokeEvent;
+        return this.svc.sendMessageHandler(mockEvent, message, {} as any, wakeSessionId, wakePath);
+      },
+      defer: (fn) => { setImmediate(fn); },
+      logInfo: (message) => logger.main.info(message),
+      logWarn: (message) => logger.main.warn(message),
+      logError: (message, error) => logger.main.error(`${message}:`, error),
+    });
+  }
+
   /** Used by AIService teardown to unwire the singleton batch listener. */
   destroy(): void {
     this.unsubscribeBatchListener();
+    this.unsubscribePromptCleared();
   }
 
   /**
@@ -431,7 +523,7 @@ export class MessageStreamingHandler {
 
     if (!session) {
       trackSendBlocked('session_not_found');
-      throw new Error(`Session ${sessionId} not found`);
+      throw new Error(sessionNotFoundMessage(sessionId, workspacePath, await AISessionsRepository.get(sessionId).catch(() => null)));
     }
 
 
@@ -440,6 +532,11 @@ export class MessageStreamingHandler {
       console.error(`[AIService] CRITICAL ERROR: Requested session ${sessionId} but got session ${session.id}!`);
       trackSendBlocked('session_mismatch', session.provider);
       throw new Error(`Session mismatch: requested ${sessionId} but got ${session.id}`);
+    }
+
+    // A workstream container only groups sessions; it has no agent of its own.
+    if (session.sessionType === 'workstream') {
+      throw new Error(`Cannot send a message to workstream ${sessionId}; start a session inside it instead`);
     }
 
     if (session.providerConfig && 'imported' in session.providerConfig && session.providerConfig.imported === true) {
@@ -1079,31 +1176,17 @@ export class MessageStreamingHandler {
     this.installListener(provider, 'session:providerSessionReceived', onProviderSessionReceived);
 
     // Wake the lead when a teammate message or finished background task
-    // arrives after its turn ended. See teammateIdleWake.ts.
-    const sessionStateManagerForWake = getSessionStateManager();
-    const onTeammateMessageWhileIdle = createTeammateIdleWakeListener({
-      isSessionActive: (id) => sessionStateManagerForWake.isSessionActive(id),
-      startSession: (options) => sessionStateManagerForWake.startSession(options),
-      endSession: (id) => sessionStateManagerForWake.endSession(id),
-      turnWorkspacePath: () => effectiveWorkspacePath,
-      resolveOwnerWorkspacePath: getWorkspacePathForSession,
-      findWindow: (wakePath) => findWindowByWorkspace(wakePath),
-      sendMessage: async (targetWindow, message, wakeSessionId, wakePath) => {
-        if (!this.svc.sendMessageHandler) {
-          throw new Error('sendMessageHandler is not registered');
-        }
-        const mockEvent = {
-          sender: targetWindow.webContents,
-          senderFrame: targetWindow.webContents.mainFrame,
-        } as Electron.IpcMainInvokeEvent;
-        return this.svc.sendMessageHandler(mockEvent, message, {} as any, wakeSessionId, wakePath);
-      },
-      defer: (fn) => { setImmediate(fn); },
-      logInfo: (message) => logger.main.info(message),
-      logWarn: (message) => logger.main.warn(message),
-      logError: (message, error) => logger.main.error(`${message}:`, error),
+    // arrives after its turn ended. See teammateIdleWake.ts. A lead parked on
+    // an interactive prompt is blocked on the user, not idle, so its wake is
+    // held until the prompt clears (#1557).
+    const onTeammateMessageWhileIdle = this.createIdleWakeListener(() => effectiveWorkspacePath, {
+      isBlockedOnUser: (id) => isSessionBlockedOnUser(id),
+      holdForUser: (id, message) => deferIdleWakeMessage(id, message),
     });
     this.installListener(provider, 'teammate:messageWhileIdle', onTeammateMessageWhileIdle);
+
+    // What the listener holds is released from the constructor's
+    // onSessionUnblocked subscription once the user has answered.
 
     // Listen for all teammates completing. When the lead finished but teammates
     // were still active, endSession was deferred. Now that all teammates are
@@ -1264,6 +1347,7 @@ export class MessageStreamingHandler {
     let questionTurn: ReturnType<typeof codexQuestionTurns.current>;
     const setup = beginTurnSetup(session.id, { submissionId: (documentContext as any)?.submissionId });
     try {
+      this.turnsInFlight.set(session.id, (this.turnsInFlight.get(session.id) ?? 0) + 1);
       inboxTurn = ['claude-code', 'openai-codex'].includes(session.provider)
         ? await setup.stage('inbox', () => sessionInbox.begin(session.id, session.workspacePath ?? workspacePath)) : undefined;
       questionTurn = session.provider === 'openai-codex' ? codexQuestionTurns.begin(session.id) : undefined;
@@ -1278,6 +1362,7 @@ export class MessageStreamingHandler {
       let providerError: string | undefined;
       let providerCrashed = false;  // The agent subprocess died from a native fault (#1361)
       let sawCompleteChunk = false;  // A terminal 'complete' chunk arrived
+      let endedSessionAtComplete = false;  // This turn called endSession; a later 'running' is a new turn
       let settledOnErrorChunk = false;  // The error branch already ended the session
       let firstChunkTime: number | undefined;
       let chunkCount = 0;
@@ -1375,7 +1460,8 @@ export class MessageStreamingHandler {
         rawContext,
         session.id,
         session.provider as AIProviderType,
-        undefined // No mode transition for now - will be added when integrating with SessionTranscript
+        undefined, // No mode transition for now - will be added when integrating with SessionTranscript
+        { wikiSkillAvailable: isWikiSkillAvailable() }
       );
 
       // Merge prepared document context with session metadata
@@ -1489,6 +1575,8 @@ export class MessageStreamingHandler {
       const { isToolLoopSession, toolLoopTools, toolLoopSystemPrompt } = resolveToolLoopTurnConfig(session, effectiveWorkspacePath);
 
       setup.finish();
+      // Awaited so it can never cancel the resume this same turn schedules on its own limit error.
+      await cancelUsageLimitResume(session.id).catch(error => logger.main.error('[AIService] Failed to cancel usage-limit resume:', error));
       for await (const chunk of provider.sendMessage(messageToSend, contextWithSession, session.id, sessionMessages, effectiveWorkspacePath, attachments, toolLoopTools, toolLoopSystemPrompt)) {
         if (!chunk) continue;
         chunkCount++;
@@ -1504,6 +1592,11 @@ export class MessageStreamingHandler {
           });
         }
         switch (chunk.type) {
+          case 'prompt_suggestion': {
+            // Ephemeral next-prompt prediction: straight to the renderer, never stored or synced.
+            if (chunk.suggestion) safeSend(event, 'ai:promptSuggestion', { sessionId: session.id, suggestion: chunk.suggestion });
+            break;
+          }
           case 'context_usage': {
             // Mid-turn context-fill snapshot (NIM-868). Updates ONLY
             // currentContext so the indicator refreshes per assistant step
@@ -1532,23 +1625,8 @@ export class MessageStreamingHandler {
               // Push live context usage to mobile sync
               const syncProvider = getSyncProvider();
               if (syncProvider) {
-                // Streaming chunks must not wait for index publication. This task catches failures internally.
-                void (async () => {
-                  try {
-                    const outcome = await syncProvider.pushChange(session.id, {
-                      type: 'metadata_updated',
-                      metadata: {
-                        currentContext: {
-                          tokens: partialContextFill,
-                          contextWindow: partialContextWindow,
-                        },
-                      },
-                    });
-                    warnIfUnpublished(message => logger.main.warn(message), session.id, '[AIService] Failed to publish sync change', outcome);
-                  } catch (error) {
-                    logger.main.warn(`[AIService] Failed to publish sync change for session ${session.id}:`, error);
-                  }
-                })();
+                // Streaming chunks must not wait for publication; the helper catches its own failures.
+                void publishContextUsage(syncProvider, session.id, { tokens: partialContextFill, contextWindow: partialContextWindow });
               }
 
               session.tokenUsage = updatedUsage;
@@ -2230,7 +2308,12 @@ export class MessageStreamingHandler {
               isBedrockToolError,
               isServerError,
               isCodexAuthRequired: chunk.isCodexAuthRequired || false,
+              isUsageLimit: chunk.usageLimitType !== undefined,
             });
+            if (chunk.usageLimitResetsAtMs !== undefined) {
+              maybeScheduleUsageLimitResume({ sessionId: session.id, workspacePath, resetsAtMs: chunk.usageLimitResetsAtMs })
+                .catch(error => logger.main.error('[AIService] Failed to schedule usage-limit resume:', error));
+            }
 
             // An in-band 'error' chunk from a tool-loop agent (Gemini's only
             // failure-settle path) does NOT throw, so the outer catch never runs
@@ -2371,20 +2454,7 @@ export class MessageStreamingHandler {
               if (contextFillTokens !== undefined && contextWindowForDisplay) {
                 const syncProvider = getSyncProvider();
                 if (syncProvider) {
-                  try {
-                    const outcome = await syncProvider.pushChange(session.id, {
-                      type: 'metadata_updated',
-                      metadata: {
-                        currentContext: {
-                          tokens: contextFillTokens,
-                          contextWindow: contextWindowForDisplay,
-                        },
-                      },
-                    });
-                    warnIfUnpublished(message => logger.main.warn(message), session.id, '[AIService] Failed to publish sync change', outcome);
-                  } catch (error) {
-                    logger.main.warn(`[AIService] Failed to publish sync change for session ${session.id}:`, error);
-                  }
+                  await publishContextUsage(syncProvider, session.id, { tokens: contextFillTokens, contextWindow: contextWindowForDisplay });
                 }
               }
 
@@ -2428,20 +2498,7 @@ export class MessageStreamingHandler {
               if (reportsCurrentContext && contextFillTokens !== undefined && reportedContextWindow) {
                 const syncProvider = getSyncProvider();
                 if (syncProvider) {
-                  try {
-                    const outcome = await syncProvider.pushChange(session.id, {
-                      type: 'metadata_updated',
-                      metadata: {
-                        currentContext: {
-                          tokens: contextFillTokens,
-                          contextWindow: reportedContextWindow,
-                        },
-                      },
-                    });
-                    warnIfUnpublished(message => logger.main.warn(message), session.id, '[AIService] Failed to publish sync change', outcome);
-                  } catch (error) {
-                    logger.main.warn(`[AIService] Failed to publish sync change for session ${session.id}:`, error);
-                  }
+                  await publishContextUsage(syncProvider, session.id, { tokens: contextFillTokens, contextWindow: reportedContextWindow });
                 }
               }
 
@@ -2606,6 +2663,12 @@ export class MessageStreamingHandler {
               // logger.main.info(`[AIService] Deferring endSession for ${session.id} - ${reason}`);
             } else {
               await stateManager.endSession(session.id);
+              endedSessionAtComplete = true;
+              // The stream stays open a few seconds for the next-prompt suggestion, which would hold the
+              // post-loop publish back; the phone hears the turn ended now (the later publish repeats it).
+              if (syncProvider && session.provider === 'claude-code' && (provider as any).willAwaitPromptSuggestion?.() === true) {
+                void publishTurnNotExecuting(syncProvider, session.id);
+              }
               // Stop file watcher after a brief delay to let pending
               // watcher events drain through WorkspaceFileEditAttributionService.
               // The manager cancels the scheduled stop if a new turn starts
@@ -2820,16 +2883,12 @@ export class MessageStreamingHandler {
       }
 
       // Clear executing and pending prompt flags for mobile sync
-      if (syncProvider && !this.svc.sessionsProcessingQueue.has(session.id)) {
-        try {
-          const outcome = await syncProvider.pushChange(session.id, {
-            type: 'metadata_updated',
-            metadata: { isExecuting: false, hasPendingPrompt: false, updatedAt: Date.now() },
-          });
-          warnIfUnpublished(message => logger.main.warn(message), session.id, '[AIService] Failed to publish sync change', outcome);
-        } catch (error) {
-          logger.main.warn(`[AIService] Failed to publish sync change for session ${session.id}:`, error);
-        }
+      // A follow-up that adopted this turn's live query during the prompt-suggestion wait is already
+      // running; don't mark it idle.
+      const liveState = endedSessionAtComplete ? stateManager.getSessionState(session.id) : undefined;
+      const followUpRunning = !!liveState && (liveState.status === 'running' || liveState.isStreaming);
+      if (syncProvider && !this.svc.sessionsProcessingQueue.has(session.id) && !followUpRunning) {
+        await publishTurnNotExecuting(syncProvider, session.id);
       }
 
       // Clean up queued prompt tracking
@@ -2977,6 +3036,9 @@ export class MessageStreamingHandler {
       // parked-generator case reaches neither exit and is covered by the
       // ticker's own expiry.
       stopTurnLiveness();
+      const turnsLeft = (this.turnsInFlight.get(session.id) ?? 1) - 1;
+      if (turnsLeft > 0) this.turnsInFlight.set(session.id, turnsLeft);
+      else this.turnsInFlight.delete(session.id);
       await Promise.all([questionRetirement, inboxRetirement]);
 
       // A cancelled turn or a provider that disconnected mid-command never sends

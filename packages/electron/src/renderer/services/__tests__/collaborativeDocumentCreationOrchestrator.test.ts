@@ -261,6 +261,14 @@ describe('CollaborativeDocumentCreationOrchestrator', () => {
       scope: createPersonalCollabScope('/workspace'), descriptor: markdownDescriptor, requestedName: 'Blank', parentFolderId: null,
     });
     expect(empty.events).toEqual(['register', 'open-personal']);
+
+    // A new editor page starts from its type's default file, not an empty file its editor cannot read.
+    const blankMockup = { ...mockupDescriptor, creation: { defaultContent: '<html></html>', source: 'newFileMenu' as const } };
+    const mockup = makeHarness({ descriptor: blankMockup });
+    const created = await mockup.orchestrator.create({
+      scope: createPersonalCollabScope('/workspace'), descriptor: blankMockup, requestedName: 'Login', parentFolderId: null,
+    });
+    expect(mockup.personalBodies.get(created.documentId)).toBe('<html></html>');
   });
 
   it('can create a cascade child without publishing it as the pending open document', async () => {

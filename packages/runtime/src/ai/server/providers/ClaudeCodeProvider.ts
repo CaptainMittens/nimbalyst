@@ -86,6 +86,8 @@ import {
 } from './claudeCode/resultChunkUtils';
 
 import {
+  ASK_USER_QUESTION_UNANSWERED_CAPABILITY,
+  AskUserQuestionDismissedError,
   handleAskUserQuestionTool,
   pollForAskUserQuestionResponse,
   type PendingAskUserQuestionEntry,
@@ -127,8 +129,16 @@ import {
   type TaskTerminalNotification,
 } from './claudeCode/subagentDrain';
 import { awaitDrainHandoff, canAdoptDrainingQuery, DrainHandoff, type AdoptedQuery } from './claudeCode/drainHandoff';
+import {
+  PROMPT_SUGGESTION_WAIT_MS,
+  canAdoptAwaitingSuggestionQuery,
+  extractPromptSuggestion,
+  promptSuggestionWaitRemainingMs,
+  shouldAwaitPromptSuggestion,
+  wantsPromptSuggestion,
+} from './claudeCode/promptSuggestionWait';
 import { injectPendingTeammateMessages } from './claudeCode/teammateInjection';
-import { hydrateTaskListItems, persistCurrentTodos, stopStaleRunningTasks } from './claudeCode/sessionMetadataWrites';
+import { hydrateTaskListItems, persistCurrentTasks, persistCurrentTodos, stopStaleRunningTasks } from './claudeCode/sessionMetadataWrites';
 import { applySystemTaskChunk, recordBackgroundEvidence, type TrackedSystemTask } from './claudeCode/systemTaskChunks';
 import {
   raceNextChunkWithStallWatchdog,
@@ -142,10 +152,14 @@ import {
 } from './claudeCode/streamClosedRecovery';
 import { normalizeStructuredContextUsage } from '../utils/contextUsage';
 import { createTurnState } from './claudeCode/turnState';
+import { blockingUsageLimit, rateLimitMarker, usageLimitSystemMessage } from './claudeCode/usageLimit';
 import { buildTurnQuery, prepareTurnAttachments, resolveTurnPaths } from './claudeCode/turnPrologue';
 import { buildTurnCompleteUsage, finishTurn, handleTurnError, type TurnEpilogueHost } from './claudeCode/turnEpilogue';
 import { fromDbBoolean } from '../../../core/dbBoolean';
+import { agentToolActivity } from '../agentToolActivity';
+import { claudeShellEndTurn, claudeShellPost, takeClaudeShellAttributedFiles } from '../claudeShellTracking';
 import { applyTaskListMutation, sortTaskList, type TaskListItem } from './claudeCode/taskListReconstruct';
+import { exitPlanModeDenialReason, type ExitPlanModeResponse } from '../../exitPlanModeDeferral';
 
 
 /**
@@ -257,6 +271,10 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
   // is still iterating to drain background sub-agents that outlived the turn.
   // See subagentDrain.ts and NIM-1344 / GitHub #732.
   private drainingBackgroundTasks: boolean = false;
+  // The turn answered and only waits for the SDK's `prompt_suggestion` frame; a follow-up may adopt the live query (promptSuggestionWait.ts).
+  private awaitingPromptSuggestion: boolean = false;
+  // Absolute end of that wait, set before `complete` is yielded so the host can read it (willAwaitPromptSuggestion).
+  private promptSuggestionDeadline: number | null = null;
   // Task ids last published as the session's background wait, so unchanged
   // task_progress chunks do not re-broadcast.
   private publishedBackgroundWaitKey = '';
@@ -357,6 +375,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
   // These forwarding setters maintain backward compatibility for callers.
 
   public static setCustomClaudeCodePathLoader(loader: ((workspacePath: string) => string) | null): void { ClaudeCodeDeps.setCustomClaudeCodePathLoader(loader); }
+  public static setPromptSuggestionsEnabledLoader(loader: (() => boolean) | null): void { ClaudeCodeDeps.setPromptSuggestionsEnabledLoader(loader); }
+  public static setClaudeInChromeEnabledLoader(loader: (() => boolean) | null): void { ClaudeCodeDeps.setClaudeInChromeEnabledLoader(loader); }
 
   constructor() {
     super();
@@ -376,8 +396,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       },
       getAbortSignal: () => this.abortController?.signal,
       interruptWithMessage: (message) => this.interruptWithMessage(message),
-      createCanUseToolHandler: (sessionId, workspacePath, permissionsPath, teammateName) =>
-        this.createCanUseToolHandler(sessionId, workspacePath, permissionsPath, teammateName),
+      createCanUseToolHandler: (sessionId, workspacePath, permissionsPath, teammateName, queryPermissionMode) =>
+        this.createCanUseToolHandler(sessionId, workspacePath, permissionsPath, teammateName, queryPermissionMode),
     });
 
     // Initialize permission service if all dependencies are available
@@ -394,6 +414,18 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
         patternChecker: ClaudeCodeDeps.claudeSettingsPatternChecker,
         securityLogger: BaseAgentProvider.securityLogger ?? undefined,
         emit: this.emit.bind(this),
+        // A prompt that another answer settled still needs its card closed in the transcript.
+        // The service does not say who gave the answer, so this records it as the desktop.
+        recordReleasedPermission: (sessionId, requestId, response) => {
+          this.logAgentMessage(
+            sessionId,
+            'claude-code',
+            'output',
+            this.createPermissionResultMessage(requestId, response, 'desktop')
+          ).catch(err => {
+            console.error('[CLAUDE-CODE] Failed to persist permission response:', err);
+          });
+        },
       });
     }
 
@@ -461,6 +493,15 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       logSecurity: this.logSecurity.bind(this),
       trustChecker: BaseAgentProvider.trustChecker || undefined,
       patternSaver: ClaudeCodeDeps.claudeSettingsPatternSaver || undefined,
+      localAllowRuleChecker: ClaudeCodeDeps.claudeLocalAllowRuleChecker || undefined,
+      // `priority: 'next'` lets the CLI fold the message into the running turn
+      // beside the blocked call's result instead of waiting for the turn to end.
+      sendApprovalToModel: (text) => this.promptController?.push({
+        type: 'user',
+        message: { role: 'user', content: text },
+        parent_tool_use_id: null,
+        priority: 'next',
+      }) ?? false,
       getCurrentMode: () => this.currentMode,
       setCurrentMode: (mode) => { this.currentMode = mode; },
       getPendingExitPlanModeConfirmations: () => this.pendingExitPlanModeConfirmations,
@@ -478,13 +519,17 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
 
   // ExitPlanMode confirmation response type
   private pendingExitPlanModeConfirmations: Map<string, {
-    resolve: (response: { approved: boolean; clearContext?: boolean; feedback?: string }) => void;
+    resolve: (response: ExitPlanModeResponse) => void;
     reject: (error: Error) => void;
   }> = new Map();
 
   // AskUserQuestion tool - stores pending question resolvers
   // When Claude calls AskUserQuestion, we block until the UI provides answers via IPC
   private pendingAskUserQuestions: Map<string, PendingAskUserQuestionEntry> = new Map();
+
+  // Protocol capabilities from the latest system/init frame. Empty on CLIs that
+  // predate the field, so feature-gated behavior stays off for them.
+  private cliCapabilities: ReadonlySet<string> = new Set();
 
   static readonly DEFAULT_MODEL = ClaudeCodeDeps.DEFAULT_MODEL;
 
@@ -506,6 +551,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
   public static setImageCompressor(compressor: ((buffer: Buffer, mimeType: string, options?: { targetSizeBytes?: number }) => Promise<{ buffer: Buffer; mimeType: string; wasCompressed: boolean }>) | null): void { ClaudeCodeDeps.setImageCompressor(compressor); }
   public static setClaudeSettingsPatternSaver(saver: ((workspacePath: string, pattern: string) => Promise<void>) | null): void { ClaudeCodeDeps.setClaudeSettingsPatternSaver(saver); }
   public static setClaudeSettingsPatternChecker(checker: ((workspacePath: string, pattern: string) => Promise<boolean>) | null): void { ClaudeCodeDeps.setClaudeSettingsPatternChecker(checker); }
+  public static setClaudeLocalAllowRuleChecker(checker: ((workspacePath: string, pattern: string) => Promise<boolean>) | null): void { ClaudeCodeDeps.setClaudeLocalAllowRuleChecker(checker); }
   public static setTrustChecker(checker: ((workspacePath: string) => { trusted: boolean; mode: 'ask' | 'allow-all' | 'bypass-all' | null; allowAllUsesClassifier?: boolean }) | null): void { BaseAgentProvider.setTrustChecker(checker); }
   public static setExtensionFileTypesLoader(loader: (() => Set<string>) | null): void { ClaudeCodeDeps.setExtensionFileTypesLoader(loader); }
 
@@ -677,8 +723,24 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       );
     }
 
+    // A newer sendMessage replaces this controller, which is how this turn knows
+    // it no longer owns the provider's live fields.
+    const turnController = this.abortController;
+    let turnQuery: Query | null = null;
+    // The grace timer belongs to this turn too: once superseded it must neither
+    // outlive the turn nor end the newer turn's prompt stream.
+    let turnPromptController: PromptStreamController | null = null;
+    let turnPromptEndTimer: ReturnType<typeof setTimeout> | null = null;
+
     // Clear edited files tracker for new turn
     this.toolHooksService.clearEditedFiles();
+
+    // Read before the query exists: the CLI suppresses a suggestion on a conversation's first turn.
+    const promptSuggestionsEnabled = wantsPromptSuggestion(
+      ClaudeCodeDeps.promptSuggestionsEnabledLoader?.() === true,
+      documentContext,
+    );
+    const resumedConversation = !!sessionId && !!this.sessions.getSessionId(sessionId);
 
     try {
       // Prompt rewriting, system prompt, SDK options, input logging and the
@@ -712,6 +774,9 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
           currentMode: this.currentMode,
           metaAgentAllowedTools: BaseAgentProvider.META_AGENT_ALLOWED_TOOLS,
           publishSdkResult: (result) => {
+            // A turn superseded while its prompt was being built must not replace
+            // the newer turn's prompt stream.
+            if (this.abortController !== turnController) return;
             this.helperMethod = result.helperMethod;
             this.promptController = adopted ? adopted.promptController : result.promptController;
           },
@@ -719,6 +784,14 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
         state,
         { documentContext, sessionId, workspacePath, attachments, paths, prepared },
       );
+
+      // Superseded or stopped while the prompt was being built. Starting now would
+      // spawn a subprocess nothing can stop.
+      if (this.abortController !== turnController) {
+        builtPromptController.end('superseded');
+        return;
+      }
+      turnPromptController = adopted ? adopted.promptController : builtPromptController;
 
       const queryCallStart = Date.now();
 
@@ -731,10 +804,13 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       if (!adopted) this.liveQueryModelVariant = this.resolveModelVariant();
 
       this.leadQuery = leadQuery as unknown as Query;
+      turnQuery = this.leadQuery;
       ClaudeCodeProvider.streamingInstances.add(this);
       this.teammateIdleMessagePending = false;
       // Reset per-turn background-drain state (defensive; also reset in finally).
       this.drainingBackgroundTasks = false;
+      this.awaitingPromptSuggestion = false;
+      this.promptSuggestionDeadline = null;
       this.drainExitCause = 'resolved';
       this.drainTerminalNotifications = [];
       this.drainGraceExpired = false;
@@ -809,16 +885,17 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       // every one that outran it. Silence from a shell is not a stall. See #1355.
       const shellDrainMs = resolveShellDrainMs();
       const armPromptEndTimer = (reason: string) => {
-        if (this.promptEndTimer) {
-          clearTimeout(this.promptEndTimer);
+        if (turnPromptEndTimer) {
+          clearTimeout(turnPromptEndTimer);
         }
         const delay = resolvePromptEndDelay(this.activeTasks.values(), {
           idle: PROMPT_GRACE_MS,
           subagent: SUBAGENT_DRAIN_GRACE_MS,
           shell: shellDrainMs,
         });
-        this.promptEndTimer = setTimeout(() => {
-          this.promptEndTimer = null;
+        const timer = setTimeout(() => {
+          if (this.promptEndTimer === timer) this.promptEndTimer = null;
+          turnPromptEndTimer = null;
           // Record that WE ended the stream on a still-running task. Ending it
           // closes the CLI's stdin, which kills every live background task with
           // the process — they then report 'stopped', indistinguishable from a
@@ -827,8 +904,10 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
             this.drainGraceExpired = true;
             console.warn(`[CLAUDE-CODE] SUBAGENT_DRAIN: grace window (${delay}ms) expired with ${countRunningTasks(this.activeTasks.values())} task(s) still running; ending stream will kill them`);
           }
-          this.promptController?.end(reason);
+          turnPromptController?.end(reason);
         }, delay);
+        turnPromptEndTimer = timer;
+        this.promptEndTimer = timer;
       };
 
       // Stream the response
@@ -861,7 +940,15 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
           // During a long tool call, sub-agent drain, or user interaction, silence is
           // legitimate and the watchdog stays disarmed so real work is never reaped.
           // NIM-1481 / #802.
-          const watchdogActive = shouldArmStreamStallWatchdog({
+          // After `complete` the only thing left to read is the suggestion frame, so
+          // the stall timer doubles as its wait, capped at the deadline set at `result`:
+          // other late chunks must not keep the turn open (expiry is handled below).
+          const awaitingSuggestion = this.awaitingPromptSuggestion && state.completeEmitted
+            && this.promptSuggestionDeadline !== null;
+          const suggestionWaitMs = awaitingSuggestion
+            ? promptSuggestionWaitRemainingMs(this.promptSuggestionDeadline!, Date.now())
+            : 0;
+          const watchdogActive = awaitingSuggestion || shouldArmStreamStallWatchdog({
             resultReceivedTime: state.resultReceivedTime,
             outstandingToolCalls: state.outstandingToolCalls,
             hasRunningTasks: this.hasRunningTasks(),
@@ -873,13 +960,21 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
             nextPromise,
             interruptPromise,
             watchdogActive,
-            stallMs: streamStallMs,
+            stallMs: awaitingSuggestion ? suggestionWaitMs : streamStallMs,
           });
 
           if (raceResult.kind === 'interrupted') {
             if (this.handOffIfRequested(state.completeEmitted, iterator, nextPromise)) break;
             console.log('[CLAUDE-CODE] Interrupt signal received, breaking streaming loop');
             this.drainExitCause = 'interrupted';
+            break;
+          }
+
+          if (raceResult.kind === 'stalled' && awaitingSuggestion) {
+            // No suggestion came (the CLI suppressed it): the wait is over, not a wedged stream.
+            void nextPromise.catch(() => {});
+            console.log(`[CLAUDE-CODE] PROMPT_SUGGESTION: none within ${PROMPT_SUGGESTION_WAIT_MS}ms of result; ending turn`);
+            this.drainExitCause = 'resolved';
             break;
           }
 
@@ -914,6 +1009,21 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
 
           const chunk = rawChunk as any;
           state.chunkCount++;
+
+          // Never part of the transcript (see CLAUDE_CODE_TRANSIENT_CHUNK_TYPES). Only the turn that
+          // answered and is waiting for it hands it on; a frame carried into an adopting turn is stale.
+          if (chunk && typeof chunk === 'object' && chunk.type === 'prompt_suggestion') {
+            const suggestion = extractPromptSuggestion(chunk);
+            if (suggestion && this.awaitingPromptSuggestion && state.completeEmitted) {
+              console.log(`[CLAUDE-CODE] PROMPT_SUGGESTION: received ${Date.now() - (state.resultReceivedTime ?? Date.now())}ms after result`);
+              this.awaitingPromptSuggestion = false;
+              this.promptSuggestionDeadline = null;
+              this.drainExitCause = 'resolved';
+              yield { type: 'prompt_suggestion', suggestion };
+              break;
+            }
+            continue;
+          }
 
           // Grace-period stdin-close logic. The SDK's `isSingleUserTurn` is
           // false because we always pass an AsyncIterable prompt -- so the
@@ -1053,7 +1163,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
             // here — sub-agent assistant text, tool calls, usage — must NOT be
             // yielded: the consumer already received isComplete:true and any further
             // text would mutate the finished parent response. See NIM-1344 / #732 (Medium).
-            if (state.completeEmitted && this.drainingBackgroundTasks && item.kind !== 'system_task') {
+            if (state.completeEmitted && (this.drainingBackgroundTasks || this.awaitingPromptSuggestion) && item.kind !== 'system_task') {
               continue;
             }
             switch (item.kind) {
@@ -1159,6 +1269,9 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
               }
 
               case 'tool_result': {
+                // A failed or denied call may never reach PostToolUse.
+                if (sessionId) agentToolActivity.finished(sessionId, item.toolUseId);
+                claudeShellPost(sessionId, item.toolUseId, { failed: item.isError === true });
                 const toolCall = state.toolCallsById.get(item.toolUseId);
                 if (toolCall) {
                   const { isDuplicate, isBackgroundAck } = applyToolResultToToolCall(toolCall, item.content, item.isError);
@@ -1279,7 +1392,11 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
 
                   const errorType = isAuthError ? 'authentication_error' : isBedrockToolError ? 'bedrock_tool_error' : isExpiredSessionError ? 'expired_session_error' : 'api_error';
                   this.logError(sessionId, 'claude-code', new Error(errorMessage), 'result_chunk', errorType, hideMessages);
-                  transcriptAdapter?.systemMessage(errorMessage, 'error');
+                  const usageLimit = state.blockingUsageLimit;
+                  transcriptAdapter?.systemMessage(
+                    usageLimit ? usageLimitSystemMessage(usageLimit, errorMessage, this.config.model) : errorMessage,
+                    'error',
+                  );
 
                   yield {
                     type: 'error',
@@ -1288,6 +1405,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
                     ...(isBedrockToolError && { isBedrockToolError: true }),
                     ...(isExpiredSessionError && { isExpiredSessionError: true }),
                     ...(isServerError && { isServerError: true }),
+                    ...(usageLimit?.resetsAtMs != null && { usageLimitResetsAtMs: usageLimit.resetsAtMs }),
+                    ...(usageLimit && { usageLimitType: usageLimit.limitType }),
                   };
 
                   // No `complete` here -- finishTurn owns terminal completion,
@@ -1356,14 +1475,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
               case 'rate_limit': {
                 const info = item.chunk.rate_limit_info;
                 if (info && info.status !== 'allowed') {
-                  const resetsAtUnix = info.resetsAt || null;
-                  const limitType = info.rateLimitType === 'five_hour' ? '5-hour session' : info.rateLimitType || 'unknown';
-                  const utilization = info.utilization != null ? Math.round(info.utilization * 100) : null;
-                  const isWarning = info.status === 'allowed_warning';
-                  const marker = isWarning ? '[RATE_LIMIT_WARNING]' : '[RATE_LIMIT]';
-                  const utilizationStr = utilization != null ? ` usage=${utilization}` : '';
-                  const modelStr = this.config.model ? ` model=${this.config.model}` : '';
-                  yield { type: 'text', content: `\n\n<!-- ${marker} limitType=${limitType} resetsAtUnix=${resetsAtUnix || 'unknown'}${utilizationStr}${modelStr} -->\n\n` };
+                  state.blockingUsageLimit = blockingUsageLimit(info) ?? state.blockingUsageLimit;
+                  yield { type: 'text', content: `\n\n${rateLimitMarker(info, this.config.model)}\n\n` };
                 }
                 break;
               }
@@ -1406,6 +1519,9 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
             await this.flushPendingWrites();
             if (sessionId) await this.processTranscriptMessages(sessionId);
 
+            if (this.toolHooksService) {
+              for (const file of await takeClaudeShellAttributedFiles(sessionId)) this.toolHooksService.getEditedFiles().add(file);
+            }
             if (this.toolHooksService && this.toolHooksService.getEditedFiles().size > 0) {
               await this.toolHooksService.createTurnEndSnapshots();
             }
@@ -1439,6 +1555,17 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
               terminalNotificationCount: this.drainTerminalNotifications.length,
             });
             this.prepareStreamClosedContinuation(sessionId, hideMessages);
+            // Decided before `complete` too, so the consumer can tell mobile the turn is done while we
+            // wait (willAwaitPromptSuggestion). The adopt flag itself is only raised after the yield.
+            this.promptSuggestionDeadline = shouldAwaitPromptSuggestion({
+              enabled: promptSuggestionsEnabled,
+              hasSessionId: !!sessionId,
+              willDrainSubagents,
+              resultIsError: chunk.is_error === true,
+              planMode: this.currentMode === 'planning',
+              firstTurn: !resumedConversation,
+              wasInterrupted: this.wasInterrupted,
+            }) ? Date.now() + PROMPT_SUGGESTION_WAIT_MS : null;
 
             yield {
               type: 'complete',
@@ -1480,6 +1607,12 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
             // loop exits for another reason, handled by finalizeBackgroundDrain).
             if (willDrainSubagents) {
               console.log(`[CLAUDE-CODE] SUBAGENT_DRAIN: lead turn complete but ${countRunningTasks(this.activeTasks.values())} sub-agent task(s) still running; deferring teardown to drain`);
+              continue;
+            }
+            // The SDK sends the suggestion after `result`; keep reading briefly for it. A follow-up
+            // prompt adopts the live query meanwhile (promptSuggestionWait.ts).
+            if (this.promptSuggestionDeadline !== null) {
+              this.awaitingPromptSuggestion = true;
               continue;
             }
             break;
@@ -1555,6 +1688,19 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     } finally {
       if (this.drainExitCause === 'handoff' && this.drainHandoff && !this.drainHandoff.cancelled) {
         this.releaseToFollowUpTurn(this.drainHandoff, sessionId);
+      } else if (this.abortController !== null && this.abortController !== turnController) {
+        // A newer turn owns the live fields. Clearing them here would orphan its
+        // subprocess, so only this turn's own subprocess is stopped.
+        if (turnPromptEndTimer) {
+          clearTimeout(turnPromptEndTimer);
+          if (this.promptEndTimer === turnPromptEndTimer) this.promptEndTimer = null;
+          turnPromptEndTimer = null;
+        }
+        try {
+          turnQuery?.close();
+        } catch (error) {
+          console.warn('[CLAUDE-CODE] Closing superseded query failed:', error);
+        }
       } else {
         // A handoff the follow-up gave up on is a supersede: the follow-up
         // starts its own query and aborts this one.
@@ -1574,6 +1720,15 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     // against the torn-down control channel and leaks. NIM-1470.
     const queryForDrainCleanup = this.leadQuery;
     this.leadQuery = null;
+    // Background commands drained with the turn; nothing it started is still running.
+    if (sessionId) agentToolActivity.endTurn(sessionId);
+    // Backgrounded commands close here, after the result's snapshot pass; their
+    // links persist once the windows reconcile, so snapshot those files then.
+    const hooksForShellSnapshots = this.toolHooksService;
+    void claudeShellEndTurn(sessionId)
+      .then(() => takeClaudeShellAttributedFiles(sessionId))
+      .then((files) => files.length > 0 ? hooksForShellSnapshots?.createSnapshotsForFiles(files) : undefined)
+      .catch((error) => console.warn('[CLAUDE-CODE] Turn-end shell snapshots failed:', error));
     ClaudeCodeProvider.streamingInstances.delete(this);
     this.abortController = null;
     this.wasInterrupted = false;
@@ -1600,6 +1755,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     // drainingBackgroundTasks, so reset those only afterward. NIM-1344 / #732.
     this.finalizeBackgroundDrain(sessionId, queryForDrainCleanup);
     this.drainingBackgroundTasks = false;
+    this.awaitingPromptSuggestion = false;
+    this.promptSuggestionDeadline = null;
     this.publishBackgroundWait(sessionId);
     this.drainExitCause = 'resolved';
     this.drainTerminalNotifications = [];
@@ -2111,9 +2268,25 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       || this.hasRunningTasks();
   }
 
+  /** The answered turn keeps its stream open only to read the next-prompt suggestion (promptSuggestionWait.ts). */
+  public willAwaitPromptSuggestion(): boolean {
+    return this.promptSuggestionDeadline !== null;
+  }
+
   /** A follow-up can go onto this draining turn's live query (drainHandoff.ts); the host dispatches on it. */
   public canAcceptFollowUpDuringDrain(): boolean {
-    return canAdoptDrainingQuery({
+    return canAdoptAwaitingSuggestionQuery({
+      awaiting: this.awaitingPromptSuggestion,
+      hasLeadQuery: this.leadQuery !== null,
+      promptStreamOpen: !!this.promptController && !this.promptController.isEnded(),
+      wasInterrupted: this.wasInterrupted,
+      hasPendingUserInteraction: this.hasPendingUserInteraction(),
+      hasTeammateWork: this.teammateIdleMessagePending
+        || this.teammateManager.hasPendingTeammateMessages()
+        || this.teammateManager.hasActiveTeammates(),
+      hasPendingContinuation: this.streamClosedContinuationMessagePending !== null,
+      handoffInProgress: this.drainHandoff !== null,
+    }) || canAdoptDrainingQuery({
       hasLeadQuery: this.leadQuery !== null,
       draining: this.drainingBackgroundTasks,
       promptStreamOpen: !!this.promptController && !this.promptController.isEnded(),
@@ -2157,7 +2330,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     pendingNext: Promise<IteratorResult<unknown>> | null,
   ): boolean {
     const handoff = this.drainHandoff;
-    if (!handoff || handoff.cancelled || !completeEmitted || !this.drainingBackgroundTasks) return false;
+    if (!handoff || handoff.cancelled || !completeEmitted || !(this.drainingBackgroundTasks || this.awaitingPromptSuggestion)) return false;
     handoff.carry = { iterator, pendingNext };
     this.drainExitCause = 'handoff';
     return true;
@@ -2182,6 +2355,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     this.wasInterrupted = false;
     this.interruptResolve = null;
     this.drainingBackgroundTasks = false;
+    this.awaitingPromptSuggestion = false;
+    this.promptSuggestionDeadline = null;
     this.publishBackgroundWait(sessionId);
     this.drainExitCause = 'resolved';
     this.drainGraceExpired = false;
@@ -2233,6 +2408,11 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     if (sessionId && this.taskListItems.size === 0) {
       void hydrateTaskListItems(sessionId, this.taskListItems);
     }
+
+    // Every turn's init carries the current list; the newest frame wins.
+    this.cliCapabilities = new Set(
+      Array.isArray(chunk.capabilities) ? chunk.capabilities.filter((c: unknown) => typeof c === 'string') : [],
+    );
 
     if (chunk.slash_commands && Array.isArray(chunk.slash_commands)) {
       this.slashCommands = chunk.slash_commands;
@@ -2475,23 +2655,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
 
   private async emitTaskUpdate(sessionId: string | undefined): Promise<void> {
     if (!sessionId) return;
-
-    try {
-      const { AISessionsRepository } = await import('../../../storage/repositories/AISessionsRepository');
-      const currentSession = await AISessionsRepository.get(sessionId);
-      const currentMetadata = currentSession?.metadata || {};
-
-      await AISessionsRepository.updateMetadata(sessionId, {
-        metadata: {
-          ...currentMetadata,
-          currentTasks: Array.from(this.activeTasks.values()),
-        }
-      });
-
-      this.emit('message:logged', { sessionId, direction: 'output' });
-    } catch (error) {
-      console.error('[CLAUDE-CODE] Failed to update session metadata with tasks:', error);
-    }
+    await persistCurrentTasks(sessionId, this.activeTasks, () => this.emit('message:logged', { sessionId, direction: 'output' }));
   }
 
   /**
@@ -2732,7 +2896,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     const planSummary = input?.plan || '';
 
     // Create a promise that will be resolved when user responds via the widget
-    const confirmationPromise = new Promise<{ approved: boolean; clearContext?: boolean; feedback?: string }>((resolve, reject) => {
+    const confirmationPromise = new Promise<ExitPlanModeResponse>((resolve, reject) => {
       this.pendingExitPlanModeConfirmations.set(requestId, { resolve, reject });
 
       if (options.signal) {
@@ -2793,12 +2957,9 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
         this.currentMode = 'agent';
         return { behavior: 'allow', updatedInput: input };
       } else {
-        const feedbackText = response.feedback
-          ? `\n\nUser feedback: "${response.feedback}"`
-          : '';
         return {
           behavior: 'deny',
-          message: `The user chose to continue planning.${feedbackText}`,
+          message: exitPlanModeDenialReason(response),
         };
       }
     } catch (error) {
@@ -2820,7 +2981,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
    */
   public resolveExitPlanModeConfirmation(
     requestId: string,
-    response: { approved: boolean; clearContext?: boolean; feedback?: string },
+    response: ExitPlanModeResponse,
     sessionId?: string,
     respondedBy: 'desktop' | 'mobile' = 'desktop'
   ): void {
@@ -2922,16 +3083,23 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
   }
 
   /**
-   * Reject a pending AskUserQuestion request (e.g., on cancel/abort)
+   * Reject a pending AskUserQuestion request because the user dismissed it
+   * (the widget's cancel on desktop or mobile). Turn aborts go through
+   * `rejectAllPendingQuestions` instead.
+   *
+   * Returns 'dismissed' when the CLI takes the dismissal as an answer
+   * (`ask_user_question_unanswered_v1`): the turn continues and the model reads
+   * it, so the caller must not abort.
    */
-  public rejectAskUserQuestion(questionId: string, error: Error): void {
+  public rejectAskUserQuestion(questionId: string, error: Error): 'dismissed' | void {
     const pending = this.pendingAskUserQuestions.get(questionId);
     if (pending) {
-      pending.reject(error);
+      pending.reject(error instanceof AskUserQuestionDismissedError ? error : new AskUserQuestionDismissedError(error.message));
       this.pendingAskUserQuestions.delete(questionId);
       // The cancelled tool result is logged by handleAskUserQuestionTool's catch block,
       // which fires when the promise rejects. It correctly handles all questionId formats
       // (both legacy ask-{sessionId}-{timestamp} and new toolu_... Claude tool use IDs).
+      if (this.cliCapabilities.has(ASK_USER_QUESTION_UNANSWERED_CAPABILITY)) return 'dismissed';
     }
   }
 
@@ -3196,10 +3364,22 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
    * 2. The tool needs user approval
    *
    * Our job is to show UI, wait for user response, and save patterns if "Always" is chosen.
+   *
+   * `queryPermissionMode` is the SDK permission mode of the query that owns this
+   * handler when it is fixed for that query (teammates run 'default'). Omitted for
+   * the lead, whose mode is read live from `currentMode` (it can change mid-turn).
    */
-  private createCanUseToolHandler(sessionId?: string, workspacePath?: string, permissionsPath?: string, teammateName?: string) {
+  private createCanUseToolHandler(
+    sessionId?: string,
+    workspacePath?: string,
+    permissionsPath?: string,
+    teammateName?: string,
+    queryPermissionMode?: 'plan' | 'auto' | 'default'
+  ) {
     // Use permissionsPath for trust checks (parent project for worktrees), workspacePath for everything else
     const pathForTrust = permissionsPath || workspacePath;
+    // Only the query that is itself running in auto mode had its calls escalated by the classifier
+    const isAutoModeQuery = () => (queryPermissionMode ?? resolvePermissionMode(this.currentMode)) === 'auto';
 
     let canUseToolCallCount = 0;
 
@@ -3217,7 +3397,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
           workspacePath,
           permissionsPath,
           teammateName,
-          warnings
+          warnings,
+          isAutoModeQuery()
         )
       : this.handleToolPermissionFallback(toolName, input, options, sessionId, workspacePath, warnings);
 
@@ -3238,11 +3419,12 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
           input,
           options,
           sessionId,
-          pathForTrust
+          pathForTrust,
+          isAutoModeQuery
         );
         // In Auto mode the SDK classifier escalated this call, so the user
         // decides on the command as a whole rather than part by part.
-        const compoundDecision = !immediateDecision && toolName === 'Bash' && this.currentMode !== 'auto'
+        const compoundDecision = !immediateDecision && toolName === 'Bash' && !isAutoModeQuery()
           ? await authorizeCompoundBashCommand(
               {
                 isPartPreApproved: createCompoundPartPreApprovalCheck(
@@ -3253,7 +3435,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
                 authorizePart: (partInput, warnings) => promptForTool(toolName, partInput, options, warnings),
                 logSecurity: (message, data) => this.logSecurity(message, data),
               },
-              input
+              input, options
             )
           : null;
         if (immediateDecision) {
@@ -3288,7 +3470,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     input: any,
     options: ToolPermissionOptions,
     sessionId: string | undefined,
-    pathForTrust: string | undefined
+    pathForTrust: string | undefined,
+    isAutoModeQuery: () => boolean
   ): Promise<{ behavior: 'allow' | 'deny'; updatedInput?: any; message?: string } | null> {
     return resolveImmediateToolDecisionHelper(
       {
@@ -3301,7 +3484,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
         handleExitPlanMode: (resolvedSessionId, resolvedInput, resolvedOptions) =>
           this.handleExitPlanMode(resolvedSessionId, resolvedInput, resolvedOptions),
         setCurrentMode: (mode) => { this.currentMode = mode; },
-        getCurrentMode: () => this.currentMode,
+        // The invoking query's mode, not the lead's: a teammate of an auto-mode lead runs 'default'
+        getCurrentMode: () => isAutoModeQuery() ? 'auto' : this.currentMode === 'auto' ? 'agent' : this.currentMode,
         logSecurity: (message, data) => this.logSecurity(message, data),
       },
       {
@@ -3322,7 +3506,8 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
     workspacePath: string,
     permissionsPath: string | undefined,
     teammateName: string | undefined,
-    warnings?: string[]
+    warnings: string[] | undefined,
+    requiresUserDecision: boolean
   ): Promise<{ behavior: 'allow' | 'deny'; updatedInput?: any; message?: string }> {
     return handleToolPermissionWithServiceHelper(
       {
@@ -3339,7 +3524,9 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
         workspacePath,
         permissionsPath,
         teammateName,
-        warnings
+        warnings,
+        // In auto mode canUseTool only runs for calls the classifier or a hook escalated (#1740)
+        requiresUserDecision,
       }
     );
   }
@@ -3394,6 +3581,7 @@ export class ClaudeCodeProvider extends BaseAgentProvider {
       {
         sessionId,
         pendingAskUserQuestions: this.pendingAskUserQuestions,
+        supportsUnansweredAnnotation: () => this.cliCapabilities.has(ASK_USER_QUESTION_UNANSWERED_CAPABILITY),
         pollForResponse: (resolvedSessionId, questionId, signal) =>
           this.pollForAskUserQuestionResponse(resolvedSessionId, questionId, signal),
         emit: (event, payload) => this.emit(event, payload),
