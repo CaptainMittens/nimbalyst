@@ -37,7 +37,12 @@ export interface ToolFailureRow extends CoachingMessageRow {
   session_created_at?: string;
 }
 
-/** The three places a failure can land. */
+/**
+ * The three places a failure can land
+ *
+ * A call to a tool that this setup does not offer (class `no-such-tool`) lands in
+ * `habit`, never in `broken-tool`, because the agent chose the wrong tool.
+ */
 export type FailureBucket = 'blocked' | 'broken-tool' | 'habit';
 
 /**
@@ -72,7 +77,8 @@ export interface DayCount {
  *     habitCounts::`{ key: string; hits: number; distinctDays: number }[]`
  *         The hits and the distinct failure days of each habit key.
  *     brokenToolKeys::`{ key: string; calls: number; failures: number }[]`
- *         The tools that cannot run in this setup.
+ *         The tools that fail almost every call. A call to a tool this setup does
+ *         not offer is a habit (class `no-such-tool`), not a broken tool.
  *     samples::`{ key: string; sessionId: string; text: string }[]`
  *         Up to 3 failure texts for each key.
  *     otherSamples::`{ day: string; sessionId: string; text: string }[]`
@@ -356,6 +362,15 @@ interface SortedFailure {
 }
 
 /**
+ * Matches the text Claude Code gives when the agent calls a tool that this setup
+ * does not offer, for example Grep, Glob or Monitor
+ *
+ * This is an agent habit, not a broken tool, so it counts as the habit class
+ * `no-such-tool` and never as a broken tool.
+ */
+const NO_SUCH_TOOL = /^<tool_use_error>Error: No such tool available:/;
+
+/**
  * Lists the failure classes with the pattern that picks each, in match order
  *
  * The first pattern that matches wins. `timeout` matches anywhere in the text
@@ -373,6 +388,7 @@ const FAILURE_CLASS_PATTERNS: readonly (readonly [RegExp, string])[] = [
   [/^<tool_use_error>InputValidationError/, 'bad-input'],
   [/^This tool's input schema/, 'bad-input'],
   [/timed out/, 'timeout'],
+  [NO_SUCH_TOOL, 'no-such-tool'],
 ];
 
 /**
@@ -391,13 +407,14 @@ function failureClass(text: string): string {
   return hit ? hit[1] : 'other';
 }
 
-const NO_SUCH_TOOL = /^<tool_use_error>Error: No such tool available:/;
-
 /** True when a result text matches none of `BLOCKED_PATTERNS`. */
 const NOT_BLOCKED = (text: string): boolean => !BLOCKED_PATTERNS.some((p) => p.test(text));
 
 /**
  * Finds the tools that fail 90% or more of their calls, with at least 10 calls
+ *
+ * A "No such tool available" failure is not counted, because it is an agent
+ * habit and not a fault of the tool.
  *
  * Args:
  *     calls::PairedCall[]
@@ -412,7 +429,8 @@ function findRateBrokenTools(calls: PairedCall[]): Set<string> {
   for (const call of calls) {
     const entry = totals.get(call.tool) ?? { calls: 0, failures: 0 };
     entry.calls += 1;
-    if (call.failed && NOT_BLOCKED(call.text.trimStart())) entry.failures += 1;
+    const text = call.text.trimStart();
+    if (call.failed && NOT_BLOCKED(text) && !NO_SUCH_TOOL.test(text)) entry.failures += 1;
     totals.set(call.tool, entry);
   }
   const broken = new Set<string>();
@@ -425,6 +443,9 @@ function findRateBrokenTools(calls: PairedCall[]): Set<string> {
 
 /**
  * Sorts each failed call into one bucket, in the order the design sets
+ *
+ * A "No such tool available" failure always lands in `habit` with class
+ * `no-such-tool`, even when the same tool is otherwise broken.
  *
  * Args:
  *     calls::PairedCall[]
@@ -443,7 +464,7 @@ function sortFailures(calls: PairedCall[]): SortedFailure[] {
     if (!NOT_BLOCKED(text)) {
       const prefix = call.tool.startsWith(CODEX_PREFIX) ? CODEX_PREFIX : '';
       sorted.push({ call, bucket: 'blocked', key: `${prefix}${hookKey(text)}` });
-    } else if (NO_SUCH_TOOL.test(text) || brokenTools.has(call.tool)) {
+    } else if (!NO_SUCH_TOOL.test(text) && brokenTools.has(call.tool)) {
       sorted.push({ call, bucket: 'broken-tool', key: call.tool });
     } else {
       const klass = call.forcedClass ?? failureClass(text);
