@@ -110,19 +110,25 @@ describe('deriveToolFailures: the ExitPlanMode hook case', () => {
   });
 });
 
-describe('deriveToolFailures: broken tools', () => {
-  it('sends "No such tool available" to broken-tool at once, keyed by the tool', () => {
-    const rows = claudeCall(
-      'n1',
-      'mcp__ghost__lookup',
-      '<tool_use_error>Error: No such tool available: mcp__ghost__lookup</tool_use_error>',
-    );
+describe('deriveToolFailures: "No such tool available"', () => {
+  const noSuchTool = (name: string) =>
+    `<tool_use_error>Error: No such tool available: ${name}</tool_use_error>`;
+
+  it('counts it as the habit class no-such-tool and never as a broken tool', () => {
+    const rows = claudeCall('n1', 'Grep', noSuchTool('Grep'));
     const result = deriveToolFailures(rows);
+    expect(result.brokenToolKeys).toEqual([]);
+    expect(result.habitCounts).toEqual([{ key: 'Grep:no-such-tool', hits: 1, distinctDays: 1 }]);
     expect(result.days).toEqual([
-      { day: '2026-11-20', bucket: 'broken-tool', key: 'mcp__ghost__lookup', calls: 1, failures: 1 },
+      { day: '2026-11-20', bucket: 'habit', key: 'Grep:no-such-tool', calls: 1, failures: 1 },
     ]);
-    expect(result.brokenToolKeys).toEqual([{ key: 'mcp__ghost__lookup', calls: 1, failures: 1 }]);
-    expect(result.habitCounts).toEqual([]);
+  });
+
+  it('stays a habit when the tool fails 10 of 10 calls with this text (the rate rule skips it)', () => {
+    const rows = Array.from({ length: 10 }, (_, i) => claudeCall(`g${i}`, 'Monitor', noSuchTool('Monitor'))).flat();
+    const result = deriveToolFailures(rows);
+    expect(result.brokenToolKeys).toEqual([]);
+    expect(result.habitCounts).toEqual([{ key: 'Monitor:no-such-tool', hits: 10, distinctDays: 1 }]);
   });
 });
 
@@ -149,13 +155,15 @@ describe('deriveToolFailures: MCP results with array content', () => {
   });
 
   it('joins the text items with a newline and finds "No such tool available" in the array', () => {
+    // The joined text is the sample; the match still files the call under no-such-tool.
     const rows = mcpCall('m2', 'mcp__ghost__lookup', [
       { type: 'image', source: {} },
       { type: 'text', text: '<tool_use_error>Error: No such tool available: mcp__ghost__lookup</tool_use_error>' },
       { type: 'text', text: 'second line' },
     ]);
     const result = deriveToolFailures(rows);
-    expect(result.brokenToolKeys).toEqual([{ key: 'mcp__ghost__lookup', calls: 1, failures: 1 }]);
+    expect(result.brokenToolKeys).toEqual([]);
+    expect(result.habitCounts).toEqual([{ key: 'mcp__ghost__lookup:no-such-tool', hits: 1, distinctDays: 1 }]);
     expect(result.samples[0].text).toBe(
       '<tool_use_error>Error: No such tool available: mcp__ghost__lookup</tool_use_error>\nsecond line',
     );
