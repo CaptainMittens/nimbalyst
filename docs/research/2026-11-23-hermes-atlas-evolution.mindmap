@@ -1,0 +1,197 @@
+---
+title: Hermes Atlas Evolution
+layout: balanced
+---
+
+# Atlas Evolution 0.13.0
+> A Hermes plugin that learns from repeat tool failures. 28,226 lines of Python, MIT licence. Colours: green = carries over to Nimbalyst, yellow = carries over with a gap, red = Hermes only. Status on each "Nimbalyst fit" node: done = built and merged into the fork's main (merge commit be28396f8, PR #2; first build 9769852b2, review fixes f39b25dc5), todo = not built, question = open. Updated 2026-11-25.
+
+## 1 Signals {color: yellow}
+> Collects what goes wrong. Nimbalyst stores every tool call in ai_agent_messages.
+- Hooks it listens to {tags: hermes}
+  - post_tool_call: failed tool calls
+  - pre_llm_call and post_llm_call: turn timing
+  - post_api_request and api_request_error
+  - on_session_end, on_session_finalize
+  - on_skill_lifecycle: skill use
+  - subagent_start, post_compaction
+- What it records
+  - Tool name
+  - One of 22 failure classes
+  - Short detail
+  - Owner corrections
+- 14-day history replay seeds the first pass
+- Modules: signals, logwatch, backfill, telemetry, operations
+- Nimbalyst fit {color: green, status: done}
+  > Built: the tool get_tool_failures (sessionContextServer.ts) reads ai_agent_messages through toolFailures.ts. Three buckets: blocked, broken-tool, habit. Seven habit classes. Codex rows have their own pairing, with codex: keys.
+  - Not carried over: turn timing, API errors, skill use, owner corrections {status: todo}
+
+## 2 Lessons {color: green}
+> The core idea. A repeat failure becomes a short "when X, do Y" rule.
+- Rule: 3+ hits on 2+ days or sessions
+- Fixed templates per failure class
+- Reflector: a model drafts lessons with no template
+  - Drafts always wait for the owner
+- Modes
+  - auto: goes live after 2 hits in the owner's own turns
+  - otherwise: waits as a candidate
+- Lesson record (experience.py:63)
+  - signature, tool, klass, hint, origin, status, text
+  - shown, hints, verdict, rate_before, rate_after
+  - baseline_failures, baseline_calls
+- Modules: lessons, reflector, hints, packs
+- Nimbalyst fit {color: green, status: done}
+  > Built as step 5 of the evolution-pass skill: a habit key with 3+ hits on 2+ days and no lesson becomes a live lesson in lessons.json. Days only: Atlas also counts 2+ sessions; the spec chose days on purpose. The agent writes the text; it goes live at once, with no owner wait. Codex keys get no lesson. First run 2026-11-25: 1 lesson live (Bash exit-code).
+
+## 3 Delivery {color: yellow}
+> How the agent sees active lessons.
+- Prompt section, 1,400 characters at most
+- Hint added to a failing tool result (tool_hints on)
+- Optional agent tool: hermes_atlas_evolution_lessons
+- Nimbalyst fit {color: yellow, status: done}
+  > Built: a section between evolution:lessons markers in the Claude Code MEMORY.md, 1,400 characters at most, beside the memory-spike learn section.
+  - Gap: a session in another folder or worktree may load a different MEMORY.md {status: question}
+  - Gap: Codex sessions get no lessons until registerContextProvider works (ExtensionLoader.ts:1026) {status: todo}
+  - Gap: no hint on a failing tool result {status: todo}
+
+## 4 Measurement {color: green}
+> Checks whether each change helped.
+- Lesson verdict: 14 days before vs 14 days after
+  - effective, ineffective, inconclusive
+  - auto mode retires an ineffective lesson
+- Change experiments: 7 days before vs after
+  - config edits, skill edits
+- Not yet tested over weeks of real use
+- Modules: experiments, evolve, insights, evolution_index
+- Nimbalyst fit {color: green, status: done}
+  > Built: evaluateHabitKeys in toolFailures.ts. Inconclusive below 20 calls or 5 before-failures; effective at half the rate; ineffective at 0.9 times the rate with 3+ failures. The skill judges at day 15 to day 45 and retires an ineffective lesson.
+  - Not carried over: change experiments for config and skill edits {status: todo}
+  - Kill check: fewer than 2 final verdicts after 30 days means review the thresholds {status: question}
+
+## 5 Proposals {color: green}
+> Anything bigger than a lesson waits for the owner.
+- Each has risk, evidence, exact command
+- Only the owner approves, in a terminal
+  - Refuses when an agent marker is set
+- Plugin runs only lessons, skill_lock, some environment fixes
+- Every action logged with an undo
+- skill_rollback opens when a skill change regressed
+- Modules: proposals, decisions, explain
+- Nimbalyst fit {color: green, status: done}
+  > Built: tracker items "Clarify block message", "Fix tool setup" and "Lesson did not help". The filed list in lessons.json stops a second item for the same key. A comment goes on an item after 14 quiet days; the owner closes it.
+
+## 6 Schedule and cost {color: green}
+- Autopilot pass about hourly
+- Weekly digest cron job
+- Self-cost meter per hook
+- Modules: autopilot, selfcost, billing, report
+- Nimbalyst fit {color: yellow, status: done}
+  > Built: the skill's setup step creates a daily 06:00 automation "Evolution pass". It runs only while a Nimbalyst window is open on the workspace.
+  - Not carried over: cost meter and weekly digest {status: todo}
+
+## 7 Storage {color: blue}
+- evolution.sqlite3, schema 8
+- settings.json
+- 90-day retention
+- Tables: lesson, change, proposal
+- Nimbalyst {status: done}
+  > One file per workspace: nimbalyst-local/evolution/lessons.json, with cursor, filed, passSessionIds, memoryDir and lessons. No new table.
+
+## 8 Hermes upkeep {color: red}
+> Hermes-only. Skip for Nimbalyst.
+- guard: blocks commands that kill Hermes
+- doctor, hermes_care, environment
+- gateway repair, fleet_update, system_update
+- memory_care: MEMORY.md and USER.md dedupe
+- skill_health, radar
+- ecosystem: Hermes plugin catalog
+- Dashboard tab, menu, admin, cli, i18n
+
+## 9 Nimbalyst v1 status {color: blue}
+> Where the build stands on 2026-11-25.
+- Done {status: done}
+  - Spec, glossary terms, 8 tickets (NIL.6 to NIL.13)
+  - Code and skill merged into the fork's main (PR #2, be28396f8)
+  - Spec and first-run checklist on docs/evolution-loop-spec, pushed to the fork, not merged
+  - Gate on the final tree (f39b25dc5): typecheck passed; 16,700 tests passed, 26 skipped
+  - Tracker: NIL.6 to NIL.12 done
+- Waiting {status: todo}
+  - Watched first run (NIL.13): ran 2026-11-25 in the installed fork build; 5 of 7 checks pass, check 3 fails (known gap), check 7 waits for the 06:00 run
+  - Merge the docs branch, so NIL.5 can close
+  - Upstream pull requests for the core parts
+- Risks {status: question}
+  - Permission prompt on the MEMORY.md write can hang an unattended run
+  - Hook text drifts and new hooks fall into the other class
+- First run done (2026-11-25) {status: done}
+  - Ran in the installed fork build 0.84.4 on the real database. No permission dialog.
+  - Filed 4 items: 1 blocked call (recursive grep, 20 failures) and 3 'No such tool' items (Grep, Monitor, Glob).
+  - 1 lesson live: Bash exit-code (17 hits on 4 days).
+  - Checks 1, 2, 4, 5, 6 pass. Check 3 fails (known gap). Check 7 waits for the 06:00 run.
+
+## 10 Gap review 2026-11-24 {color: red}
+> Two separate reviews (Sonnet and Fable 5.2; Mythos is not offered by this Nimbalyst build) of branch feat/evolution-loop at 9769852b2. "Both" = both reviewers found it. The lead checked each line marked checked in the code.
+- Fix before the first run {status: done}
+  > Fixed in commit f39b25dc5 on feat/evolution-loop (pushed). Gate: 16,700 tests passed, 26 skipped. Rule 1 resultText stays hand-written: the runtime package does not export subagentDrain.ts.
+  - lessons.json saves only at the last step: a failed run files the same items again (both, checked, SKILL.md:65,83)
+  - truncated turns on for any sample over 200 characters, so the "failures stopped" comment never runs (both, checked, toolFailures.ts:606)
+  - automations_list and automations_create are not auto-allowed: setup waits on a prompt (both, checked, toolPolicy.ts)
+  - Hook key: the [tag] rule searches the whole text and the 40-character fallback changes with numbers in the message (both, checked, toolFailures.ts:331)
+  - A block seen once gets a tracker item; the spec target is 20 or more (both, checked, SKILL.md:48)
+  - The skill never reads the clock, so "now" and "14 days back" can be wrong (Sonnet, checked, SKILL.md:60)
+  - Rule 1: resultText repeats extractToolResultText (Sonnet, checked, subagentDrain.ts:46)
+- First-run plan is wrong {status: done}
+  > Fixed: the checklist now copies the real database into the dev app's folder and runs in the Nimbalyst workspace (commit 1c8415c18). Section 11 lists a new first-run gap.
+  - dev:user2 reads its own empty database, so the run finds no failures (Fable, checked, dev-user2.mjs)
+  - This workspace has few failures; Phoenix has about 9 times more (Fable, database query)
+- Fix after the first run {status: todo}
+  - The query loads every tool row with full text and no limit (both, checked, sessionContextServer.ts:171)
+  - The after-window is a fixed 14 days, so judging again up to day 45 gives the same answer (Fable, checked, toolFailures.ts:868)
+  - No per-tool call totals in the result (Fable)
+  - Bash:exit-code and other keys get lessons that cannot help (both)
+  - A misspelled tool name gets its own "Fix tool setup" item (Sonnet)
+  - Lesson text goes into MEMORY.md with no clean-up of untrusted failure text (Sonnet, security)
+- Atlas parts the spec dropped {status: question}
+  - shown: whether a session loaded the lesson; without it the after-window mixes in sessions that never saw it (Sonnet)
+  - Lesson expiry after quiet days, so the 1,400 characters do not fill (Fable)
+  - Detail in the key, so one exit-code lesson does not cover every command (Fable)
+  - Keep a lesson the owner reworded (Sonnet)
+- Tracker {status: done}
+  - NIL.6 to NIL.12 done after the merge. NIL.13 (first run) stays to-do.
+
+## 11 Gap review 2 (2026-11-24) {color: red}
+> Second pair of reviews (Sonnet and Fable 5.2; Mythos is not offered) of main at be28396f8, with section 10 excluded. The lead checked each line marked checked.
+- Blocks learning {status: todo}
+  - No daily home: the installed app (0.84.4) has no evolution extension, and dev:user2 reads a frozen copy, so no pass sees new sessions (Fable, checked) {status: done}
+    > Owner chose: install a fork build. Branch sync/upstream-0.84.4 merges upstream 0.84.4 into the fork (13e2d8b35; gate: 19,431 tests passed, 30 skipped) and takes updates from CaptainMittens/nimbalyst, which has no releases (1e174c8ac). Built as release/mac-arm64/Nimbalyst.app. Install waits on the owner. Each upstream release needs a merge and a rebuild.
+  - A lesson starts at 3 hits but a final verdict needs 5 before-failures, so a 3- or 4-hit lesson stays live and inconclusive forever and fills the 1,400 characters (Fable, checked, toolFailures.ts:736, SKILL.md:65) {status: done}
+    > Owner chose: retire a lesson still inconclusive after day 45, with no tracker item (90897fa7f).
+  - This workspace has 1 eligible habit key in 14 days (Bash:exit-code, 16 hits), so 5 final verdicts cannot happen here (Fable, database query)
+- First run {status: todo}
+  - Split state: the dev run writes the real lessons.json and MEMORY.md, but its tracker items stay in the database copy; `filed` then blocks the real items (Fable, checked) {status: done}
+    > The checklist now backs up both files before the run and puts them back after it (975079fc5). With the fork build installed, the run can use the real database, and this gap goes away.
+  - The 7 checks test plumbing only; none checks a count, a verdict or a run started by the automation (Fable)
+  - Tip: add one lesson dated 16 days back, so the judging step runs (Fable)
+- Bugs and risks {status: todo}
+  - One deleted tracker item fails the comment call, and the stop rule then ends every later pass (Fable, SKILL.md:57,90)
+  - "Grep is not available in this session" is 18 of 20 "No such tool" hits: a habit, filed as a broken tool (Fable, toolFailures.ts:394)
+    - Seen in the first run: Grep, Monitor and Glob were each filed as 'Fix tool setup'.
+  - Lesson text goes live with no length or character check; Atlas allows 12 to 240 characters and no control characters (Sonnet, checked, Atlas lessons.py:29-30)
+  - passSessionIds keeps 30 ids, so pass sessions older than 30 days count in the day-45 before-window (Sonnet, SKILL.md:68)
+  - The skill makes the model do date maths and add counts; a tool field could do it (Fable, SKILL.md:51,64)
+- Not shown before {status: question}
+  - The 60-day read limit, and `otherSamples`, which the skill never reads (Fable, sessionContextServer.ts:238)
+  - Atlas judges a lesson after 5 days or 20 calls; Nimbalyst waits 15 days (Sonnet, checked, Atlas lessons.py:25-26)
+  - Atlas holds agent-written lessons as quarantined until the owner approves (Sonnet, checked, Atlas lessons.py:5,21)
+  - Atlas also has secret and injection filters, a pass lease, a queue tidy and lesson packs (Fable, Hermes source on disk)
+- Rule 1 {status: done}
+  - resultText stays hand-written: the runtime package does not export extractToolResultText (both)
+- Worktree sessions do not load lessons {status: todo}
+  - Claude Code gives each worktree folder its own memory folder, so a worktree session reads a different MEMORY.md.
+- Pass inside a working session hides that session {status: todo}
+  - The pass adds its own session to passSessionIds, so that session's failures never count. Run the pass in a new session.
+
+## Already on this machine {color: purple}
+- memory-spike learn
+  > Writes "failed command, then working command" lessons. No measurement, no retirement.
+- nimbalyst-coach
+  > Reads session signals and recommends changes. No failure classes, no verdicts.
